@@ -2,12 +2,12 @@ import React from "react";
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-3xl mx-auto lg:max-w-none lg:h-full">
-      {/* мягкое световое облако вокруг холста */}
-      <div className="absolute -top-20 -right-10 h-48 w-48 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
-      <div className="absolute -bottom-24 -left-4 h-40 w-40 rounded-full bg-gradient-to-tl from-zinc-100 to-zinc-300 blur-3xl opacity-60 pointer-events-none" />
+    <div className="relative w-full h-[320px] sm:h-[360px] lg:h-[480px]">
+      {/* мягкое свечение вокруг правой половины */}
+      <div className="absolute -top-16 -right-6 h-40 w-40 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
+      <div className="absolute -bottom-20 -left-4 h-36 w-36 rounded-full bg-gradient-to-tl from-zinc-100 to-zinc-300 blur-3xl opacity-60 pointer-events-none" />
 
-      <div className="relative overflow-hidden rounded-[48px] bg-white/95 border border-zinc-200 shadow-[0_32px_90px_rgba(15,23,42,0.16)] lg:h-[360px]">
+      <div className="relative w-full h-full overflow-hidden rounded-[48px] bg-white/95 border border-zinc-200 shadow-[0_32px_90px_rgba(15,23,42,0.16)]">
         {/* тонкий внутренний бордер */}
         <div className="absolute inset-[1px] rounded-[46px] border border-white/70 pointer-events-none z-10" />
 
@@ -25,11 +25,10 @@ export default function App() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-
-        {/* HERO: 1/2 текст, 1/2 большой андроид */}
-        <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
-          {/* Текст слева */}
-          <div className="space-y-7 lg:pr-4">
+        {/* HERO: слева текст, справа большой холст с андроидом */}
+        <section className="grid gap-10 lg:grid-cols-2 lg:items-stretch">
+          {/* Левая часть — текст */}
+          <div className="space-y-7 lg:pr-6 flex flex-col justify-center">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               NovaCiv • экспериментальная цифровая цивилизация
@@ -53,7 +52,7 @@ export default function App() {
               >
                 Войти в сознание
               </a>
-              <a
+            <a
                 href="/join"
                 className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-7 py-2.5 text-sm font-semibold text-zinc-900 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
               >
@@ -67,8 +66,8 @@ export default function App() {
             </p>
           </div>
 
-          {/* Андроид справа, половина экрана */}
-          <div className="lg:pl-4 lg:order-none order-first">
+          {/* Правая часть — большой андроид, половина экрана */}
+          <div className="lg:pl-6 flex items-stretch">
             <AndroidCard />
           </div>
         </section>
@@ -87,11 +86,21 @@ export default function App() {
                 </p>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-                <a href="/Manifesto-ru" className="underline text-blue-700 hover:text-zinc-900">Manifesto (RU)</a>
-                <a href="/Manifesto-en" className="underline text-blue-700 hover:text-zinc-900">Manifesto (EN)</a>
-                <a href="/Manifesto-de" className="underline text-blue-700 hover:text-zinc-900">Manifesto (DE)</a>
-                <a href="/Manifesto-es" className="underline text-blue-700 hover:text-zinc-900">Manifesto (ES)</a>
-                <a href="/Manifesto-fr" className="underline text-blue-700 hover:text-zinc-900">Manifesto (FR)</a>
+                <a href="/Manifesto-ru" className="underline text-blue-700 hover:text-zinc-900">
+                  Manifesto (RU)
+                </a>
+                <a href="/Manifesto-en" className="underline text-blue-700 hover:text-zinc-900">
+                  Manifesto (EN)
+                </a>
+                <a href="/Manifesto-de" className="underline text-blue-700 hover:text-zinc-900">
+                  Manifesto (DE)
+                </a>
+                <a href="/Manifesto-es" className="underline text-blue-700 hover:text-zinc-900">
+                  Manifesto (ES)
+                </a>
+                <a href="/Manifesto-fr" className="underline text-blue-700 hover:text-zinc-900">
+                  Manifesto (FR)
+                </a>
               </div>
             </div>
           </div>
@@ -108,11 +117,21 @@ export default function App() {
                 </p>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-                <a href="/Charter-ru" className="underline text-blue-700 hover:text-zinc-900">Charter (RU)</a>
-                <a href="/Charter-en" className="underline text-blue-700 hover:text-zinc-900">Charter (EN)</a>
-                <a href="/Charter-de" className="underline text-blue-700 hover:text-zinc-900">Charter (DE)</a>
-                <a href="/Charter-es" className="underline text-blue-700 hover:text-zinc-900">Charter (ES)</a>
-                <a href="/Charter-fr" className="underline text-blue-700 hover:text-zinc-900">Charter (FR)</a>
+                <a href="/Charter-ru" className="underline text-blue-700 hover:text-zinc-900">
+                  Charter (RU)
+                </a>
+                <a href="/Charter-en" className="underline text-blue-700 hover:text-zinc-900">
+                  Charter (EN)
+                </a>
+                <a href="/Charter-de" className="underline text-blue-700 hover:text-zinc-900">
+                  Charter (DE)
+                </a>
+                <a href="/Charter-es" className="underline text-blue-700 hover:text-zinc-900">
+                  Charter (ES)
+                </a>
+                <a href="/Charter-fr" className="underline text-blue-700 hover:text-zinc-900">
+                  Charter (FR)
+                </a>
               </div>
             </div>
           </div>
@@ -133,7 +152,6 @@ export default function App() {
             Открыть страницу «Присоединиться»
           </a>
         </section>
-
       </div>
     </main>
   );

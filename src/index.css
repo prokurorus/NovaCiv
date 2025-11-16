@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { @apply bg-white text-zinc-900 m-0 selection:bg-zinc-900 selection:text-white; }
+a { @apply underline text-blue-700 hover:text-zinc-900; }
+h1 { @apply text-3xl font-semibold mb-6 mt-6; }
+h2 { @apply text-xl font-semibold mb-3 mt-6; }
+.wrap { @apply max-w-5xl mx-auto px-4; }
+.card { @apply bg-white border border-zinc-200 rounded-2xl shadow p-6; }
+.grid { @apply grid gap-6 md:grid-cols-2; }

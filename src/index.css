@@ -30,8 +30,6 @@ h2 {
   @apply bg-white border border-zinc-200 rounded-2xl shadow p-6; 
 }
 
-/* Убрали кастомный .grid, чтобы не конфликтовать с tailwind-классом `grid` */
-
 /* ===== Анимация "пробуждающегося" глаза андроида ===== */
 
 @keyframes eyePulse {
@@ -71,4 +69,25 @@ h2 {
   animation: eyePulse 3.5s ease-in-out infinite;
   pointer-events: none;
   mix-blend-mode: screen;
+}
+
+/* ===== Плавное появление блоков на главной ===== */
+
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.9s ease-out both;
+}
+
+.fade-in-up-slow {
+  animation: fadeInUp 1.2s ease-out 0.1s both;
 }

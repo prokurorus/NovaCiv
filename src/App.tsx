@@ -3,16 +3,17 @@ import React from "react";
 function AndroidCard() {
   return (
     <div className="relative w-full max-w-xl lg:max-w-lg mx-auto">
-      {/* мягкое общее свечение вокруг блока */}
+      {/* мягкое свечение */}
       <div className="absolute -top-16 -right-10 h-40 w-40 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
       <div className="absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-gradient-to-tl from-zinc-100 to-zinc-300 blur-3xl opacity-60 pointer-events-none" />
 
       <div className="relative overflow-hidden rounded-[40px] bg-white border border-zinc-200 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-        {/* тонкий внутренний бордер */}
+        {/* внутренний тонкий бордер */}
         <div className="absolute inset-[1px] rounded-[38px] border border-white/60 pointer-events-none z-10" />
 
+        {/* Картинка андроида */}
         <img
-          src="/android-hero.png"
+          src="/lovable-uploads/android.png"
           alt="Цифровой собеседник NovaCiv"
           className="relative z-0 w-full h-auto object-cover"
         />
@@ -25,8 +26,11 @@ export default function App() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-        {/* HERO */}
+
+        {/* HERO БЛОК */}
         <section className="grid gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] items-center">
+
+          {/* ЛЕВАЯ ТЕКСТОВАЯ ЧАСТЬ */}
           <div className="space-y-7">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -38,8 +42,8 @@ export default function App() {
                 Новая цивилизация
               </h1>
               <p className="text-base sm:text-lg text-zinc-600 max-w-xl leading-relaxed">
-                Для тех, кто устал от старых моделей власти и денег.
-                Мы пробуем собрать честные правила, открытый код и живой разговор
+                Для тех, кто устал от старых моделей власти и денег.  
+                Мы пробуем собрать честные правила, открытый код и живой разговор  
                 о будущем — без лозунгов и начальников.
               </p>
             </div>
@@ -60,85 +64,72 @@ export default function App() {
             </div>
 
             <p className="text-xs text-zinc-500 max-w-md">
-              Никаких подписок, сборов и скрытых условий. Только тексты, форум
+              Никаких подписок, сборов и скрытых условий. Только тексты, форум  
               и возможность проверить, подходит ли тебе такая логика мира.
             </p>
           </div>
 
+          {/* ПРАВАЯ ЧАСТЬ — КАРТИНКА АНДРОИДА */}
           <AndroidCard />
         </section>
 
-        {/* БЛОКИ МАНИФЕСТ / УСТАВ */}
+        {/* МАНИФЕСТ / УСТАВ */}
         <section className="grid gap-6 lg:grid-cols-2">
-          {/* Манифест */}
+
+          {/* МАНИФЕСТ */}
           <div className="card relative overflow-hidden bg-gradient-to-b from-white to-zinc-50/70 border-zinc-200/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
             <div className="absolute -top-10 -right-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
+
             <div className="relative space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-zinc-900">Манифест</h2>
                 <p className="text-sm text-zinc-600">
-                  Короткий и честный текст о том, зачем вообще нужна NovaCiv
+                  Короткий и честный текст о том, зачем вообще нужна NovaCiv  
                   и почему мы считаем разум важнее любой материи.
                 </p>
               </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-                <a href="/Manifesto-ru" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (RU)
-                </a>
-                <a href="/Manifesto-en" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (EN)
-                </a>
-                <a href="/Manifesto-de" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (DE)
-                </a>
-                <a href="/Manifesto-es" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (ES)
-                </a>
-                <a href="/Manifesto-fr" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (FR)
-                </a>
+                <a href="/Manifesto-ru" className="underline text-blue-700 hover:text-zinc-900">Manifesto (RU)</a>
+                <a href="/Manifesto-en" className="underline text-blue-700 hover:text-zinc-900">Manifesto (EN)</a>
+                <a href="/Manifesto-de" className="underline text-blue-700 hover:text-zinc-900">Manifesto (DE)</a>
+                <a href="/Manifesto-es" className="underline text-blue-700 hover:text-zinc-900">Manifesto (ES)</a>
+                <a href="/Manifesto-fr" className="underline text-blue-700 hover:text-zinc-900">Manifesto (FR)</a>
               </div>
             </div>
           </div>
 
-          {/* Устав */}
+          {/* УСТАВ */}
           <div className="card relative overflow-hidden bg-gradient-to-b from-white to-zinc-50/70 border-zinc-200/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
             <div className="absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
+
             <div className="relative space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-zinc-900">Устав</h2>
                 <p className="text-sm text-zinc-600">
-                  Полные правила игры: от референдума и экономики до культуры,
+                  Полные правила игры: от референдума и экономики до культуры,  
                   тела, автономий и цифровой архитектуры.
                 </p>
               </div>
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-                <a href="/Charter-ru" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (RU)
-                </a>
-                <a href="/Charter-en" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (EN)
-                </a>
-                <a href="/Charter-de" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (DE)
-                </a>
-                <a href="/Charter-es" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (ES)
-                </a>
-                <a href="/Charter-fr" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (FR)
-                </a>
+                <a href="/Charter-ru" className="underline text-blue-700 hover:text-zinc-900">Charter (RU)</a>
+                <a href="/Charter-en" className="underline text-blue-700 hover:text-zinc-900">Charter (EN)</a>
+                <a href="/Charter-de" className="underline text-blue-700 hover:text-zinc-900">Charter (DE)</a>
+                <a href="/Charter-es" className="underline text-blue-700 hover:text-zinc-900">Charter (ES)</a>
+                <a href="/Charter-fr" className="underline text-blue-700 hover:text-zinc-900">Charter (FR)</a>
               </div>
             </div>
           </div>
+
         </section>
 
         {/* ПРИСОЕДИНИТЬСЯ */}
         <section className="card bg-white/90 border-dashed border-zinc-300 space-y-3">
           <h2 className="text-lg font-semibold text-zinc-900">Присоединиться</h2>
           <p className="text-sm text-zinc-600 max-w-2xl">
-            NovaCiv не просит веры или клятвы. Единственное, что важно —
-            понимание и добровольность. Прочитай манифест и Устав, задай вопросы
+            NovaCiv не просит веры или клятвы. Единственное, что важно —  
+            понимание и добровольность. Прочитай манифест и Устав, задай вопросы  
             на форуме и реши, хочешь ли ты вкладывать часть себя в такой проект.
           </p>
           <a
@@ -148,6 +139,7 @@ export default function App() {
             Открыть страницу «Присоединиться»
           </a>
         </section>
+
       </div>
     </main>
   );

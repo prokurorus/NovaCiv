@@ -1,100 +1,162 @@
+import { Link } from "react-router-dom";
 
-import React, { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useLanguage } from '../context/LanguageContext';
-
-const Home: React.FC = () => {
-  const { t, setLanguage } = useLanguage();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Автоматическое определение языка браузера
-    const browserLang = navigator.language.toLowerCase();
-    if (browserLang.startsWith('ru')) {
-      setLanguage('ru');
-    } else {
-      setLanguage('en');
-    }
-  }, [setLanguage]);
-
-  const handleEnter = () => {
-    // Add fade out effect and navigate to manifesto
-    document.body.style.transition = 'opacity 1s ease';
-    document.body.style.opacity = '0';
-    setTimeout(() => {
-      navigate('/manifesto');
-      document.body.style.opacity = '1';
-    }, 1000);
-  };
-
+function AndroidCard() {
   return (
-    <div className="fixed inset-0 bg-white overflow-hidden">
-      {/* Background Image */}
-      <div 
-        className="absolute top-0 left-0 w-full md:w-1/3 h-1/3 md:h-full bg-cover bg-center md:bg-left bg-no-repeat opacity-30 pointer-events-none"
-        style={{
-          backgroundImage: `url('/lovable-uploads/03f35303-0d95-4c3c-9e72-4442e7ba90f0.png')`
-        }}
-      />
-      
-      {/* Main Content Container */}
-      <div className="relative z-10 flex flex-col md:flex-row min-h-screen">
-        
-        {/* Left Section - Image space (hidden on mobile) */}
-        <div className="hidden md:block md:w-1/3 flex-shrink-0"></div>
-        
-        {/* Right Section - Content */}
-        <div className="flex-1 flex flex-col justify-center items-center md:items-start px-6 md:px-16 py-8 pt-32 md:pt-8">
-          
-          {/* Title Section */}
-          <div className="mb-12 md:mb-16 text-center md:text-left">
-            <h1 className="text-4xl md:text-7xl font-light text-gray-900 mb-4 md:mb-6 tracking-wider uppercase leading-tight">
-              NovaCiv
-            </h1>
-            <div className="w-16 md:w-24 h-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full mb-6 md:mb-8 mx-auto md:mx-0"></div>
-            <p className="text-lg md:text-xl text-gray-600 leading-relaxed max-w-lg font-light px-4 md:px-0">
-              {t.home.subtitle}
-            </p>
+    <div className="relative w-full max-w-md mx-auto">
+      <div className="rounded-[32px] bg-zinc-50 border border-zinc-200 shadow-xl shadow-zinc-200/80 p-8">
+        {/* «Солнечное» пятно */}
+        <div className="absolute -top-10 -right-10 h-40 w-40 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
+
+        {/* Лицо-овал */}
+        <div className="relative mx-auto h-44 w-44 rounded-[40%] bg-gradient-to-br from-zinc-100 via-zinc-200 to-zinc-300 shadow-inner flex items-center justify-center">
+          {/* Глаза */}
+          <div className="flex gap-6 items-center justify-center">
+            <div className="h-5 w-10 rounded-full bg-white/80 shadow-inner" />
+            <div className="h-5 w-10 rounded-full bg-white/80 shadow-inner" />
           </div>
-          
-          {/* Action Section */}
-          <div className="space-y-6 md:space-y-8 text-center md:text-left">
-            <button
-              onClick={handleEnter}
-              className="group px-8 md:px-12 py-3 md:py-4 text-base md:text-lg border-2 border-gray-300 bg-transparent text-gray-700 rounded-lg transition-all duration-500 hover:border-blue-400 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50 hover:shadow-xl hover:shadow-blue-100/50 hover:scale-105 font-medium tracking-wide"
-            >
-              <span className="relative">
-                {t.home.enterButton}
-                <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 group-hover:w-full"></span>
-              </span>
-            </button>
-            
-            {/* Subtle hint */}
-            <p className="text-sm text-gray-400 italic px-4 md:px-0">
-              {t.home.hintText}
-            </p>
-          </div>
-          
+
+          {/* «Чёлка» / лоб */}
+          <div className="absolute top-7 left-1/2 -translate-x-1/2 h-7 w-24 rounded-full bg-gradient-to-b from-white/90 to-zinc-200/70 shadow" />
+
+          {/* Подбородок */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 h-6 w-18 rounded-b-[40%] bg-zinc-200/80" />
         </div>
-        
-      </div>
-      
-      {/* Decorative Elements */}
-      <div className="absolute bottom-4 md:bottom-8 right-4 md:right-8 opacity-20">
-        <div className="w-16 md:w-32 h-16 md:h-32 border border-gray-200 rounded-full flex items-center justify-center">
-          <div className="w-10 md:w-20 h-10 md:h-20 border border-gray-300 rounded-full flex items-center justify-center">
-            <div className="w-4 md:w-8 h-4 md:h-8 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full"></div>
-          </div>
+
+        {/* Небольшой текст под изображением */}
+        <div className="mt-6 text-center text-sm text-zinc-500">
+          Цифровой собеседник, который не командует и не подчиняется.  
+          Только — разговаривает и помогает думать.
         </div>
       </div>
-      
-      {/* Floating particles effect */}
-      <div className="absolute top-1/4 right-1/4 w-1 md:w-2 h-1 md:h-2 bg-blue-300 rounded-full opacity-40 animate-pulse"></div>
-      <div className="absolute top-1/3 right-1/3 w-0.5 md:w-1 h-0.5 md:h-1 bg-purple-300 rounded-full opacity-60 animate-pulse delay-1000"></div>
-      <div className="absolute bottom-1/3 right-1/5 w-1 md:w-1.5 h-1 md:h-1.5 bg-indigo-300 rounded-full opacity-50 animate-pulse delay-2000"></div>
-      
     </div>
   );
-};
+}
 
-export default Home;
+export default function Home() {
+  return (
+    <main className="min-h-screen bg-white">
+      <div className="wrap py-10 space-y-12">
+        {/* HERO-БЛОК */}
+        <section className="grid gap-10 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] items-center">
+          <div className="space-y-6">
+            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-4 py-1 text-xs font-medium text-zinc-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+              Цифровое сообщество NovaCiv
+            </div>
+
+            <div className="space-y-4">
+              <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight text-zinc-900">
+                Новая цивилизация
+              </h1>
+              <p className="text-base sm:text-lg text-zinc-600 max-w-xl">
+                Платформа для тех, кто не верит в старые модели власти и денег.
+                Мы пробуем собрать честные правила, открытый код и живой разговор
+                о будущем — без лозунгов и начальников.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Link
+                to="/manifest/ru"
+                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/20 hover:bg-zinc-800 transition"
+              >
+                Войти в сознание
+              </Link>
+              <Link
+                to="/join"
+                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 transition"
+              >
+                Присоединиться
+              </Link>
+            </div>
+
+            <p className="text-xs text-zinc-500 max-w-md">
+              Никаких подписок, сборов и скрытых условий.
+              Только тексты, форум и возможность посмотреть, подходит ли тебе
+              такая логика мира.
+            </p>
+          </div>
+
+          <AndroidCard />
+        </section>
+
+        {/* БЛОК С ТЕКСТАМИ */}
+        <section className="grid gap-6 lg:grid-cols-2">
+          {/* МАНИФЕСТ */}
+          <div className="card space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold text-zinc-900">Манифест</h2>
+              <p className="text-sm text-zinc-600">
+                Короткий и честный текст о том, зачем вообще нужна NovaCiv
+                и почему мы считаем разум важнее любой материи.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+              <Link to="/manifest/ru" className="underline text-blue-700 hover:text-zinc-900">
+                Manifesto (RU)
+              </Link>
+              <Link to="/manifest/en" className="underline text-blue-700 hover:text-zinc-900">
+                Manifesto (EN)
+              </Link>
+              <Link to="/manifest/de" className="underline text-blue-700 hover:text-zinc-900">
+                Manifesto (DE)
+              </Link>
+              <Link to="/manifest/es" className="underline text-blue-700 hover:text-zinc-900">
+                Manifesto (ES)
+              </Link>
+              <Link to="/manifest/fr" className="underline text-blue-700 hover:text-zinc-900">
+                Manifesto (FR)
+              </Link>
+            </div>
+          </div>
+
+          {/* УСТАВ */}
+          <div className="card space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-xl font-semibold text-zinc-900">Устав</h2>
+              <p className="text-sm text-zinc-600">
+                Полные правила игры: от референдума и экономики
+                до культуры, тела, автономий и цифровой архитектуры.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+              <Link to="/charter/ru" className="underline text-blue-700 hover:text-zinc-900">
+                Charter (RU)
+              </Link>
+              <Link to="/charter/en" className="underline text-blue-700 hover:text-zinc-900">
+                Charter (EN)
+              </Link>
+              <Link to="/charter/de" className="underline text-blue-700 hover:text-zinc-900">
+                Charter (DE)
+              </Link>
+              <Link to="/charter/es" className="underline text-blue-700 hover:text-zinc-900">
+                Charter (ES)
+              </Link>
+              <Link to="/charter/fr" className="underline text-blue-700 hover:text-zinc-900">
+                Charter (FR)
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* ПРИСОЕДИНИТЬСЯ */}
+        <section className="card space-y-3">
+          <h2 className="text-lg font-semibold text-zinc-900">Присоединиться</h2>
+          <p className="text-sm text-zinc-600 max-w-2xl">
+            Если тебе близка эта логика — не нужно «записываться в организацию».
+            Достаточно внимательно прочитать манифест и Устав, задать вопросы на форуме
+            и решить, хочешь ли ты быть частью такого эксперимента.
+          </p>
+          <Link
+            to="/join"
+            className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 transition"
+          >
+            Открыть страницу «Присоединиться»
+          </Link>
+        </section>
+      </div>
+    </main>
+  );
+}

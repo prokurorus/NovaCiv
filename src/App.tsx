@@ -2,40 +2,20 @@ import React from "react";
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-md lg:max-w-sm mx-auto">
-      {/* мягкое «свечение» фона */}
+    <div className="relative w-full max-w-xl lg:max-w-lg mx-auto">
+      {/* мягкое общее свечение вокруг блока */}
       <div className="absolute -top-16 -right-10 h-40 w-40 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
       <div className="absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-gradient-to-tl from-zinc-100 to-zinc-300 blur-3xl opacity-60 pointer-events-none" />
 
-      <div className="relative rounded-[36px] bg-gradient-to-b from-white to-zinc-50 border border-zinc-200 shadow-[0_24px_80px_rgba(15,23,42,0.10)] p-8">
+      <div className="relative overflow-hidden rounded-[40px] bg-white border border-zinc-200 shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
         {/* тонкий внутренний бордер */}
-        <div className="absolute inset-[1px] rounded-[34px] border border-white/60 pointer-events-none" />
+        <div className="absolute inset-[1px] rounded-[38px] border border-white/60 pointer-events-none z-10" />
 
-        {/* лицо-барельеф */}
-        <div className="relative mx-auto h-44 w-44 rounded-[42%] bg-gradient-to-br from-zinc-100 via-zinc-200 to-zinc-300 shadow-inner flex items-center justify-center">
-          {/* «череп» */}
-          <div className="absolute inset-4 rounded-[40%] bg-gradient-to-br from-white/80 via-zinc-200/80 to-zinc-300/80 shadow-[inset_0_12px_24px_rgba(255,255,255,0.9)]" />
-
-          {/* глаза */}
-          <div className="relative flex gap-6 items-center justify-center">
-            <div className="h-5 w-10 rounded-full bg-white/85 shadow-inner" />
-            <div className="h-5 w-10 rounded-full bg-white/85 shadow-inner" />
-          </div>
-
-          {/* лоб */}
-          <div className="absolute top-7 left-1/2 -translate-x-1/2 h-7 w-26 rounded-full bg-gradient-to-b from-white/95 to-zinc-200/70 shadow" />
-
-          {/* рот / нижняя часть */}
-          <div className="absolute bottom-7 left-1/2 -translate-x-1/2 h-7 w-18 rounded-full bg-gradient-to-t from-zinc-200 to-zinc-100 shadow-inner" />
-
-          {/* подбородок */}
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 h-6 w-[72px] rounded-b-[45%] bg-zinc-200/90" />
-        </div>
-
-        <div className="mt-6 text-center text-sm text-zinc-500">
-          Цифровой собеседник, который не командует и не подчиняется.
-          Только разговаривает и помогает думать.
-        </div>
+        <img
+          src="/android-hero.png"
+          alt="Цифровой собеседник NovaCiv"
+          className="relative z-0 w-full h-auto object-cover"
+        />
       </div>
     </div>
   );

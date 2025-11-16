@@ -9,4 +9,4 @@ h1 { @apply text-3xl font-semibold mb-6 mt-6; }
 h2 { @apply text-xl font-semibold mb-3 mt-6; }
 .wrap { @apply max-w-5xl mx-auto px-4; }
 .card { @apply bg-white border border-zinc-200 rounded-2xl shadow p-6; }
-.grid { @apply grid gap-6 md:grid-cols-2; }
+/* Убрали кастомный .grid, чтобы не конфликтовать с tailwind-классом `grid` */

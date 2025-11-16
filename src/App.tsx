@@ -31,9 +31,10 @@ export default function App() {
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
         {/* HERO: слева текст, справа большой холст с андроидом */}
+        {/* HERO: слева текст, справа большой холст с андроидом */}
         <section className="grid gap-10 lg:grid-cols-2 lg:items-stretch">
           {/* Левая часть — текст */}
-          <div className="space-y-7 lg:pr-6 flex flex-col justify-center">
+          <div className="space-y-7 lg:pr-6 flex flex-col justify-center fade-in-up">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               NovaCiv • экспериментальная цифровая цивилизация
@@ -71,8 +72,8 @@ export default function App() {
             </p>
           </div>
 
-          {/* Правая часть — большой андроид, половина экрана */}
-          <div className="lg:pl-6 flex items-stretch">
+        {/* Правая часть — большой андроид, половина экрана */}
+          <div className="lg:pl-6 flex items-stretch fade-in-up-slow">
             <AndroidCard />
           </div>
         </section>

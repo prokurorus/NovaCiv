@@ -1,4 +1,13 @@
 import React from "react";
+import ManifestoRu from "./pages/Manifesto-ru";
+import ManifestoEn from "./pages/Manifesto-en";
+import ManifestoDe from "./pages/Manifesto-de";
+import ManifestoEs from "./pages/Manifesto-es";
+import CharterRu from "./pages/Charter-ru";
+import CharterEn from "./pages/Charter-en";
+import CharterDe from "./pages/Charter-de";
+import CharterEs from "./pages/Charter-es";
+import Join from "./pages/Join";
 
 function AndroidCard() {
   return (
@@ -109,7 +118,7 @@ function MainScreen() {
                   и почему мы считаем разум важнее любой материи.
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 text-sm">
                 <a href="/Manifesto-ru" className="underline text-blue-700 hover:text-zinc-900">
                   Manifesto (RU)
                 </a>
@@ -121,9 +130,6 @@ function MainScreen() {
                 </a>
                 <a href="/Manifesto-es" className="underline text-blue-700 hover:text-zinc-900">
                   Manifesto (ES)
-                </a>
-                <a href="/Manifesto-fr" className="underline text-blue-700 hover:text-zinc-900">
-                  Manifesto (FR)
                 </a>
               </div>
             </div>
@@ -140,7 +146,7 @@ function MainScreen() {
                   тела, автономий и цифровой архитектуры.
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 text-sm">
                 <a href="/Charter-ru" className="underline text-blue-700 hover:text-zinc-900">
                   Charter (RU)
                 </a>
@@ -152,9 +158,6 @@ function MainScreen() {
                 </a>
                 <a href="/Charter-es" className="underline text-blue-700 hover:text-zinc-900">
                   Charter (ES)
-                </a>
-                <a href="/Charter-fr" className="underline text-blue-700 hover:text-zinc-900">
-                  Charter (FR)
                 </a>
               </div>
             </div>
@@ -185,7 +188,22 @@ function MainScreen() {
 
 export default function App() {
   const [entered, setEntered] = React.useState(false);
+  const pathname = window.location.pathname;
 
+  // Прямые переходы по адресам — сразу нужная страница
+  if (pathname === "/Manifesto-ru") return <ManifestoRu />;
+  if (pathname === "/Manifesto-en") return <ManifestoEn />;
+  if (pathname === "/Manifesto-de") return <ManifestoDe />;
+  if (pathname === "/Manifesto-es") return <ManifestoEs />;
+
+  if (pathname === "/Charter-ru") return <CharterRu />;
+  if (pathname === "/Charter-en") return <CharterEn />;
+  if (pathname === "/Charter-de") return <CharterDe />;
+  if (pathname === "/Charter-es") return <CharterEs />;
+
+  if (pathname === "/join") return <Join />;
+
+  // Корень — первая страница и затем простая навигация
   if (!entered) {
     return <IntroScreen onEnter={() => setEntered(true)} />;
   }

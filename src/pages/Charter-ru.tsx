@@ -1,7 +1,6 @@
 import React from "react";
 
 const charterTextRu = `
-	УСТАВ NovaCiv
 
 0.	ИДЕОЛОГИЧЕСКИЙ ВЕКТОР СООБЩЕСТВА И ТЕРМИНОЛОГИЯ
  

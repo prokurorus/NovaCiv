@@ -31,7 +31,8 @@ export default function ManifestoRu() {
         </section>
 
         {/* Основной текст */}
-        <section className="prose prose-zinc max-w-none text-justify whitespace-pre-wrap leading-relaxed text-[15px]">
+        <section className="prose prose-zinc max-w-none text-justify whitespace-pre-wrap leading-relaxed text-[15px] mt-6">
+
 {`
 ЗАЧЕМ МЫ ЭТО ДЕЛАЕМ — И ЧТО ЭТО ЗА ПРОЕКТ?
 1. САМАЯ ЦЕННАЯ ВЕЩЬ ВО ВСЕЛЕННОЙ — ЭТО ЖИЗНЬ

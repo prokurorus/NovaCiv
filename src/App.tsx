@@ -25,12 +25,12 @@ function AndroidCard() {
   );
 }
 
+/* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 
-export default function App() {
+function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-        {/* HERO: слева текст, справа большой холст с андроидом */}
         {/* HERO: слева текст, справа большой холст с андроидом */}
         <section className="grid gap-10 lg:grid-cols-2 lg:items-stretch">
           {/* Левая часть — текст */}
@@ -52,18 +52,12 @@ export default function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <a
-                href="/Manifesto-ru"
+              <button
+                onClick={onEnter}
                 className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
               >
                 Войти в сознание
-              </a>
-            <a
-                href="/join"
-                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-7 py-2.5 text-sm font-semibold text-zinc-900 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
-              >
-                Присоединиться
-              </a>
+              </button>
             </div>
 
             <p className="text-xs text-zinc-500 max-w-md">
@@ -72,11 +66,36 @@ export default function App() {
             </p>
           </div>
 
-        {/* Правая часть — большой андроид, половина экрана */}
+          {/* Правая часть — большой андроид, половина экрана */}
           <div className="lg:pl-6 flex items-stretch fade-in-up-slow">
             <AndroidCard />
           </div>
         </section>
+      </div>
+    </main>
+  );
+}
+
+/* ---------- ВТОРАЯ СТРАНИЦА: простая навигация ---------- */
+
+function MainScreen() {
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
+      <div className="wrap max-w-6xl mx-auto py-10 space-y-10">
+        <header className="space-y-3">
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            NovaCiv • цифровое сообщество прямой демократии
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900">
+            С чего начать
+          </h1>
+          <p className="text-sm text-zinc-600 max-w-2xl">
+            Сначала — понять смысл. Потом — прочитать правила игры.
+            Если откликается, можно присоединиться и включиться в развитие
+            Сообщества.
+          </p>
+        </header>
 
         {/* МАНИФЕСТ / УСТАВ */}
         <section className="grid gap-6 lg:grid-cols-2">
@@ -148,7 +167,7 @@ export default function App() {
           <h2 className="text-lg font-semibold text-zinc-900">Присоединиться</h2>
           <p className="text-sm text-zinc-600 max-w-2xl">
             NovaCiv не просит веры или клятвы. Единственное, что важно —
-            понимание и добровольность. Прочитай манифест и Устав, задай вопросы
+            понимание и добровольность. Прочитай Манифест и Устав, задай вопросы
             на форуме и реши, хочешь ли ты вкладывать часть себя в такой проект.
           </p>
           <a
@@ -161,4 +180,16 @@ export default function App() {
       </div>
     </main>
   );
+}
+
+/* ---------- Корневой компонент: переключатель экранов ---------- */
+
+export default function App() {
+  const [entered, setEntered] = React.useState(false);
+
+  if (!entered) {
+    return <IntroScreen onEnter={() => setEntered(true)} />;
+  }
+
+  return <MainScreen />;
 }

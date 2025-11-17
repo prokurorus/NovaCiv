@@ -91,3 +91,35 @@ h2 {
 .fade-in-up-slow {
   animation: fadeInUp 1.2s ease-out 0.1s both;
 }
+/* Типографика для страниц документов (Манифест / Устав) */
+.nova-text h2 {
+  font-size: 1.25rem; /* ~20px */
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.8rem;
+  color: #111827; /* zinc-900 */
+}
+
+.nova-text h3 {
+  font-size: 1.1rem; /* ~17.6px */
+  font-weight: 600;
+  margin-top: 1.6rem;
+  margin-bottom: 0.6rem;
+  color: #111827;
+}
+
+.nova-text p {
+  margin-bottom: 1rem;
+}
+
+.nova-text ul, 
+.nova-text ol {
+  margin-top: 0.8rem;
+  margin-bottom: 0.8rem;
+  padding-left: 1.4rem;
+}
+
+.nova-text li {
+  margin-bottom: 0.4rem;
+  line-height: 1.5;
+}

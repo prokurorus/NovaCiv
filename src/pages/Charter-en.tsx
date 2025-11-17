@@ -1,11 +1,19 @@
 import React from "react";
 
-const CharterRu = () => {
+const CharterEn: React.FC = () => {
   return (
-    <div className="p-6 max-w-5xl mx-auto text-gray-900 space-y-4 whitespace-pre-wrap text-justify">
-{`
-	Charter of NovaCiv
+    <main className="min-h-screen w-full px-4 py-10 md:px-8">
+      <div className="mx-auto w-full max-w-4xl">
+        {/* Заголовок страницы */}
+        <div className="mb-8">
+          <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
+            Charter of NovaCiv
+          </h1>
+        </div>
 
+        {/* Основной текст Устава */}
+        <div className="space-y-4 text-sm leading-relaxed whitespace-pre-wrap text-justify md:text-base">
+{`
 0. Ideological Vector of the Community and Terminology
 
 Preamble:
@@ -848,8 +856,10 @@ Toward the light.
 
 Last edited on: May 20, 2025
 This version approved by the founder of the Community.`}
-    </div>
+        </div>
+      </div>
+    </main>
   );
 };
 
-export default CharterRu;
+export default CharterEn;

@@ -11,28 +11,20 @@ import Join from "./pages/Join";
 
 function AndroidCard() {
   return (
-    <div className="relative w-full h-[320px] sm:h-[360px] lg:h-[480px]">
-      {/* мягкое свечение вокруг правой половины */}
-      <div className="absolute -top-16 -right-6 h-40 w-40 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-300 blur-3xl opacity-70 pointer-events-none" />
-      <div className="absolute -bottom-20 -left-4 h-36 w-36 rounded-full bg-gradient-to-tr from-zinc-100 to-zinc-300 blur-3xl opacity-60 pointer-events-none" />
+    <div className="relative w-full max-w-[520px] mx-auto lg:mx-0">
+      {/* слой "пробуждающегося" глаза */}
+      <div className="android-eye-pulse z-20" />
 
-      <div className="relative w-full h-full overflow-hidden rounded-[48px] bg-zinc-50 border border-zinc-200 shadow-[0_32px_90px_rgba(15,23,42,0.16)]">
-        {/* тонкий внутренний бордер */}
-        <div className="absolute inset-[1px] rounded-[46px] border border-white/70 pointer-events-none z-10" />
-
-        {/* слой "пробуждающегося" глаза */}
-        <div className="android-eye-pulse z-20" />
-
-        <img
-          src="/lovable-uploads/android.png"
-          alt="Цифровой собеседник NovaCiv"
-          className="absolute inset-0 w-full h-full object-cover select-none"
-          draggable={false}
-        />
-      </div>
+      <img
+        src="/lovable-uploads/android.png"
+        alt="Цифровой собеседник NovaCiv"
+        className="w-full h-auto select-none drop-shadow-[0_24px_80px_rgba(15,23,42,0.12)]"
+        draggable={false}
+      />
     </div>
   );
 }
+
 
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 

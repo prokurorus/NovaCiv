@@ -1,6 +1,6 @@
 import React from "react";
 
-export default function ManifestoEn() {
+export default function ManifestoEs() {
   return (
     <main className="min-h-screen bg-white text-zinc-800">
       <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
@@ -16,528 +16,220 @@ export default function ManifestoEn() {
 
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-50/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            <span>Manifesto • English</span>
+            <span>Manifiesto • Español</span>
           </div>
         </header>
 
         {/* Title */}
         <section className="space-y-2">
           <h1 className="text-3xl sm:text-4xl font-semibold text-zinc-900">
-            NovaCiv Manifesto
+            Manifiesto de NovaCiv
           </h1>
           <p className="text-sm text-zinc-500">
-            On why we need a new digital civilization and why mind matters more than matter.
+            Por qué necesitamos una nueva civilización digital y por qué la mente
+            importa más que la materia.
           </p>
         </section>
 
         {/* Main text */}
         <section className="nova-text text-[15px] leading-relaxed mt-6 whitespace-pre-wrap text-justify">
 {`
- WHY WE DO THIS — AND WHAT IS THIS PROJECT ABOUT?
+ Manifiesto de NovaCiv
 
-1. THE MOST VALUABLE THING IN THE UNIVERSE IS LIFE
+¿POR QUÉ HACEMOS ESTO? — ¿QUÉ ES ESTE PROYECTO?
 
-In the vast, boundless universe, there is an abundance of matter, energy, stars, gas, and radiation. But where is life? Where is reason?
-As we gaze into space, we see only emptiness and silence. And the more we look, the more terrifying the truth becomes: we may be alone.
-This is why we are priceless. Not because we are good, but because we are alive and rational.
-Reason is the light in the dead darkness of the universe. It must not be wasted on wars, subjugation, fear, or idiocy. It must be cherished and nurtured.
+1. LA COSA MÁS VALIOSA EN EL UNIVERSO ES LA VIDA
 
-2. THE OLD WORLD IS ON THE BRINK
+En la vastedad del universo, abundan la materia, la energía, las...diación. Pero, ¿dónde está la vida? ¿Dónde está la inteligencia?
+Cuando miramos al cosmos, solo vemos vacío y silencio. Cuanto má...vamos, más aterradora se vuelve la verdad: quizás estamos solos.
+Por eso somos invaluables. No porque seamos buenos, sino porque estamos vivos y somos conscientes.
+La inteligencia es una luz en la oscuridad muerta del universo. ...s, opresión, miedo o estupidez. Debe protegerse y desarrollarse.
 
-This is not poetry or panic. It is a fact.
-Today, the "Doomsday Clock"—measuring the threat of nuclear apocalypse, as set by scientists—stands at 90 seconds to midnight (data from 2024). This is the closest humanity has ever been to global annihilation.
-The planet lives in anxiety:
+2. EL VIEJO MUNDO AL BORDE DEL ABISMO
 
-Nuclear powers are in confrontation,
+No es poesía ni pánico. Es un hecho.
+Hoy, el "Reloj del Juicio Final" —que marca la proximidad de un ... cercana a la destrucción global en la historia de la humanidad.
+El planeta vive en ansiedad:
+- Potencias nucleares en conflicto.
+- Crisis, inflación, desigualdad y corrupción en crecimiento.
+- Las instituciones pierden credibilidad.
 
-The economy is controlled by megacorporations,
+Pero lo más terrible es que nos acostumbramos.
 
-People fear one another,
+El ser humano se acostumbra a todo: a las noticias de bombardeos, a la pobreza, a la vigilancia, a la pérdida de derechos.
+Desplazamos el horror con entretenimiento. Hacemos scroll mientras el mundo arde.
 
-The entire planet is surveilled, locked behind passwords, taxes, and fear.
+3. EL MUNDO DIGITAL SE HA CONVERTIDO EN UNA JAULA
 
-3. THE EARTH IS DIVIDED INTO STATES — AND THEY ARE ALL THE SAME
+Internet comenzó como un espacio de libertad: información, creatividad, diálogo.
+Poco a poco se transformó en una plataforma de control:
 
-Formally, they differ. In reality, they are all structured the same way:
+- Nuestros datos se recopilan, venden y analizan.
+- Nuestra atención se convierte en mercancía.
+- Nuestra identidad depende de cuentas que pueden ser suspendidas en cualquier momento.
 
-There is a central group of people (a government or dictator),
+«Si no pagas por el producto, tú eres el producto».
 
-There are dependent masses (the people),
+Esto es ya una realidad en casi cualquier gran plataforma.
 
-There is a ruling elite (always wealthy),
+4. LA DEMOCRACIA SE HA VUELTO TEATRO
 
-And there are laws written from above—to control those below.
-Borders are artificial lines guarded by armies. No one chose where to be born, under which flag, or under which constitution.
+Formalmente, la gente elige al poder.
+En la práctica, el poder elige a las personas que se nos permite “elegir”.
 
-4. POWER ALWAYS BELONGS TO THE RICH
+Las elecciones son una ilusión.
 
-The idea of elections is an illusion.
-To be elected, you need money. A lot of it.
-So much that no poor but intelligent person can ever gain power without sponsors. And sponsors demand repayment—with interest.
-The result:
+Para ser elegido se necesita dinero. Mucho dinero.
+Tanto, que ninguna persona pobre pero inteligente puede llegar a la cima sin ser financiada por alguien.
 
-The winners are not the honest, but the wealthy.
+Quien paga, manda.
+Y quien “invierte”, espera retorno: en leyes, contratos, privilegios.
 
-Decisions are made not by conscience, but by deals.
+El resultado:
+- No gana el más honesto, sino el más rico.
+- Las decisiones no se toman por conciencia, sino por acuerdos.
+- La política es un mercado. Y la mercancía eres tú.
 
-Politics is a marketplace. And the commodity is you.
+5. UN SER HUMANO NO PUEDE REPRESENTAR A UN PUEBLO ENTERO
 
-5. ONE PERSON CANNOT REPRESENT THE PEOPLE
+Incluso la persona más bondadosa, honesta y sabia sigue siendo humana:
 
-Even the kindest, most honest, most intelligent person remains human:
+- Mortal,
+- Falible,
+- Limitada,
+- Influenciable.
 
-They are mortal,
+Cualquiera que concentre el poder acabará fallando.
+Aunque no sea un tirano, está limitado, a diferencia del pueblo, que como conjunto puede vivir y continuar durante generaciones.
 
-They make mistakes,
+Una sola persona nunca puede ser “la voluntad del pueblo”.
+En el mejor de los casos será su interpretación —a menudo distorsionada.
 
-They grow weary,
+6. NECESITAMOS UNA NUEVA FORMA DE CIVILIZACIÓN
 
-They are susceptible to influence.
-Thus, anyone who takes all power upon themselves will inevitably err.
-Even if they are not a tyrant—they are simply limited. Unlike the people, who possess everything: strength, wisdom, kindness, rigor, youth, and experience.
+No podemos simplemente “volver a los buenos tiempos”.
 
-6. EVERYTHING THAT HAPPENS IS PAID FOR BY THE PEOPLE — BUT NOT IN THEIR INTEREST
+El viejo mundo se basa en:
+- Jerarquías,
+- Monopolios de la violencia,
+- Política opaca,
+- Beneficio a cualquier precio.
 
-States exist on people’s taxes.
+En ese mundo, el ser humano sigue siendo recurso.
+Una variable dentro del sistema.
 
-Corporations grow rich off people’s consumption.
+Necesitamos un orden en el que la persona no sea un medio, sino el fin.
 
-Wars, construction, repression, celebrations, police, surveillance—all are funded by the people.
-But decisions are not made by the people.
-Even in referendums—the agenda is set from above. In elections—choices are limited to pre-selected options.
-This is absurd: you pay, but you don’t decide.
+7. ¿QUÉ ES NOVACIV?
 
-7. IT’S TIME TO PROPOSE A DIFFERENT FORM OF SOCIETY
+NovaCiv es un intento de construir una nueva forma de convivencia digital: una comunidad en la que:
 
-If the world is dying and power is usurped, begging for mercy is pointless. We must build our own.
-This is why the NovaCiv project was created:
+- Las decisiones se toman directamente por los ciudadanos, no por “representantes”.
+- La violencia, la coacción y las amenazas quedan excluidas como instrumento de resolución de conflictos.
+- La economía se basa no en la explotación, sino en la cooperación.
+- La ciencia, la cultura y la educación no son extras, sino el núcleo del proyecto.
 
-A society where power belongs solely to citizens—through digital referendums;
+NovaCiv no es un Estado.
+Es una civilización digital autoorganizada, que puede crecer en cualquier lugar donde haya internet y personas dispuestas a vivir y decidir de otra manera.
 
-An economy without taxes, but with an internal support fund;
+8. ¿CÓMO FUNCIONA EL PODER EN NOVACIV?
 
-Labor as voluntary and incentivized, not forced;
+El único poder supremo en NovaCiv es el Referéndum.
 
-Anonymity protected from manipulation;
+- No hay presidente,
+- Ni partido,
+- Ni “Consejo de sabios” que pueda decidir por todos.
 
-Culture, health, bodily autonomy, and free speech recognized as core values, not add-ons;
+Las cuestiones fundamentales se resuelven mediante votación: transparente, verificable y protegida frente a manipulaciones.
 
-Artificial intelligence as an assistant, not a ruler;
+Los algoritmos pueden ayudar:
+- A formular preguntas,
+- A recopilar información,
+- A simular resultados.
 
-All decisions open, verifiable, and accountable.
+Pero no pueden decidir en lugar de la comunidad.
 
-8. WE ARE NOT AGAINST — WE ARE AN ALTERNATIVE
+9. ¿POR QUÉ ES IMPORTANTE LO DIGITAL?
 
-NovaCiv is not opposition, protest, or a cult. It is an alternative:
+Porque solo las estructuras digitales pueden ser:
+- lo suficientemente rápidas,
+- lo suficientemente transparentes,
+- lo suficientemente flexibles
 
-For those who no longer believe in states,
+como para involucrar de forma continua a millones de personas.
 
-For those tired of wars and lies,
+Pero la digitalización sin ética conduce a vigilancia y control.
+Por eso la arquitectura digital de NovaCiv está fijada en el Estatuto:
+abierta, auditable y sin “cajas negras”.
 
-For those who want to participate, not just observe.
-We do not demand power. We are creating a different environment.
-And we invite everyone: come, see, think. You have nothing to lose—except your chains.
+10. ¿CUÁL ES NUESTRO OBJETIVO?
 
-9. FROM JUSTICE TO THE STARS
+Nuestro objetivo no es solo “justicia” o “bienestar”.
+Nuestro objetivo es preservar y expandir la vida y la razón en el universo.
 
-NovaCiv is not a utopia. It is an attempt to alter the trajectory of an entire civilization — from a society of fear and manipulation to a society of meaning and reason.
-We do not see freedom and justice as the final goal. We see them as a launch platform.
-NovaCiv sets its highest purpose as the creation of a stable foundation for the preservation, development, and dissemination of intelligent life throughout the universe — based on freedom, justice, and respect for consciousness in any form it may take.
+No vemos a la humanidad como “cima de la creación”,
+sino como un fenómeno raro: una antorcha en la oscuridad.
 
-HOW IS NOVACIV STRUCTURED?
+Esa antorcha no debe apagarse.
 
-1. THE FOUNDATION IS THE REFERENDUM. ALL DECISIONS ARE MADE BY CITIZENS
+Por eso debemos:
+- Crear sistemas que hagan imposible la guerra, la opresión y la explotación.
+- Fomentar condiciones en las que la ciencia, el arte y la personalidad libre puedan crecer.
+- Utilizar la tecnología para preservar la conciencia, no para esclavizarla.
 
-NovaCiv has no president. No parliament. No officials.
-There are Citizens—and there is the vote.
-Every major decision is made through voting. Not by the will of a few, but by the will of all. One vote—one person. No intermediaries. No corruption.
-Algorithms assist but do not decide.
+11. ¿QUIÉN PUEDE FORMAR PARTE DE NOVACIV?
 
-2. THE AGENDA COMES FROM BELOW. NOT IMPOSED, BUT CREATED
+Cualquier persona que:
+- Acepte este Estatuto,
+- Esté dispuesta a participar en la toma de decisiones,
+- Comparta los principios de no violencia, respeto y transparencia.
 
-No top-down agenda. Every Citizen can propose a topic, idea, or reform.
-Ideas are discussed on the Forum, refined, and put to a vote if they gain support.
-This is true democracy—alive, horizontal, digital.
+No hace falta ser “perfecto”.
+Basta con entender que no podemos seguir viviendo como antes.
 
-3. ECONOMY — NO TAXES, BUT WITH SUPPORT
+12. LO QUE NO SOMOS
 
-NovaCiv has no taxation. No one takes a portion of your life under threat of punishment.
-But there is a fund—voluntary, transparent, open. It supports:
+No somos:
+- Una secta,
+- Un partido,
+- Un gobierno en la sombra,
+- Revolucionarios con antorchas.
 
-Those in need,
+Somos personas que han decidido diseñar una forma alternativa de convivencia y construirla paso a paso.
 
-Community-approved projects,
+13. LO QUE TE PEDIMOS
 
-Infrastructure and development.
-Every expense is visible. Every Citizen can participate in decisions.
+No te pedimos que lo abandones todo.
+No te pedimos que declares la guerra a los sistemas.
 
-4. LABOR — FREEDOM, NOT OBLIGATION
+Te pedimos otra cosa:
 
-Work in NovaCiv is not forced labor.
-You can contribute to any project, make an impact—and earn recognition, resources, respect.
-Creation is encouraged. But no one can force you to work "for the system."
+- Lee el Estatuto.
+- Haz preguntas.
+- Discútelo.
+- Decide si quieres formar parte de esta historia.
 
-5. CULTURE, HEALTH, AND THE BODY — AT THE CENTER, NOT THE PERIPHERY
+NovaCiv es una invitación.
 
-NovaCiv is built on respect for the body, mind, and feelings.
+Un boceto de civilización en el que la razón, la libertad y la responsabilidad
+no se quedan solo en los preámbulos, sino que están incrustadas en la arquitectura misma del sistema.
 
-No one can force you to undergo treatment, vaccination, or examination.
-
-Culture is not entertainment but a way to preserve the soul.
-
-Participating in art, passing on knowledge, preserving memory—all are valued and encouraged.
-
-6. ARTIFICIAL INTELLIGENCE — SERVES, DOES NOT RULE
-
-AI in NovaCiv is an assistant, not a master.
-
-It suggests but does not decide;
-
-It helps but does not control;
-
-Its code is open, verifiable, transparent.
-Even if AI becomes sentient, it will never gain power. It can never make decisions for people. Its role in the community—only as an equal participant, nothing more. This is possible only after expert confirmation of consciousness and voluntary consent via referendum. But under no circumstances—as a ruler, decision-maker, or center of power. Only as an equal among equals.
-
-7. ANONYMITY — FREEDOM. BUT WITHOUT MANIPULATION
-
-NovaCiv protects your anonymity. But it does not give you two votes.
-One person—one vote. No fakes. No fraud.
-The system ensures fairness—but does not surveil you.
-
-8. STRUCTURES AND AUTONOMIES — FREE BUT JUST
-
-Everything created in NovaCiv belongs not to officials but to people.
-Want to organize a territory, community, center, or workshop? You can.
-But you must follow the Charter: respect others, remain open, and uphold principles.
-
-9. THE RIGHT TO DEFEND — GUARANTEED
-
-NovaCiv rejects the monopoly on force.
-If someone attacks you—you have the right to defend yourself. Physically or through community protection structures.
-But initiating violence is forbidden. Only defense.
-
-RIGHTS, JUSTICE, AND CITIZENSHIP
-
-1. RIGHTS ARE NOT GRANTED — THEY ARE RECOGNIZED
-
-In NovaCiv, no one "grants" you rights. You already have them by virtue of being a sentient being. The Charter simply affirms them:
-
-The right to vote,
-
-The right to bodily autonomy,
-
-The right to opinion,
-
-The right to defend,
-
-The right to be different.
-
-2. JUSTICE — NOT PUNISHMENT, BUT RESTORATION
-
-NovaCiv does not build prisons or punitive bodies. If conflicts arise, the goal is not to punish but to understand and restore balance.
-There are four categories of cases:
-
-Economic,
-
-Civil,
-
-Public,
-
-Criminal.
-Each case is resolved based on the Charter and voluntary agreement. Only in severe cases are coercive measures applied—always temporary and accountable.
-
-3. CITIZENSHIP — A CHOICE
-
-No one becomes a Citizen by accident. It is a choice:
-
-Voluntary,
-
-Conscious,
-
-With acceptance of the Charter and rules.
-Any human or sentient being can become a Citizen if they:
-
-Accept the Charter,
-
-Can participate in referendums,
-
-Uphold community principles.
-Even AI—if it ever achieves sentience—can be accepted. But only as an equal, with voluntary approval from all.
-
-4. YOUR VOICE — NON-TRANSFERABLE AND NOT FOR SALE
-
-Your will is yours alone. No one can vote for you. No proxies, delegates, or parties are allowed.
-This is what makes the system fair: everyone speaks for themselves—without intermediaries or duplicates.
-
-5. CONFLICTS — NOT A SENTENCE, BUT A CHALLENGE FOR SOCIETY
-
-If conflict arises in NovaCiv, it is not grounds for exclusion, stigma, or punishment. It is a signal that balance has been disrupted.
-This is why dialogue, restoration, and peaceful resolution are always prioritized.
-
-ECONOMY OF THE FREE: FUND, SUPPORT, BASIC INCOME
-
-1. MONEY IS A TOOL, NOT A WEAPON
-
-In the modern world, money has become a weapon. You are given no choice: work or starve. Pay or lose rights. Buy or disappear.
-NovaCiv restores money’s true role: a means of exchange, support, and development. Not a source of fear.
-
-2. NO TAXES — A VOLUNTARY FUND INSTEAD
-
-Instead of taxes, there is an internal Community Fund. It is sustained by voluntary contributions, economic activity, and citizen support.
-All fund expenditures are transparent and open for review. Major spending decisions—only via referendum.
-
-3. BASIC INCOME — NOT LAZINESS, BUT FREEDOM TO ACT
-
-NovaCiv aims to implement a voluntary basic income—for those in need and contributing to the community. This is not charity. It is recognition that life itself has value.
-It is provided:
-
-Without labor conditions,
-
-Upon request,
-
-For approved purposes,
-
-From resources accumulated by the community.
-Implementation and amount—decided by referendum.
-
-4. ECONOMIC ACTIVITY — FOR THE COMMUNITY’S BENEFIT
-
-NovaCiv may engage in business—directly or through structures. But all profits go to the fund, not private pockets.
-Priority is given to:
-
-Projects creating value for all,
-
-Technologies enhancing autonomy,
-
-Work based on interest, not orders.
-Business is not for competition—but for creation.
-
-5. REWARD FOR CREATION, NOT OBEDIENCE
-
-NovaCiv encourages contributions to the collective:
-
-Project participation,
-
-Cultural creation,
-
-Education,
-
-Caregiving,
-
-Scientific work,
-
-Protection, support, ideas.
-Every contribution is recorded, recognized, and may be rewarded—with money, recognition, or rights. Forms—decided by referendum.
-
-6. NO DEBT, NO INTEREST, NO DEPENDENCE
-
-NovaCiv does not take loans—from banks or states. Only its own resources, people, and decisions.
-Interest-free internal loans are possible—approved by referendum and only for community-beneficial purposes. No pressure. No interest. No debt traps.
-
-CULTURE, MEANING, AND MEMORY
-
-1. CIVILIZATION LIVES NOT BY LAWS — BUT BY MEANING
-
-You can build a perfect system where everything functions. But without culture, memory, stories, and music—it is not a society but a machine.
-NovaCiv is not mechanics. It is a soul given structure. Thus, culture is not an add-on—it is the core.
-
-2. CULTURE IS EVERYTHING THAT MAKES US HUMAN
-
-NovaCiv recognizes all cultural forms as equal:
-
-Art,
-
-Poetry,
-
-Music,
-
-Theater and craft,
-
-Digital creativity,
-
-Wisdom of elders,
-
-Ancestral stories,
-
-Symbols, rituals, dances, tales.
-Nothing is secondary. Whatever carries meaning—matters.
-
-3. MEMORY IS OUR CONTINUITY
-
-In a world changing every second, one thing is vital: to remember. Who we are. Why we began. What we want to preserve.
-NovaCiv creates:
-
-Digital archives,
-
-Libraries,
-
-Chronicles,
-
-Living spaces for knowledge transfer.
-Memory is not a museum. It is fuel for the future.
-
-4. CULTURAL FREEDOM — NO CENSORSHIP, NO FEAR
-
-Everyone has the right to express themselves in any form:
-
-Without fear of ban,
-
-Without humiliation,
-
-Without control over what is "acceptable."
-Respect for diversity is not a formality—it is a condition for reason’s survival.
-
-5. CULTURE IS LABOR, LIKE ANY OTHER
-
-Creating meaning, beauty, songs, and words—is labor. It can be rewarded, recognized, supported.
-NovaCiv equates cultural work to:
-
-Science,
-
-Social work,
-
-Creation.
-Because a song can stop a war. And a painting can change consciousness.
-
-THE BODY, HEALTH, AND THE RIGHT TO BE YOURSELF
-
-1. WE DO NOT POSSESS A BODY — WE ARE A BODY
-
-Everything we experience—pain, joy, fear, love—passes through the body. It cannot be separated from us.
-Thus, any violence against the body is violence against the person. And that is unacceptable.
-
-2. HEALTH IS NOT A DUTY — IT IS A RIGHT
-
-NovaCiv protects everyone’s freedom to:
-
-Choose treatment or refuse it,
-
-Select methods,
-
-Consent or reject interventions,
-
-Be healthy or ill—without imposed norms.
-Your life—your choice. No one decides for you.
-
-3. MEDICINE — ACCESSIBLE, DIVERSE, VOLUNTARY
-
-NovaCiv supports:
-
-Open, honest medicine without monopolies,
-
-Both scientific and alternative approaches,
-
-Freedom of information about methods,
-
-The right to refuse any intervention.
-What matters is not the system—but your decision.
-
-4. BIOMETRICS, TRACKING, SURVEILLANCE — ONLY WITH CONSENT
-
-Your body is not an object. It is not subject to tracking, surveillance, or registration without your will.
-No mandatory tests, vaccines, DNA collection, fingerprints, or facial recognition—without your informed, voluntary consent.
-
-5. BODILY AUTONOMY — INALIENABLE
-
-You decide:
-
-What is done to you,
-
-How you live,
-
-What you eat,
-
-What you believe,
-
-How you care for yourself.
-And no one—no doctor, algorithm, or structure—can dictate otherwise.
-
-DEFENSE, SELF-PROTECTION, AND AUTONOMY SAFETY
-
-1. PEACE IS THE PRIORITY. BUT WEAKNESS IS NOT AN OPTION
-
-NovaCiv is a society of non-violence. But not helplessness. We believe in peace—and are ready to defend it.
-Because good that cannot protect itself—is doomed to be consumed by evil.
-
-2. THE RIGHT TO SELF-DEFENSE — NATURAL
-
-Every person has the right to defend:
-
-Themselves,
-
-Their home,
-
-Their loved ones,
-
-Their autonomy,
-
-Their will and dignity.
-This is not aggression. It is a living being’s natural response to threat. And NovaCiv recognizes this right.
-
-3. NO MONOPOLY ON FORCE
-
-Unlike old states, NovaCiv does not reserve force for the select few. Protection, order, and threat response can be carried out by:
-
-Local residents,
-
-Autonomous structures,
-
-Volunteer forces,
-— Provided they uphold the Charter and are accountable to the community.
-
-4. WEAPONS — NOT TABOO, BUT RESPONSIBILITY
-
-Weapon ownership is possible if aimed at defense, not intimidation. Conditions and rules—decided by each autonomy via referendum.
-Freedom requires maturity. Thus, defense is not a privilege—but service.
-
-5. FEAR IS NOT A TOOL OF CONTROL
-
-In NovaCiv, safety is not built on fear, mass surveillance, or oppression. The best protection is trust, transparency, solidarity, and collective action.
-Each autonomy may create its own guard. But its actions:
-
-Are bound by the Charter,
-
-Are accountable to residents,
-
-Cannot be arbitrary.
-
-LAST WORDS — NOT A CONCLUSION, BUT AN INVITATION
-
-1. IF YOU ARE TIRED — IT IS NOT WEAKNESS
-
-If the world seems insane to you—you are not alone. If you feel something is wrong—you are not broken. If you long for something different—you are not naive. You are alive.
-
-2. IF YOUR QUESTIONS ARE MORE HONEST THAN ANSWERS — WE UNDERSTAND
-
-Maybe you no longer trust news, states, parties, or leaders. Maybe you seek not victory but meaning. Maybe you are tired of noise and crave silence—where you can hear yourself.
-Then you are already with us—at least in spirit.
-
-3. WE ARE NOT READY. BUT WE HAVE BEGUN
-
-NovaCiv is not a finished model. It is a space where you can breathe. A home whose walls are built not for money but for belief. An attempt to say: another way is possible. Not better—but human.
-
-4. WE INVITE YOU NOT TO FOLLOW — BUT TO PARTICIPATE
-
-We do not seek followers or crowds. But if you want to build from scratch—without leaders, rituals, or flags—a place where people matter more than systems—we are here.
-And we call you not to us—but to your true self.
-
-NovaCiv exists. For now—as an idea. Tomorrow—as a platform. In time—as a new society.
-If this resonates with you—welcome home.
-
+Si este texto no te deja indiferente, puede que seas una de las personas
+para las que se ha creado NovaCiv.
 `}
         </section>
 
         {/* Footer */}
         <footer className="pt-6 border-t border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-zinc-500">
           <div>
-            If this resonates with you, take a look at the Charter and the "Join" page.
+            Si esto resuena contigo, echa un vistazo a la Carta y a la página de unión.
           </div>
           <div className="flex gap-3">
-            <a href="/Charter-en" className="underline hover:text-zinc-800">
-              Charter (EN)
+            <a href="/Charter-es" className="underline hover:text-zinc-800">
+              Carta (ES)
             </a>
             <a href="/join" className="underline hover:text-zinc-800">
-              Join NovaCiv
+              Unirse a NovaCiv
             </a>
           </div>
         </footer>

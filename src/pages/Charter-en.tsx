@@ -2,18 +2,38 @@ import React from "react";
 
 const CharterEn: React.FC = () => {
   return (
-    <main className="min-h-screen w-full px-4 py-10 md:px-8">
-      <div className="mx-auto w-full max-w-4xl">
-        {/* Заголовок страницы */}
-        <div className="mb-8">
-          <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
+    <main className="min-h-screen bg-white text-zinc-800">
+      <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
+        {/* Верхняя панель */}
+        <header className="flex items-center justify-between">
+          <button
+            onClick={() => (window.location.href = "/")}
+            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+          >
+            ← Back to home
+          </button>
+
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-50/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            <span>Charter • English</span>
+          </div>
+        </header>
+
+        {/* Заголовок */}
+        <section className="space-y-2">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-zinc-900">
             Charter of NovaCiv
           </h1>
-        </div>
+          <p className="text-sm text-zinc-500">
+            The full rules of the game: from referendum and economy to culture,
+            body, autonomies, and digital architecture.
+          </p>
+        </section>
 
         {/* Основной текст Устава */}
-        <div className="space-y-4 text-sm leading-relaxed whitespace-pre-wrap text-justify md:text-base">
-{`
+        <section className="nova-text text-[15px] leading-relaxed mt-6 whitespace-pre-wrap text-justify">
+          {/* СЮДА ВСТАВЬ СВОЙ СТАРЫЙ БОЛЬШОЙ БЛОК С TEXT-CHARTER */}
+{` 
 0. Ideological Vector of the Community and Terminology
 
 Preamble:
@@ -856,7 +876,23 @@ Toward the light.
 
 Last edited on: May 20, 2025
 This version approved by the founder of the Community.`}
-        </div>
+        </section>
+
+        {/* Нижний блок */}
+        <footer className="pt-6 border-t border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-zinc-500">
+          <div>
+            If you have not read the Manifesto yet, it is better to start with it
+            and then return to the Charter.
+          </div>
+          <div className="flex gap-3">
+            <a href="/Manifesto-en" className="underline hover:text-zinc-800">
+              Manifesto (EN)
+            </a>
+            <a href="/join" className="underline hover:text-zinc-800">
+              Join NovaCiv
+            </a>
+          </div>
+        </footer>
       </div>
     </main>
   );

@@ -1,7 +1,6 @@
 import React from "react";
 
 const charterTextRu = `
-
 0.	ИДЕОЛОГИЧЕСКИЙ ВЕКТОР СООБЩЕСТВА И ТЕРМИНОЛОГИЯ
  
 Преамбула:

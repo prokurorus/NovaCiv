@@ -81,7 +81,7 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
 
 function MainScreen() {
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
+    <main className="min-h-screen bg-white">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-10">
         <header className="space-y-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">

@@ -30,7 +30,7 @@ function AndroidCard() {
 
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
-    <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
+    <main className="min-h-screen bg-white">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
 <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
   {/* Андроид слева */}

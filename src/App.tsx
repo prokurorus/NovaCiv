@@ -31,7 +31,6 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-        {/* HERO: слева текст, справа большой холст с андроидом */}
         <section className="grid gap-10 lg:grid-cols-2 lg:items-stretch">
           {/* Левая часть — текст */}
           <div className="space-y-7 lg:pr-6 flex flex-col justify-center fade-in-up">
@@ -66,7 +65,7 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
             </p>
           </div>
 
-          {/* Правая часть — большой андроид, половина экрана */}
+          {/* Правая часть — большой андроид */}
           <div className="lg:pl-6 flex items-stretch fade-in-up-slow">
             <AndroidCard />
           </div>
@@ -182,7 +181,7 @@ function MainScreen() {
   );
 }
 
-/* ---------- Корневой компонент: переключатель экранов ---------- */
+/* ---------- Корневой компонент ---------- */
 
 export default function App() {
   const [entered, setEntered] = React.useState(false);

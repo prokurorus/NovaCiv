@@ -31,7 +31,7 @@ export default function ManifestoRu() {
         </section>
 
         {/* Основной текст */}
-        <section className="prose prose-zinc max-w-none text-justify whitespace-pre-wrap leading-relaxed text-[15px] mt-6">
+        <section className="nova-text text-[15px] leading-relaxed mt-6 whitespace-pre-wrap text-justify">
 
 {`
 ЗАЧЕМ МЫ ЭТО ДЕЛАЕМ — И ЧТО ЭТО ЗА ПРОЕКТ?

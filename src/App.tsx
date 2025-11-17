@@ -32,45 +32,46 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="min-h-screen bg-gradient-to-b from-zinc-50 via-white to-zinc-50">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-        <section className="grid gap-10 lg:grid-cols-2 lg:items-stretch">
-          {/* Левая часть — текст */}
-          <div className="space-y-7 lg:pr-6 flex flex-col justify-center fade-in-up">
-            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              NovaCiv • экспериментальная цифровая цивилизация
-            </div>
+<section className="grid gap-10 lg:grid-cols-2 lg:items-center">
+  {/* Андроид слева */}
+  <div className="order-0 lg:order-0 flex items-center justify-center lg:justify-start fade-in-up-slow">
+    <AndroidCard />
+  </div>
 
-            <div className="space-y-4">
-              <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
-                Новая цивилизация
-              </h1>
-              <p className="text-base sm:text-lg text-zinc-600 max-w-2xl leading-relaxed">
-                Для тех, кто устал от старых моделей власти и денег.
-                Мы пробуем собрать честные правила, открытый код и живой разговор
-                о будущем — без лозунгов и начальников.
-              </p>
-            </div>
+  {/* Текст справа */}
+  <div className="order-1 lg:order-1 space-y-7 lg:pl-6 flex flex-col justify-center fade-in-up">
+    <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+      NovaCiv • экспериментальная цифровая цивилизация
+    </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={onEnter}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
-              >
-                Войти в сознание
-              </button>
-            </div>
+    <div className="space-y-4">
+      <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
+        Новая цивилизация
+      </h1>
+      <p className="text-base sm:text-lg text-zinc-600 max-w-2xl leading-relaxed">
+        Для тех, кто устал от старых моделей власти и денег.
+        Мы пробуем собрать честные правила, открытый код и живой разговор
+        о будущем — без лозунгов и начальников.
+      </p>
+    </div>
 
-            <p className="text-xs text-zinc-500 max-w-md">
-              Никаких подписок, сборов и скрытых условий. Только тексты, форум
-              и возможность проверить, подходит ли тебе такая логика мира.
-            </p>
-          </div>
+    <div className="flex flex-wrap items-center gap-3">
+      <button
+        onClick={onEnter}
+        className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
+      >
+        Войти в сознание
+      </button>
+    </div>
 
-          {/* Правая часть — большой андроид */}
-          <div className="lg:pl-6 flex items-stretch fade-in-up-slow">
-            <AndroidCard />
-          </div>
-        </section>
+    <p className="text-xs text-zinc-500 max-w-md">
+      Никаких подписок, сборов и скрытых условий. Только тексты, форум
+      и возможность проверить, подходит ли тебе такая логика мира.
+    </p>
+  </div>
+</section>
+
       </div>
     </main>
   );

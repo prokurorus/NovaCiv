@@ -1,11 +1,39 @@
 import React from "react";
 
-const ManifestoRu = () => {
+export default function ManifestoEs() {
   return (
-    <div className="p-6 max-w-5xl mx-auto text-gray-900 space-y-4 whitespace-pre-wrap text-justify">
-{`
- Manifiesto de NovaCiv
+    <main className="min-h-screen bg-white text-zinc-800">
+      <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
 
+        {/* Top bar */}
+        <header className="flex items-center justify-between">
+          <button
+            onClick={() => (window.location.href = "/")}
+            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+          >
+            ← Back to home
+          </button>
+
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-50/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            <span>Manifiesto • Español</span>
+          </div>
+        </header>
+
+        {/* Title */}
+        <section className="space-y-2">
+          <h1 className="text-3xl sm:text-4xl font-semibold text-zinc-900">
+            Manifiesto de NovaCiv
+          </h1>
+          <p className="text-sm text-zinc-500">
+            Por qué necesitamos una nueva civilización digital y por qué la mente
+            importa más que la materia.
+          </p>
+        </section>
+
+        {/* Main text */}
+        <section className="nova-text text-[15px] leading-relaxed mt-6 whitespace-pre-wrap text-justify">
+{`
 ¿POR QUÉ HACEMOS ESTO? — ¿QUÉ ES ESTE PROYECTO?
 
 1. LA COSA MÁS VALIOSA EN EL UNIVERSO ES LA VIDA
@@ -333,7 +361,8 @@ DEFENSA, AUTOPROTECCIÓN Y SEGURIDAD
 1. LA PAZ ES PRIORIDAD, PERO LA DEBILIDAD NO ES OPCIÓN
 
 NovaCiv es una sociedad no violenta, pero no indefensa. Creemos en la paz y la defendemos.
-Porque el bien que no puede protegerse está condenado a ser destruido.
+Porque el bien que no puede protegerse está condenado
+a ser destruido.
 
 2. DERECHO A LA AUTODEFENSA
 
@@ -393,8 +422,24 @@ No te llamamos a nosotros, sino a tu verdadero ser.
 NovaCiv existe. Hoy como idea. Mañana como plataforma. Con el tiempo, como nueva sociedad.
 Si sientes que esto es tuyo, bienvenido a casa.
 `}
-    </div>
-  );
-};
+        </section>
 
-export default ManifestoRu;
+        {/* Footer */}
+        <footer className="pt-6 border-t border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-zinc-500">
+          <div>
+            Si esto resuena contigo, echa un vistazo a la Carta y a la página de unión.
+          </div>
+          <div className="flex gap-3">
+            <a href="/Charter-es" className="underline hover:text-zinc-800">
+              Carta (ES)
+            </a>
+            <a href="/join" className="underline hover:text-zinc-800">
+              Unirse a NovaCiv
+            </a>
+          </div>
+        </footer>
+
+      </div>
+    </main>
+  );
+}

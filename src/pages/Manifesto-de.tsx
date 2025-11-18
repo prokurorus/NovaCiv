@@ -33,7 +33,7 @@ export default function ManifestoDe() {
 
         {/* Main text */}
         <section className="nova-text text-[15px] leading-relaxed mt-6 whitespace-pre-wrap text-justify space-y-3">
-          {'
+{`
 WARUM WIR DAS TUN — UND WORUM ES BEI DIESEM PROJEKT GEHT
 
 1. DAS Wertvollste im Universum ist das Leben
@@ -91,7 +91,7 @@ Staaten leben durch die Steuern der Menschen.
 Unternehmen werden reich durch den Konsum der Menschen.
 Krieg, Bau, Repression, Feiern, Polizei, Überwachung — alles wird vom Volk finanziert.
 Aber Entscheidungen werden nicht vom Volk getroffen.
-Sogar bei Volksabstimmungen wird die Agenda von oben gesetzt. Bei Wahlen beschränken sich die Optionen auf vorgeglühtes.
+Sogar bei Volksabstimmungen wird die Agenda von oben gesetzt. Bei Wahlen beschränken sich die Optionen auf Vorgekochtes.
 Das ist absurd: Du zahlst, aber du entscheidest nicht.
 
 7. ES IST ZEIT, EINE ANDERE FORM DER GESELLSCHAFT VORZUSCHLAGEN
@@ -415,7 +415,7 @@ Daher ist Verteidigung kein Privileg — sondern Dienst.
 
 5. ANGST IST KEIN Instrument DER Kontrolle
 
-In NovaCiv basiert Sicherheit nicht auf Angst, Massenüberwachung oder Unterdrückung.
+In NovaCiv basiert Sicherheit nicht trên Angst, Massenüberwachung oder Unterdrückung.
 Der beste Schutz ist Vertrauen, Transparenz, Solidarität und kollektives Handeln.
 Jede Autonomie kann ihre eigene Wachmannschaft aufstellen.
 Aber ihre Aktionen:
@@ -459,7 +459,7 @@ Für den Moment — als Idee.
 Morgen — als Plattform.
 Mit der Zeit — als neue Gesellschaft.
 Wenn dich das anspricht — Willkommen zuhause.
-          '}
+`}
         </section>
 
         {/* Footer */}

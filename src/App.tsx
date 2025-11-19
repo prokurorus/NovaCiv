@@ -14,19 +14,20 @@ import { useStats } from "./hooks/useStats";
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-[520px] mx-auto lg:mx-0">
+    <div className="relative w-full max-w-[420px] mx-auto lg:mx-0">
       {/* слой "пробуждающегося" глаза */}
       <div className="android-eye-pulse z-20" />
 
       <img
         src="/lovable-uploads/android.png"
         alt="Цифровой собеседник NovaCiv"
-        className="w-full h-auto select-none drop-shadow-[0_24px_80px_rgba(15,23,42,0.12)]"
+        className="w-full h-auto select-none drop-shadow-[0_24px_80px_rgba(15,23,42,0.12)] transform -scale-x-100"
         draggable={false}
       />
     </div>
   );
 }
+
 
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 

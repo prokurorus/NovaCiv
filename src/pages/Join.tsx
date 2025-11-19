@@ -92,7 +92,7 @@ const JoinPage: React.FC = () => {
           </div>
         </section>
 
-        {/* Кто уже с нами */}
+        {/* Те, кто уже здесь */}
         {recentNicknames.length > 0 && (
           <section className="border rounded-xl p-4 shadow-sm space-y-2">
             <h2 className="text-sm font-medium text-gray-800">
@@ -155,6 +155,26 @@ const JoinPage: React.FC = () => {
             </div>
           </section>
         )}
+
+        {/* Кого мы ищем (над чатом) */}
+        <section className="border rounded-xl p-4 shadow-sm space-y-3">
+          <h2 className="text-lg font-medium">Кого мы сейчас ищем</h2>
+          <p className="text-sm text-gray-600 max-w-2xl">
+            NovaCiv — не продукт и не секта. Это экспериментальная площадка.
+            Нам нужны люди, которые хотят не просто читать, а делать.
+          </p>
+          <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+            <li>разработчики: React, TypeScript, backend, инфраструктура;</li>
+            <li>дизайнеры: UI/UX, Figma, визуальный язык будущего;</li>
+            <li>переводчики и редакторы для 10 языков платформы;</li>
+            <li>исследователи, философы, социологи, люди с чувством справедливости;</li>
+            <li>любые, кто готов взять на себя маленький участок работы и довести его до конца.</li>
+          </ul>
+          <p className="text-xs text-gray-500">
+            Если ты видишь себя в этом списке — просто представься в чате и
+            напиши, чем хотел бы заняться.
+          </p>
+        </section>
 
         {/* Чат */}
         <section className="border rounded-xl p-4 shadow-sm space-y-4">

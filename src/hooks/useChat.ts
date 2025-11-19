@@ -1,117 +1,84 @@
 // src/hooks/useChat.ts
-
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { db } from "../lib/firebase";
 import {
-  ref,
+  onValue,
   push,
-  limitToLast,
-  onChildAdded,
-  off,
   query,
+  ref,
+  limitToLast,
   serverTimestamp,
-  type DataSnapshot,
 } from "firebase/database";
+import type { MemberInfo } from "./useMember";
 
-type ChatMessage = {
+export type ChatMessage = {
   id: string;
   nickname: string;
   text: string;
-  createdAt?: number;
+  createdAt: number | null;
 };
-
-type Member = {
-  memberId?: string;
-  nickname?: string;
-};
-
-const MAX_MESSAGE_LENGTH = 500;      // максимум символов
-const SEND_COOLDOWN_MS = 5000;       // минимум 5 сек между сообщениями
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
 
-  // локальный таймер против спама
-  const lastSentRef = useRef<number>(0);
-
+  // подписка на последние сообщения
   useEffect(() => {
-    // читаем последние 100 сообщений
-    const messagesRef = ref(db, "chat/messages");
-    const q = query(messagesRef, limitToLast(100));
+    const messagesQuery = query(ref(db, "messages"), limitToLast(100));
 
-    const handleChildAdded = (snapshot: DataSnapshot) => {
-      const value = snapshot.val();
-      if (!value) return;
+    const unsubscribe = onValue(messagesQuery, (snap) => {
+      const value = snap.val() as
+        | Record<string, { nickname?: string; text?: string; createdAt?: number }>
+        | null;
 
-      setMessages((prev) => {
-        const next: ChatMessage[] = [
-          ...prev,
-          {
-            id: snapshot.key ?? "",
-            nickname: value.nickname ?? "anon",
-            text: value.text ?? "",
-            createdAt: value.createdAt ?? 0,
-          },
-        ];
+      if (!value) {
+        setMessages([]);
+        return;
+      }
 
-        // на всякий случай обрезаем до 100
-        if (next.length > 100) {
-          return next.slice(next.length - 100);
-        }
-        return next;
-      });
-    };
+      const list: ChatMessage[] = Object.entries(value).map(([key, v]) => ({
+        id: key,
+        nickname: v.nickname ?? "someone",
+        text: v.text ?? "",
+        createdAt:
+          typeof v.createdAt === "number" ? v.createdAt : null,
+      }));
 
-    onChildAdded(q, handleChildAdded);
+      // упорядочим по времени
+      list.sort(
+        (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
+      );
 
-    return () => {
-      off(q, "child_added", handleChildAdded);
-    };
+      setMessages(list);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const sendMessage = async (member: Member, text: string) => {
-    const trimmed = text.trim();
+  // отправка сообщения
+  async function sendMessage(member: MemberInfo, rawText: string) {
+    const text = rawText.trim();
+    if (!text) return;
 
-    // без участника или ника — не отправляем
-    if (!member || !member.memberId || !member.nickname) {
-      console.warn("Cannot send message: member is not registered");
-      return;
-    }
-
-    if (!trimmed) return;
-
-    // 1) длина сообщения
-    if (trimmed.length > MAX_MESSAGE_LENGTH) {
-      console.warn("Message is too long");
-      return;
-    }
-
-    // 2) пауза между сообщениями
-    const now = Date.now();
-    if (now - lastSentRef.current < SEND_COOLDOWN_MS) {
-      console.warn("Messages are limited to one every 5 seconds");
+    if (!member.memberId || !member.nickname) {
+      console.warn("Cannot send message: no member registered");
       return;
     }
 
     setIsSending(true);
     try {
-      const messagesRef = ref(db, "chat/messages");
-      await push(messagesRef, {
+      await push(ref(db, "messages"), {
         memberId: member.memberId,
         nickname: member.nickname,
-        text: trimmed,
-        createdAt: Date.now(),
-        serverTime: serverTimestamp(),
+        text,
+        createdAt: serverTimestamp(),
       });
-
-      lastSentRef.current = now;
-    } catch (err) {
-      console.error("Failed to send message", err);
+    } catch (e) {
+      console.error("Failed to send message", e);
     } finally {
       setIsSending(false);
     }
-  };
+  }
 
-  return { messages, sendMessage, isSending };
+  return { messages, isSending, sendMessage };
 }

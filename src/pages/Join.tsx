@@ -5,8 +5,8 @@ import { useMember } from "../hooks/useMember";
 
 const JoinPage: React.FC = () => {
   const { stats, ensureVisitorCounted, like, joined } = useStats();
-  const { member, registerNickname, recentMembers } = useMember();
-  const { messages, sendMessage, isSending } = useChat();
+  const { member, registerNickname } = useMember();
+  const { messages, sendMessage, isSending, cooldownLeft, maxLength } = useChat();
 
   const [nicknameInput, setNicknameInput] = useState("");
   const [messageInput, setMessageInput] = useState("");
@@ -41,23 +41,19 @@ const JoinPage: React.FC = () => {
   };
 
   const isMember = Boolean(member.memberId && member.nickname);
+  const length = messageInput.length;
+  const nearLimit = length > maxLength - 40; // последние 40 символов подсвечиваем
+
+  const sendDisabled =
+    !isMember || isSending || !messageInput.trim() || cooldownLeft > 0;
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <div className="max-w-5xl mx-auto px-4 py-10 space-y-8">
-        {/* Шапка */}
-        <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          NovaCiv • открытая цифровая платформа
-        </div>
-
-        <h1 className="text-3xl font-semibold mb-2">
-          Присоединиться к NovaCiv
-        </h1>
+        <h1 className="text-3xl font-semibold mb-2">Присоединиться к NovaCiv</h1>
         <p className="text-gray-600">
-          Это открытая платформа. Счётчики и чат отражают{" "}
-          <span className="font-semibold">реальных людей</span>, которые сюда
-          пришли, поставили «Нравится» и решили помочь развитию проекта.
+          Это открытая платформа. Счётчики и чат отражают реальных людей, которые
+          сюда пришли, поставили «Нравится» и решили помочь развитию проекта.
         </p>
 
         {/* Счётчики */}
@@ -84,44 +80,53 @@ const JoinPage: React.FC = () => {
           </div>
         </div>
 
-                {/* Короткое пояснение про честные цифры и анонимность */}
-        <p className="text-xs text-gray-500 mt-1">
-          Мы не накручиваем цифры: один браузер — один визит, один лайк и одно
-          «Присоединился». Никаких аккаунтов и слежки — только анонимная
-          статистика, чтобы понимать, сколько нас на самом деле.
-        </p>
-
-
-        {/* Те, кто уже здесь */}
-        <div className="border rounded-xl p-4 shadow-sm space-y-2">
-          <h2 className="text-md font-medium">Те, кто уже здесь</h2>
-          <p className="text-sm text-gray-600">
+        {/* Список тех, кто уже здесь (можно расширять позже) */}
+        <div className="border rounded-xl p-4 shadow-sm">
+          <h2 className="text-lg font-medium mb-2">Те, кто уже здесь</h2>
+          <p className="text-sm text-gray-600 mb-1">
             Список последних активных участников по никнеймам.
           </p>
-          <div className="flex flex-wrap gap-2 text-sm">
-            {recentMembers.length === 0 && (
-              <span className="text-gray-500">Пока никого.</span>
-            )}
-            {recentMembers.map((m) => (
-              <span
-                key={m.memberId}
-                className="inline-flex items-center rounded-full border border-gray-200 px-3 py-1 bg-gray-50"
-              >
-                @{m.nickname}
+          <div className="inline-flex flex-wrap gap-2 text-sm">
+            {member.nickname && (
+              <span className="inline-flex items-center rounded-full border border-gray-300 px-3 py-1">
+                @{member.nickname}
               </span>
-            ))}
+            )}
           </div>
         </div>
 
-        {/* Ты в системе как... */}
+        {/* Текущий пользователь */}
         {isMember && (
           <div className="border rounded-xl p-4 shadow-sm">
             <div className="text-sm text-gray-600">
               Ты в системе как:{" "}
               <span className="font-semibold">@{member.nickname}</span>
+            </div>
           </div>
-        </div>
         )}
+
+        {/* Кого мы сейчас ищем */}
+        <div className="border rounded-xl p-4 shadow-sm space-y-3">
+          <h2 className="text-lg font-semibold">Кого мы сейчас ищем</h2>
+          <p className="text-sm text-gray-600">
+            NovaCiv — не продукт и не секта. Это экспериментальная площадка. Нам
+            нужны люди, которые хотят не просто читать, а делать.
+          </p>
+          <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+            <li>разработчики: React, TypeScript, backend, инфраструктура;</li>
+            <li>дизайнеры: UI/UX, Figma, визуальный язык будущего;</li>
+            <li>переводчики и редакторы для 10 языков платформы;</li>
+            <li>исследователи, философы, социологи, люди с чувством справедливости;</li>
+            <li>
+              любые, кто готов взять на себя маленький участок работы и довести его
+              до конца.
+            </li>
+          </ul>
+          <p className="text-xs text-gray-500">
+            Если ты видишь себя в этом списке — просто представься в чате и
+            напиши, чем хотел бы заняться.
+          </p>
+        </div>
 
         {/* Регистрация ника */}
         {!isMember && (
@@ -155,32 +160,6 @@ const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* Блок "Кого мы сейчас ищем" — над чатом */}
-        <div className="border rounded-xl p-4 shadow-sm space-y-3">
-          <h2 className="text-lg font-medium">Кого мы сейчас ищем</h2>
-          <p className="text-sm text-gray-600">
-            NovaCiv — не продукт и не секта. Это экспериментальная площадка.
-            Нам нужны люди, которые хотят не просто читать, а делать.
-          </p>
-          <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-            <li>разработчики: React, TypeScript, backend, инфраструктура;</li>
-            <li>дизайнеры: UI/UX, Figma, визуальный язык будущего;</li>
-            <li>переводчики и редакторы для 10 языков платформы;</li>
-            <li>
-              исследователи, философы, социологи, люди с чувством
-              справедливости;
-            </li>
-            <li>
-              любые, кто готов взять на себя маленький участок работы и довести
-              его до конца.
-            </li>
-          </ul>
-          <p className="text-xs text-gray-500">
-            Если ты видишь себя в этом списке — просто представься в чате и
-            напиши, чем хотел бы заняться.
-          </p>
-        </div>
-
         {/* Чат */}
         <div className="border rounded-xl p-4 shadow-sm space-y-4">
           <h2 className="text-lg font-medium">Открытый чат</h2>
@@ -197,7 +176,7 @@ const JoinPage: React.FC = () => {
               </div>
             )}
             {messages.map((msg) => (
-              <div key={msg.id} className="text-sm">
+              <div key={msg.id} className="text-sm chat-message">
                 <span className="font-semibold">@{msg.nickname}</span>
                 <span className="text-gray-500"> · </span>
                 <span>{msg.text}</span>
@@ -208,31 +187,50 @@ const JoinPage: React.FC = () => {
           {/* Форма отправки */}
           <form
             onSubmit={handleSendMessage}
-            className="flex flex-col sm:flex-row gap-3"
+            className="flex flex-col gap-2"
           >
-            <input
-              type="text"
-              className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
-              placeholder={
-                isMember
-                  ? "Напиши своё сообщение..."
-                  : "Чтобы писать, сначала выбери ник выше."
-              }
-              value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
-              disabled={!isMember || isSending}
-            />
-            <button
-              type="submit"
-              disabled={!isMember || isSending || !messageInput.trim()}
-              className={`px-4 py-2 rounded-lg text-white transition ${
-                !isMember || isSending || !messageInput.trim()
-                  ? "bg-gray-300 cursor-not-allowed"
-                  : "bg-gray-900 hover:bg-gray-800"
-              }`}
-            >
-              Отправить
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
+                placeholder={
+                  isMember
+                    ? "Напиши своё сообщение..."
+                    : "Чтобы писать, сначала выбери ник выше."
+                }
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                disabled={!isMember || isSending}
+                maxLength={maxLength}
+              />
+              <button
+                type="submit"
+                disabled={sendDisabled}
+                className={`px-4 py-2 rounded-lg text-white transition ${
+                  sendDisabled
+                    ? "bg-gray-300 cursor-not-allowed"
+                    : "bg-gray-900 hover:bg-gray-800"
+                }`}
+              >
+                {cooldownLeft > 0
+                  ? `Подождите ${cooldownLeft} с…`
+                  : "Отправить"}
+              </button>
+            </div>
+
+            {/* счётчик символов */}
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">
+                Максимум {maxLength} символов.
+              </span>
+              <span
+                className={
+                  nearLimit ? "text-red-500 font-medium" : "text-gray-400"
+                }
+              >
+                {length} / {maxLength}
+              </span>
+            </div>
           </form>
         </div>
       </div>
@@ -241,4 +239,3 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
-

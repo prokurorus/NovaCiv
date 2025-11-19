@@ -1,10 +1,13 @@
+// src/lib/firebase.ts
+
 import { initializeApp } from "firebase/app";
-import { getDatabase } from "firebase/database";
+import { getAnalytics, Analytics } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCmTNXdBF7ilzeZVB2VaIt1USIMdXA2src",
   authDomain: "novaciv-web.firebaseapp.com",
-  databaseURL: "https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app",
+  databaseURL:
+    "https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "novaciv-web",
   storageBucket: "novaciv-web.firebasestorage.app",
   messagingSenderId: "884571454196",
@@ -12,7 +15,11 @@ const firebaseConfig = {
   measurementId: "G-FG254WGYF1",
 };
 
-const app = initializeApp(firebaseConfig);
+let analytics: Analytics | undefined;
 
-export const db = getDatabase(app);
+if (typeof window !== "undefined") {
+  const app = initializeApp(firebaseConfig);
+  analytics = getAnalytics(app);
+}
 
+export { analytics };

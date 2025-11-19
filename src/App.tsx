@@ -9,6 +9,10 @@ import CharterDe from "./pages/Charter-de";
 import CharterEs from "./pages/Charter-es";
 import Join from "./pages/Join";
 import { useStats } from "./hooks/useStats";
+import { useLanguage } from "./context/LanguageContext";
+import LanguageSwitcher from "./components/LanguageSwitcher";
+import type { Language } from "./types/language";
+
 
 /* ---------- Карточка андроида (левая колонка) ---------- */
 

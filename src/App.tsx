@@ -31,6 +31,8 @@ function AndroidCard() {
 
 /* ---------- Общая панель счётчиков ---------- */
 
+/* ---------- Общая панель счётчиков ---------- */
+
 type StatsBarProps = {
   visitors: number;
   likes: number;
@@ -39,10 +41,46 @@ type StatsBarProps = {
 };
 
 function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
+  const { language } = useLanguage();
+
+  const labels: Record<
+    Language,
+    { visitors: string; likes: string; joined: string; likeButton: string }
+  > = {
+    ru: {
+      visitors: "Посетителей",
+      likes: "Нравится",
+      joined: "Присоединились",
+      likeButton: "♥ Нравится",
+    },
+    en: {
+      visitors: "Visitors",
+      likes: "Likes",
+      joined: "Joined",
+      likeButton: "♥ Like",
+    },
+    de: {
+      visitors: "Besucher",
+      likes: "Gefällt",
+      joined: "Beigetreten",
+      likeButton: "♥ Gefällt mir",
+    },
+    es: {
+      visitors: "Visitantes",
+      likes: "Me gusta",
+      joined: "Se unieron",
+      likeButton: "♥ Me gusta",
+    },
+  };
+
+  const current = labels[language];
+
   return (
     <section className="mt-8 grid gap-4 sm:grid-cols-3">
       <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
-        <div className="text-xs font-medium text-zinc-500">Посетителей</div>
+        <div className="text-xs font-medium text-zinc-500">
+          {current.visitors}
+        </div>
         <div className="mt-2 text-2xl font-semibold text-zinc-900">
           {visitors}
         </div>
@@ -50,12 +88,14 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
 
       <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-zinc-500">Нравится</span>
+          <span className="text-xs font-medium text-zinc-500">
+            {current.likes}
+          </span>
           <button
             onClick={onLike}
             className="text-[11px] border rounded-full px-3 py-1 hover:bg-zinc-50 active:bg-zinc-100 transition"
           >
-            ♥ Нравится
+            {current.likeButton}
           </button>
         </div>
         <div className="mt-2 text-2xl font-semibold text-zinc-900">
@@ -64,7 +104,9 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
       </div>
 
       <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
-        <div className="text-xs font-medium text-zinc-500">Присоединились</div>
+        <div className="text-xs font-medium text-zinc-500">
+          {current.joined}
+        </div>
         <div className="mt-2 text-2xl font-semibold text-zinc-900">
           {joined}
         </div>

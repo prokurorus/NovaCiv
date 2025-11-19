@@ -172,8 +172,11 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
 
 /* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
 
+/* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
+
 function MainScreen() {
   const { stats, ensureVisitorCounted, like } = useStats();
+  const { t } = useLanguage();
 
   React.useEffect(() => {
     ensureVisitorCounted();
@@ -182,18 +185,22 @@ function MainScreen() {
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Верхний бейдж и заголовок */}
-        <header className="space-y-3">
+        {/* Бейдж + переключатель языка */}
+        <div className="flex justify-between items-start gap-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            NovaCiv • цифровое сообщество прямой демократии
+            {t.home.title} • {t.home.subtitle}
           </div>
+          <LanguageSwitcher />
+        </div>
+
+        {/* Краткое объяснение */}
+        <header className="space-y-3">
           <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900">
-            С чего начать
+            {t.home.manifestoSummary.title}
           </h1>
           <p className="text-sm text-zinc-600 max-w-2xl">
-            Сначала — понять смысл. Потом — прочитать правила игры. Если
-            откликается, можно присоединиться и включиться в развитие Сообщества.
+            {t.home.manifestoSummary.content}
           </p>
         </header>
 
@@ -205,60 +212,20 @@ function MainScreen() {
           onLike={like}
         />
 
-        {/* Коротко о NovaCiv + андроид слева */}
-        <section className="grid gap-10 lg:grid-cols-2 lg:items-center pt-6">
-          <div className="order-0 flex items-center justify-center lg:justify-start">
-            <AndroidCard />
-          </div>
-
-          <div className="order-1 space-y-4 lg:pl-6">
-            <h2 className="text-xl sm:text-2xl font-semibold text-zinc-900">
-              Коротко о NovaCiv
-            </h2>
-
-            <div className="space-y-3 text-sm text-zinc-700 max-w-xl leading-relaxed">
-              <p>
-                <span className="font-medium">Что это?</span> Экспериментальная
-                цифровая цивилизация, где решения принимаются не лидерами, а
-                прямым референдумом Граждан. Без скрытых советов и кулуарных
-                договорённостей.
-              </p>
-              <p>
-                <span className="font-medium">Как устроено?</span> В основе —
-                Устав, открытый код и прозрачные алгоритмы. Любой может
-                проверить, как считаются голоса, как расходуются средства и как
-                формируется повестка.
-              </p>
-              <p>
-                <span className="font-medium">Чем отличается?</span> Мы не обещаем
-                рай. Мы честно фиксируем правила, признаём ценность разума и
-                отказываемся от насилия и культа силы как нормального инструмента
-                политики.
-              </p>
-              <p className="text-xs text-zinc-500">
-                Если всё это звучит необычно, но не отталкивает — значит, ты уже
-                в редком меньшинстве. Возможно, тебе здесь и место.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* МАНИФЕСТ / УСТАВ */}
+        {/* Манифест / Устав */}
         <section className="grid gap-6 lg:grid-cols-2 pt-4">
           {/* Манифест */}
-          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50/70 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
-            <div className="absolute -top-10 -right-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
             <div className="relative space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-zinc-900">
-                  Манифест
+                  {t.navigation.manifesto}
                 </h2>
                 <p className="text-sm text-zinc-600">
-                  Короткий и честный текст о том, зачем вообще нужна NovaCiv и
-                  почему мы считаем разум важнее любой материи.
+                  {t.home.manifestoSummary.content}
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-sm">
                 <a
                   href="/Manifesto-ru"
                   className="underline text-blue-700 hover:text-zinc-900"
@@ -288,17 +255,17 @@ function MainScreen() {
           </div>
 
           {/* Устав */}
-          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50/70 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
-            <div className="absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
             <div className="relative space-y-4">
               <div className="space-y-1">
-                <h2 className="text-xl font-semibold text-zinc-900">Устав</h2>
+                <h2 className="text-xl font-semibold text-zinc-900">
+                  {t.navigation.charter}
+                </h2>
                 <p className="text-sm text-zinc-600">
-                  Полные правила игры: от референдума и экономики до культуры,
-                  тела, автономий и цифровой архитектуры.
+                  {t.charter.sections[0]?.content}
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-sm">
                 <a
                   href="/Charter-ru"
                   className="underline text-blue-700 hover:text-zinc-900"
@@ -327,27 +294,11 @@ function MainScreen() {
             </div>
           </div>
         </section>
-
-        {/* ПРИСОЕДИНИТЬСЯ */}
-        <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 space-y-3 shadow-sm">
-          <h2 className="text-lg font-semibold text-zinc-900">Присоединиться</h2>
-          <p className="text-sm text-zinc-600 max-w-2xl">
-            NovaCiv не просит веры или клятвы. Единственное, что важно —
-            понимание и добровольность. Прочитай Манифест и Устав, задай вопросы
-            на странице «Присоединиться» и реши, хочешь ли ты вкладывать часть
-            себя в такой проект.
-          </p>
-          <a
-            href="/join"
-            className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
-          >
-            Открыть страницу «Присоединиться»
-          </a>
-        </section>
       </div>
     </main>
   );
 }
+
 
 /* ---------- Корневой компонент ---------- */
 

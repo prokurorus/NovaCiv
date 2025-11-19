@@ -26,61 +26,69 @@ function AndroidCard() {
   );
 }
 
-
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="min-h-screen bg-white">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-14">
-<section className="grid gap-10 lg:grid-cols-2 lg:items-center">
-  {/* Андроид слева */}
-  <div className="order-0 lg:order-0 flex items-center justify-center lg:justify-start fade-in-up-slow">
-    <AndroidCard />
-  </div>
+        <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
+          {/* Андроид слева */}
+          <div className="order-0 lg:order-0 flex items-center justify-center lg:justify-start fade-in-up-slow">
+            <AndroidCard />
+          </div>
 
-  {/* Текст справа */}
-  <div className="order-1 lg:order-1 space-y-7 lg:pl-6 flex flex-col justify-center fade-in-up">
-    <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-      NovaCiv • экспериментальная цифровая цивилизация
-    </div>
+          {/* Текст справа */}
+          <div className="order-1 lg:order-1 space-y-7 lg:pl-6 flex flex-col justify-center fade-in-up">
+            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              NovaCiv • экспериментальная цифровая цивилизация
+            </div>
 
-    <div className="space-y-4">
-      <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
-        Новая цивилизация
-      </h1>
-      <p className="text-base sm:text-lg text-zinc-600 max-w-2xl leading-relaxed">
-        Для тех, кто устал от старых моделей власти и денег.
-        Мы пробуем собрать честные правила, открытый код и живой разговор
-        о будущем — без лозунгов и начальников.
-      </p>
-    </div>
+            <div className="space-y-4">
+              <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
+                Новая цивилизация
+              </h1>
+              <p className="text-base sm:text-lg text-zinc-600 max-w-2xl leading-relaxed">
+                Для тех, кто устал от старых моделей власти и денег.
+                Мы пробуем собрать честные правила, открытый код и живой разговор
+                о будущем — без лозунгов и начальников.
+              </p>
+            </div>
 
-    <div className="flex flex-wrap items-center gap-3">
-      <button
-        onClick={onEnter}
-        className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
-      >
-        Войти в сознание
-      </button>
-    </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={onEnter}
+                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
+              >
+                Войти в сознание
+              </button>
+            </div>
 
-    <p className="text-xs text-zinc-500 max-w-md">
-      Никаких подписок, сборов и скрытых условий. Только тексты, форум
-      и возможность проверить, подходит ли тебе такая логика мира.
-    </p>
-  </div>
-</section>
-
+            <p className="text-xs text-zinc-500 max-w-md">
+              Никаких подписок, сборов и скрытых условий. Только тексты, форум
+              и возможность проверить, подходит ли тебе такая логика мира.
+            </p>
+          </div>
+        </section>
       </div>
     </main>
   );
 }
 
-/* ---------- ВТОРАЯ СТРАНИЦА: простая навигация ---------- */
+/* ---------- ВТОРАЯ СТРАНИЦА: простая навигация + статистика ---------- */
 
 function MainScreen() {
+  const { stats, ensureVisitorCounted, like } = useStats();
+
+  React.useEffect(() => {
+    ensureVisitorCounted();
+  }, [ensureVisitorCounted]);
+
+  const handleLike = () => {
+    like();
+  };
+
   return (
     <main className="min-h-screen bg-white">
       <div className="wrap max-w-6xl mx-auto py-10 space-y-10">
@@ -98,6 +106,32 @@ function MainScreen() {
             Сообщества.
           </p>
         </header>
+
+        {/* СЧЁТЧИКИ ПЛАТФОРМЫ */}
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="border rounded-xl p-4 shadow-sm">
+            <div className="text-sm text-zinc-500">Посетители</div>
+            <div className="text-2xl font-semibold mt-1">{stats.visitors}</div>
+          </div>
+
+          <div className="border rounded-xl p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-zinc-500">Нравится</span>
+              <button
+                onClick={handleLike}
+                className="text-xs border rounded-full px-3 py-1 hover:bg-zinc-50 transition"
+              >
+                ♥ Нравится
+              </button>
+            </div>
+            <div className="text-2xl font-semibold mt-1">{stats.likes}</div>
+          </div>
+
+          <div className="border rounded-xl p-4 shadow-sm">
+            <div className="text-sm text-zinc-500">Присоединились</div>
+            <div className="text-2xl font-semibold mt-1">{stats.joined}</div>
+          </div>
+        </section>
 
         {/* МАНИФЕСТ / УСТАВ */}
         <section className="grid gap-6 lg:grid-cols-2">

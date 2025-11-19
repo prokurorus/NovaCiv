@@ -84,6 +84,14 @@ const JoinPage: React.FC = () => {
           </div>
         </div>
 
+                {/* Короткое пояснение про честные цифры и анонимность */}
+        <p className="text-xs text-gray-500 mt-1">
+          Мы не накручиваем цифры: один браузер — один визит, один лайк и одно
+          «Присоединился». Никаких аккаунтов и слежки — только анонимная
+          статистика, чтобы понимать, сколько нас на самом деле.
+        </p>
+
+
         {/* Те, кто уже здесь */}
         <div className="border rounded-xl p-4 shadow-sm space-y-2">
           <h2 className="text-md font-medium">Те, кто уже здесь</h2>
@@ -233,3 +241,4 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+

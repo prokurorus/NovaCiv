@@ -117,10 +117,24 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
 
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 
+/* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
+
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
+  const { t } = useLanguage();
+
   return (
     <main className="min-h-screen bg-white">
-      <div className="max-w-6xl mx-auto py-10 px-4 space-y-14">
+      <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
+        {/* Бейдж + переключатель языка */}
+        <div className="flex justify-between items-start gap-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            {t.home.title} • {t.home.subtitle}
+          </div>
+          <LanguageSwitcher />
+        </div>
+
+        {/* Основной блок: андроид + текст */}
         <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
           {/* Андроид слева */}
           <div className="order-0 flex items-center justify-center lg:justify-start">
@@ -128,37 +142,27 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
           </div>
 
           {/* Текст справа */}
-          <div className="order-1 space-y-7 lg:pl-6 flex flex-col justify-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              NovaCiv • экспериментальная цифровая цивилизация
-            </div>
-
+          <div className="order-1 space-y-6 lg:pl-6 flex flex-col justify-center">
             <div className="space-y-4">
               <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
-                Новая цивилизация
+                {t.home.title}
               </h1>
-              <p className="text-base sm:text-lg text-zinc-600 max-w-2xl leading-relaxed">
-                Мы не строим ещё одну социальную сеть. Мы пробуем собрать честные
-                правила, открытый код и живой разговор о будущем — без
-                начальников, партий и культа лидеров.
+              <p className="text-base sm:text-lg text-zinc-600 leading-relaxed">
+                {t.home.manifestoSummary.content}
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap gap-3 items-center">
               <button
                 onClick={onEnter}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md shadow-zinc-900/25 hover:bg-zinc-800 active:bg-zinc-900 transition"
+                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 active:bg-zinc-900 transition"
               >
-                Войти в сознание
+                {t.home.enterButton}
               </button>
+              <p className="text-xs text-zinc-500 max-w-xs">
+                {t.home.hintText}
+              </p>
             </div>
-
-            <p className="text-xs text-zinc-500 max-w-md">
-              Никаких подписок, сборов и скрытых условий. Только тексты, открытый
-              чат и возможность проверить, откликается ли тебе такая логика
-              мира.
-            </p>
           </div>
         </section>
       </div>

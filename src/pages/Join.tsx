@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useStats } from "../hooks/useStats";
-import { useChat, useMember } from "../hooks/useChat";
+import { useChat } from "../hooks/useChat";
+import { useMember } from "../hooks/useMember";
 
 const JoinPage: React.FC = () => {
   const { stats, ensureVisitorCounted, like, joined } = useStats();
-  const { member, registerNickname } = useMember();
+  const { member, registerNickname, recentMembers } = useMember();
   const { messages, sendMessage, isSending } = useChat();
 
   const [nicknameInput, setNicknameInput] = useState("");
@@ -23,53 +24,44 @@ const JoinPage: React.FC = () => {
     e.preventDefault();
     setRegisterError(null);
 
-    const result = await registerNickname(nicknameInput.trim());
+    const result = await registerNickname(nicknameInput);
     if (!result) {
       setRegisterError("Введите ник.");
       return;
     }
 
     setNicknameInput("");
-    joined(); // увеличиваем счётчик присоединившихся
+    joined();
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageInput.trim()) return;
-    await sendMessage(member, messageInput.trim());
+    await sendMessage(member, messageInput);
     setMessageInput("");
   };
 
   const isMember = Boolean(member.memberId && member.nickname);
 
-  // Берём до 10 последних уникальных ников из ленты сообщений (с конца массива)
-  const recentNicknames: string[] = [];
-  for (let i = messages.length - 1; i >= 0 && recentNicknames.length < 10; i--) {
-    const nick = messages[i].nickname;
-    if (nick && !recentNicknames.includes(nick)) {
-      recentNicknames.push(nick);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-white text-gray-900">
       <div className="max-w-5xl mx-auto px-4 py-10 space-y-8">
-        {/* Заголовок */}
-        <header className="space-y-3">
-          <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-gray-600 shadow-sm">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            NovaCiv • открытая цифровая платформа
-          </div>
-          <h1 className="text-3xl font-semibold">Присоединиться к NovaCiv</h1>
-          <p className="text-gray-600 text-sm sm:text-base max-w-2xl">
-            Это открытая платформа. Счётчики и чат отражают{" "}
-            <span className="font-medium">реальных людей</span>, которые сюда
-            пришли, поставили «Нравится» и решили помочь развитию проекта.
-          </p>
-        </header>
+        {/* Шапка */}
+        <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          NovaCiv • открытая цифровая платформа
+        </div>
+
+        <h1 className="text-3xl font-semibold mb-2">
+          Присоединиться к NovaCiv
+        </h1>
+        <p className="text-gray-600">
+          Это открытая платформа. Счётчики и чат отражают{" "}
+          <span className="font-semibold">реальных людей</span>, которые сюда
+          пришли, поставили «Нравится» и решили помочь развитию проекта.
+        </p>
 
         {/* Счётчики */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="border rounded-xl p-4 shadow-sm">
             <div className="text-sm text-gray-500">Посетители</div>
             <div className="text-2xl font-semibold mt-1">{stats.visitors}</div>
@@ -90,36 +82,45 @@ const JoinPage: React.FC = () => {
             <div className="text-sm text-gray-500">Присоединились</div>
             <div className="text-2xl font-semibold mt-1">{stats.joined}</div>
           </div>
-        </section>
+        </div>
 
         {/* Те, кто уже здесь */}
-        {recentNicknames.length > 0 && (
-          <section className="border rounded-xl p-4 shadow-sm space-y-2">
-            <h2 className="text-sm font-medium text-gray-800">
-              Те, кто уже здесь
-            </h2>
-            <p className="text-xs text-gray-500">
-              Список последних активных участников по никнеймам.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {recentNicknames.map((nick) => (
-                <span
-                  key={nick}
-                  className="inline-flex items-center rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-700 bg-gray-50"
-                >
-                  @{nick}
-                </span>
-              ))}
-            </div>
-          </section>
+        <div className="border rounded-xl p-4 shadow-sm space-y-2">
+          <h2 className="text-md font-medium">Те, кто уже здесь</h2>
+          <p className="text-sm text-gray-600">
+            Список последних активных участников по никнеймам.
+          </p>
+          <div className="flex flex-wrap gap-2 text-sm">
+            {recentMembers.length === 0 && (
+              <span className="text-gray-500">Пока никого.</span>
+            )}
+            {recentMembers.map((m) => (
+              <span
+                key={m.memberId}
+                className="inline-flex items-center rounded-full border border-gray-200 px-3 py-1 bg-gray-50"
+              >
+                @{m.nickname}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Ты в системе как... */}
+        {isMember && (
+          <div className="border rounded-xl p-4 shadow-sm">
+            <div className="text-sm text-gray-600">
+              Ты в системе как:{" "}
+              <span className="font-semibold">@{member.nickname}</span>
+          </div>
+        </div>
         )}
 
         {/* Регистрация ника */}
         {!isMember && (
-          <section className="border rounded-xl p-4 shadow-sm space-y-3">
+          <div className="border rounded-xl p-4 shadow-sm space-y-3">
             <h2 className="text-lg font-medium">Выбери свой ник</h2>
             <p className="text-sm text-gray-600">
-              Ник будет виден в общем чате. Позже можно усложнить систему
+              Ник будет виден в общем чате. Позже можно будет усложнить систему
               регистрации, но сейчас главное — живая лента и реальные люди.
             </p>
             <form
@@ -143,23 +144,13 @@ const JoinPage: React.FC = () => {
             {registerError && (
               <div className="text-sm text-red-600">{registerError}</div>
             )}
-          </section>
+          </div>
         )}
 
-        {/* Информация о текущем участнике */}
-        {isMember && (
-          <section className="border rounded-xl p-4 shadow-sm">
-            <div className="text-sm text-gray-600">
-              Ты в системе как:{" "}
-              <span className="font-semibold">@{member.nickname}</span>
-            </div>
-          </section>
-        )}
-
-        {/* Кого мы ищем (над чатом) */}
-        <section className="border rounded-xl p-4 shadow-sm space-y-3">
+        {/* Блок "Кого мы сейчас ищем" — над чатом */}
+        <div className="border rounded-xl p-4 shadow-sm space-y-3">
           <h2 className="text-lg font-medium">Кого мы сейчас ищем</h2>
-          <p className="text-sm text-gray-600 max-w-2xl">
+          <p className="text-sm text-gray-600">
             NovaCiv — не продукт и не секта. Это экспериментальная площадка.
             Нам нужны люди, которые хотят не просто читать, а делать.
           </p>
@@ -167,17 +158,23 @@ const JoinPage: React.FC = () => {
             <li>разработчики: React, TypeScript, backend, инфраструктура;</li>
             <li>дизайнеры: UI/UX, Figma, визуальный язык будущего;</li>
             <li>переводчики и редакторы для 10 языков платформы;</li>
-            <li>исследователи, философы, социологи, люди с чувством справедливости;</li>
-            <li>любые, кто готов взять на себя маленький участок работы и довести его до конца.</li>
+            <li>
+              исследователи, философы, социологи, люди с чувством
+              справедливости;
+            </li>
+            <li>
+              любые, кто готов взять на себя маленький участок работы и довести
+              его до конца.
+            </li>
           </ul>
           <p className="text-xs text-gray-500">
             Если ты видишь себя в этом списке — просто представься в чате и
             напиши, чем хотел бы заняться.
           </p>
-        </section>
+        </div>
 
         {/* Чат */}
-        <section className="border rounded-xl p-4 shadow-sm space-y-4">
+        <div className="border rounded-xl p-4 shadow-sm space-y-4">
           <h2 className="text-lg font-medium">Открытый чат</h2>
           <p className="text-sm text-gray-600">
             Лента доступна для чтения всем. Писать сообщения могут только те, кто
@@ -229,7 +226,7 @@ const JoinPage: React.FC = () => {
               Отправить
             </button>
           </form>
-        </section>
+        </div>
       </div>
     </div>
   );

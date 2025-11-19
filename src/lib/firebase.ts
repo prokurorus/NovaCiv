@@ -1,7 +1,8 @@
 // src/lib/firebase.ts
 
 import { initializeApp } from "firebase/app";
-import { getAnalytics, Analytics } from "firebase/analytics";
+import { getAnalytics, type Analytics } from "firebase/analytics";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCmTNXdBF7ilzeZVB2VaIt1USIMdXA2src",
@@ -15,10 +16,16 @@ const firebaseConfig = {
   measurementId: "G-FG254WGYF1",
 };
 
+// Инициализируем приложение
+export const app = initializeApp(firebaseConfig);
+
+// Экспорт базы данных для useStats / чата / ников
+export const db = getDatabase(app);
+
+// (опционально) аналитика — только в браузере
 let analytics: Analytics | undefined;
 
 if (typeof window !== "undefined") {
-  const app = initializeApp(firebaseConfig);
   analytics = getAnalytics(app);
 }
 

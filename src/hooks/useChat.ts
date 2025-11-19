@@ -1,84 +1,94 @@
 // src/hooks/useChat.ts
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { db } from "../lib/firebase";
-import {
-  onValue,
-  push,
-  query,
-  ref,
-  limitToLast,
-  serverTimestamp,
-} from "firebase/database";
-import type { MemberInfo } from "./useMember";
+import { ref, push, onValue } from "firebase/database";
 
-export type ChatMessage = {
-  id: string;
-  nickname: string;
-  text: string;
-  createdAt: number | null;
-};
+// простой локальный идентификатор участника
+export function useMember() {
+  const [member, setMember] = useState<{ memberId: string; nickname: string | null }>({
+    memberId: "",
+    nickname: null,
+  });
 
-export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isSending, setIsSending] = useState(false);
-
-  // подписка на последние сообщения
   useEffect(() => {
-    const messagesQuery = query(ref(db, "messages"), limitToLast(100));
+    let storedId = localStorage.getItem("memberId");
+    if (!storedId) {
+      storedId = "m_" + Math.random().toString(36).substring(2, 12);
+      localStorage.setItem("memberId", storedId);
+    }
 
-    const unsubscribe = onValue(messagesQuery, (snap) => {
-      const value = snap.val() as
-        | Record<string, { nickname?: string; text?: string; createdAt?: number }>
-        | null;
+    const nickname = localStorage.getItem("memberNickname");
 
-      if (!value) {
-        setMessages([]);
-        return;
-      }
-
-      const list: ChatMessage[] = Object.entries(value).map(([key, v]) => ({
-        id: key,
-        nickname: v.nickname ?? "someone",
-        text: v.text ?? "",
-        createdAt:
-          typeof v.createdAt === "number" ? v.createdAt : null,
-      }));
-
-      // упорядочим по времени
-      list.sort(
-        (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)
-      );
-
-      setMessages(list);
+    setMember({
+      memberId: storedId,
+      nickname: nickname || null,
     });
-
-    return () => unsubscribe();
   }, []);
 
-  // отправка сообщения
-  async function sendMessage(member: MemberInfo, rawText: string) {
-    const text = rawText.trim();
-    if (!text) return;
+  const registerNickname = (nickname: string) => {
+    if (!nickname || nickname.trim().length < 2) return false;
+    localStorage.setItem("memberNickname", nickname.trim());
+    setMember((prev) => ({ ...prev, nickname: nickname.trim() }));
+    return true;
+  };
 
-    if (!member.memberId || !member.nickname) {
-      console.warn("Cannot send message: no member registered");
+  return { member, registerNickname };
+}
+
+// -------------------------------------------------------------
+
+export function useChat() {
+  const [messages, setMessages] = useState<
+    { id: string; nickname: string; text: string }[]
+  >([]);
+
+  const [isSending, setIsSending] = useState(false);
+
+  // ТАЙМЕР ЗАЩИТЫ ОТ ФЛУДА
+  const lastSendRef = useRef(0);
+
+  useEffect(() => {
+    const messagesRef = ref(db, "messages");
+
+    return onValue(messagesRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const list = Object.entries(data).map(([id, msg]: any) => ({
+        id,
+        nickname: msg.nickname,
+        text: msg.text,
+      }));
+
+      setMessages(list.reverse());
+    });
+  }, []);
+
+  // -----------------------------------------
+  // ОТПРАВКА С УЧЁТОМ АНТИФЛУДА
+  // -----------------------------------------
+  const sendMessage = async (
+    member: { nickname: string | null },
+    text: string
+  ) => {
+    if (!member.nickname) return;
+    if (!text || text.length > 300) return; // уже существующее ограничение
+
+    const now = Date.now();
+    if (now - lastSendRef.current < 2000) {
+      // меньше 2 секунд — блокируем
       return;
     }
+    lastSendRef.current = now;
 
     setIsSending(true);
-    try {
-      await push(ref(db, "messages"), {
-        memberId: member.memberId,
-        nickname: member.nickname,
-        text,
-        createdAt: serverTimestamp(),
-      });
-    } catch (e) {
-      console.error("Failed to send message", e);
-    } finally {
-      setIsSending(false);
-    }
-  }
+    const messagesRef = ref(db, "messages");
 
-  return { messages, isSending, sendMessage };
+    await push(messagesRef, {
+      nickname: member.nickname,
+      text: text.trim(),
+    });
+
+    setIsSending(false);
+  };
+
+  return { messages, sendMessage, isSending };
 }

@@ -8,6 +8,7 @@ import CharterEn from "./pages/Charter-en";
 import CharterDe from "./pages/Charter-de";
 import CharterEs from "./pages/Charter-es";
 import Join from "./pages/Join";
+import { useStats } from "./hooks/useStats";
 
 function AndroidCard() {
   return (

@@ -129,6 +129,59 @@ function MainScreen() {
           </div>
         </header>
 
+{/* --- МАНИФЕСТ / УСТАВ --- */}
+<section className="space-y-6">
+  <h2 className="text-lg sm:text-xl font-semibold text-zinc-900">Тексты</h2>
+
+  <p className="text-sm text-zinc-600 max-w-2xl">
+    Два основных документа NovaCiv — это смысловая основа и правила игры.
+    Они полностью публичны, на разных языках, без скрытых условий.
+  </p>
+
+  <div className="grid sm:grid-cols-2 gap-4">
+
+    <a
+      href="/Manifesto-ru"
+      className="block rounded-xl border border-zinc-200 p-5 hover:bg-zinc-50 transition"
+    >
+      <h3 className="font-semibold text-zinc-800">Манифест</h3>
+      <p className="text-sm text-zinc-600 mt-1">
+        Короткое, честное объяснение того, ради чего всё это создано.
+      </p>
+    </a>
+
+    <a
+      href="/Charter-ru"
+      className="block rounded-xl border border-zinc-200 p-5 hover:bg-zinc-50 transition"
+    >
+      <h3 className="font-semibold text-zinc-800">Устав</h3>
+      <p className="text-sm text-zinc-600 mt-1">
+        Полные правила: референдум, структура, цифровая этика и управление.
+      </p>
+    </a>
+  </div>
+</section>
+
+
+{/* --- ПРИСОЕДИНИТЬСЯ --- */}
+<section className="space-y-6">
+  <h2 className="text-lg sm:text-xl font-semibold text-zinc-900">
+    Присоединиться
+  </h2>
+
+  <p className="text-sm text-zinc-600 max-w-2xl">
+    Если откликается — заходи в чат, выбери ник и напиши, чем хочешь заняться.
+  </p>
+
+  <a
+    href="/join"
+    className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-7 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-zinc-800 transition"
+  >
+    Перейти к присоединению
+  </a>
+</section>
+
+        
         {/* Блок "Коротко о NovaCiv" — андроид теперь СЛЕВА */}
         <section className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-center">
 

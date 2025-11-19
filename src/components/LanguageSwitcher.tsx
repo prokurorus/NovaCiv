@@ -1,37 +1,43 @@
 import React from "react";
-import LanguageSwitcher from "./LanguageSwitcher";
+import { useLanguage } from "../context/LanguageContext";
+import type { Language } from "../types/language";
 
+const LABELS: Record<Language, string> = {
+  ru: "RU",
+  en: "EN",
+  de: "DE",
+  es: "ES",
+};
 
-export default function Layout({ children }: { children: React.ReactNode }) {
-return (
-<div className="min-h-screen bg-gradient-to-b from-white to-zinc-50 text-zinc-900">
-<header className="sticky top-0 z-40 backdrop-blur bg-white/70 border-b">
-<div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-<a href="/" className="font-semibold tracking-wide hover:opacity-80 transition-opacity">
-NovaCiv
-</a>
-<nav className="flex items-center gap-4 text-sm">
-<a href="/#manifest" className="opacity-80 hover:opacity-100">Манифест</a>
-<a href="/#charter" className="opacity-80 hover:opacity-100">Устав</a>
-<a href="/join" className="opacity-80 hover:opacity-100">Присоединиться</a>
-<LanguageSwitcher />
-</nav>
-</div>
-</header>
+const LanguageSwitcher: React.FC = () => {
+  const { language, setLanguage } = useLanguage();
 
+  const order: Language[] = ["ru", "en", "de", "es"];
 
-<main className="mx-auto max-w-5xl px-4 py-10">
-<div className="bg-white rounded-2xl shadow-sm ring-1 ring-zinc-900/5 p-6 md:p-8 fade-in">
-{children}
-</div>
-</main>
+  const handleChange = (code: Language) => {
+    if (code === language) return;
+    setLanguage(code);
+  };
 
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white/80 px-2 py-1 text-[11px] sm:text-xs shadow-sm">
+      {order.map((code) => (
+        <button
+          key={code}
+          type="button"
+          onClick={() => handleChange(code)}
+          className={`px-2 py-0.5 rounded-full transition ${
+            language === code
+              ? "bg-zinc-900 text-white"
+              : "text-zinc-700 hover:bg-zinc-100"
+          }`}
+          aria-pressed={language === code}
+        >
+          {LABELS[code]}
+        </button>
+      ))}
+    </div>
+  );
+};
 
-<footer className="border-t bg-white/70">
-<div className="mx-auto max-w-5xl px-4 py-6 text-sm opacity-70">
-© NovaCiv. Свобода, ненасилие, прямая демократия, наука.
-</div>
-</footer>
-</div>
-);
-}
+export default LanguageSwitcher;

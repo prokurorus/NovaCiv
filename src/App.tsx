@@ -351,6 +351,21 @@ export default function App() {
   if (pathname === "/Charter-en") return <CharterEn />;
   if (pathname === "/Charter-de") return <CharterDe />;
   if (pathname === "/Charter-es") return <CharterEs />;
+  if (pathname === "/forum")
+    return (
+      <>
+        <ForumPage />
+        <AssistantWidget />
+      </>
+    );
+
+  if (pathname.startsWith("/forum/"))
+    return (
+      <>
+        <TopicPage />
+        <AssistantWidget />
+      </>
+    );
 
   if (pathname === "/join")
     return (

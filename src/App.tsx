@@ -12,6 +12,7 @@ import { useStats } from "./hooks/useStats";
 import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { Language } from "./types/language";
+import AssistantWidget from "./components/AssistantWidget";
 
 
 /* ---------- Карточка андроида (левая колонка) ---------- */

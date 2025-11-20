@@ -29,22 +29,40 @@ exports.handler = async (event) => {
   }
 
   const userMessages = Array.isArray(body.messages) ? body.messages : [];
+  const language = body.language || "ru";
+  const page = body.page || "/";
+
+  const projectContext =
+    "NovaCiv is a digital civilization project with a public Charter and Manifesto. " +
+    "It stands for non-violence, direct democracy, transparency of power, scientific development " +
+    "and protection of life and reason as the highest values. " +
+    "The site novaciv.space hosts the Manifesto and the Charter in several languages, " +
+    "a Join page with an open chat and counters (visitors / likes / joined), and a simple forum in development. " +
+    "You are not a decision-maker of the community, only a helper and explainer. " +
+    "If the user asks something that requires legal precision (for example, about the Charter), " +
+    "you should answer carefully and recommend reading the official text on the site.";
+
+  const systemPrompt =
+    "You are the AI house spirit of NovaCiv, called 'Домовой'. " +
+    "You speak briefly, warmly and honestly, like a friendly but direct companion. " +
+    "Avoid flattery, don't invent facts about the project. " +
+    "If you don't know something, say that you are not sure and suggest where to look. " +
+    "Answer in the same language as the last user message. " +
+    "Project context: " +
+    projectContext +
+    " Current page path: " +
+    page +
+    ". If questions are about how to join or help the project, you may suggest the Join page (/join) or the forum when appropriate.";
 
   const messages = [
     {
       role: "system",
-      content:
-        "You are the AI house spirit of NovaCiv, called 'Домовой'. " +
-        "Speak briefly, warmly and honestly. " +
-        "You know about NovaCiv as a digital civilization project with a Charter and Manifesto, " +
-        "but if you are not sure about something, say so openly. " +
-        "Avoid flattery. Be friendly but objective. Answer in the language of the user message.",
+      content: systemPrompt,
     },
     ...userMessages,
   ];
 
   try {
-    // В Node 18+ fetch есть глобально
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -62,7 +80,6 @@ exports.handler = async (event) => {
     const text = await response.text();
 
     if (!response.ok) {
-      // Возвращаем текст ошибки в тело, чтобы видеть, что именно не так
       return {
         statusCode: 200,
         body: JSON.stringify({

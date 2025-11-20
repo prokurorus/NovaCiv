@@ -8,38 +8,65 @@ import CharterEn from "./pages/Charter-en";
 import CharterDe from "./pages/Charter-de";
 import CharterEs from "./pages/Charter-es";
 import Join from "./pages/Join";
+import ForumPage from "./pages/ForumPage";
+import TopicPage from "./pages/TopicPage";
 import { useStats } from "./hooks/useStats";
 import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { Language } from "./types/language";
 import AssistantWidget from "./components/AssistantWidget";
 
+const forumNavLabel: Record<Language, string> = {
+  ru: "Форум",
+  en: "Forum",
+  de: "Forum",
+  es: "Foro",
+};
 
 /* ---------- Карточка андроида (левая колонка) ---------- */
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-[520px] mx-auto lg:mx-0">
-      <img
-        src="/lovable-uploads/android.png"
-        alt="Цифровой собеседник NovaCiv"
-        className="w-full h-auto select-none drop-shadow-[0_24px_80px_rgba(15,23,42,0.12)]"
-        draggable={false}
-      />
+    <div className="relative w-full max-w-sm">
+      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-zinc-100 via-white to-zinc-200 shadow-[0_18px_60px_rgba(15,23,42,0.22)]" />
+      <div className="relative rounded-[1.75rem] bg-white overflow-hidden border border-zinc-200">
+        <div className="aspect-[4/5] bg-gradient-to-b from-zinc-50 via-zinc-100 to-zinc-200 flex items-end justify-center p-6">
+          <div className="relative w-full h-full max-h-[420px] flex items-center justify-center">
+            <div className="absolute inset-10 rounded-[1.75rem] bg-gradient-to-br from-white/70 via-white/30 to-zinc-200/60 backdrop-blur-xl shadow-[0_22px_70px_rgba(15,23,42,0.25)]" />
+            <img
+              src="/lovable-uploads/android.png"
+              alt="NovaCiv Android"
+              className="relative max-h-full w-auto object-contain drop-shadow-[0_25px_60px_rgba(15,23,42,0.55)]"
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-zinc-200 bg-white/80 px-5 py-4">
+          <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-600">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="uppercase tracking-[0.12em] text-zinc-500 font-semibold">
+                DIGITAL CONSCIOUSNESS
+              </span>
+            </div>
+            <span className="text-[10px] text-zinc-400">
+              Prototype node • alpha
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-/* ---------- Общая панель счётчиков ---------- */
+/* ---------- Панель статистики ---------- */
 
-/* ---------- Общая панель счётчиков ---------- */
-
-type StatsBarProps = {
+interface StatsBarProps {
   visitors: number;
   likes: number;
   joined: number;
   onLike: () => void;
-};
+}
 
 function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
   const { language } = useLanguage();
@@ -69,7 +96,7 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
     es: {
       visitors: "Visitantes",
       likes: "Me gusta",
-      joined: "Se unieron",
+      joined: "Unidos",
       likeButton: "♥ Me gusta",
     },
   };
@@ -118,10 +145,8 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
 
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 
-/* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
-
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
 
   return (
     <main className="min-h-screen bg-white">
@@ -132,7 +157,23 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             {t.home.title} • {t.home.subtitle}
           </div>
-          <LanguageSwitcher />
+          <div className="flex flex-col items-end gap-2">
+            <LanguageSwitcher />
+            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
+              <a
+                href="/join"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
+              >
+                {t.navigation.join}
+              </a>
+              <a
+                href="/forum"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
+              >
+                {forumNavLabel[language]}
+              </a>
+            </nav>
+          </div>
         </div>
 
         {/* Основной блок: андроид + текст */}
@@ -153,14 +194,14 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3 items-center">
+            <div className="space-y-3">
               <button
                 onClick={onEnter}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 active:bg-zinc-900 transition"
+                className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-zinc-900/30 hover:bg-zinc-800 active:bg-zinc-950 transition"
               >
                 {t.home.enterButton}
               </button>
-              <p className="text-xs text-zinc-500 max-w-xs">
+              <p className="text-xs text-zinc-500 max-w-sm">
                 {t.home.hintText}
               </p>
             </div>
@@ -173,10 +214,6 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
 
 /* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
 
-/* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
-
-/* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
-
 function MainScreen() {
   const { stats, ensureVisitorCounted, like } = useStats();
   const { t, language } = useLanguage();
@@ -186,17 +223,38 @@ function MainScreen() {
   }, [ensureVisitorCounted]);
 
   const joinText: Record<Language, string> = {
-    ru: "NovaCiv не просит веры или клятвы. Важно только понимание и добровольность. Прочитай Манифест и Устав, загляни в открытый чат на странице «Присоединиться» и реши, хочешь ли ты вкладывать часть себя в такой проект.",
-    en: "NovaCiv does not ask for faith or oaths. What matters is understanding and free choice. Read the Manifesto and the Charter, visit the open chat on the “Join” page and decide whether you want to invest a part of yourself in this project.",
-    de: "NovaCiv verlangt keinen Glauben und keine Eide. Wichtig sind nur Verständnis und freiwillige Entscheidung. Lies Manifest und Charta, schau in den offenen Chat auf der Seite „Beitreten“ und entscheide, ob du einen Teil von dir in dieses Projekt investieren möchtest.",
-    es: "NovaCiv no pide fe ni juramentos. Lo que importa es la comprensión y la decisión voluntaria. Lee el Manifiesto y la Carta, visita el chat abierto en la página «Unirse» y decide si quieres invertir una parte de ti en este proyecto."
+    ru: "NovaCiv не просит веры или клятвы. Важно только понимание того, во что ты входишь: цифровое сообщество, основанное на свободе, ненасилии, прямой демократии и честных правилах. Мы не обещаем рай — мы обещаем прозрачность и добровольность. Прочитай Манифест и Устав, загляни в открытый чат на странице «Присоединиться» и реши, хочешь ли ты вкладывать часть себя в такой проект.",
+    en: "NovaCiv does not ask for faith or oaths. What matters is understanding what you are entering: a digital community built on freedom, non-violence, direct democracy and clear rules. We do not promise paradise — we promise transparency and voluntariness. Read the Manifesto and the Charter, visit the open chat on the Join page and decide whether you want to invest a part of yourself in this project.",
+    de: "NovaCiv verlangt keinen Glauben und keine Eide. Wichtig ist das Verständnis, worin du eintrittst: eine digitale Gemeinschaft, die auf Freiheit, Gewaltlosigkeit, direkter Demokratie und klaren Regeln basiert. Wir versprechen kein Paradies – wir versprechen Transparenz und Freiwilligkeit. Lies das Manifest und die Charta, wirf einen Blick in den offenen Chat auf der Seite „Beitreten“ und entscheide, ob du einen Teil von dir in dieses Projekt investieren möchtest.",
+    es: "NovaCiv no pide fe ni juramentos. Lo que importa es entender en qué entras: una comunidad digital basada en la libertad, la no violencia, la democracia directa y reglas claras. No prometemos un paraíso: prometemos transparencia y voluntariedad. Lee el Manifiesto y la Carta, visita el chat abierto en la página «Unirse» y decide si quieres invertir una parte de ti en este proyecto.",
   };
 
   const joinButtonLabel: Record<Language, string> = {
     ru: "Открыть страницу «Присоединиться»",
     en: "Open the “Join” page",
     de: "Seite „Beitreten“ öffnen",
-    es: "Abrir página «Unirse»"
+    es: "Abrir página «Unirse»",
+  };
+
+  const forumCardTitle: Record<Language, string> = {
+    ru: "Форум NovaCiv",
+    en: "NovaCiv Forum",
+    de: "NovaCiv-Forum",
+    es: "Foro de NovaCiv",
+  };
+
+  const forumCardText: Record<Language, string> = {
+    ru: "Открытое пространство для вопросов, идей и обсуждений Устава, Манифеста и будущего платформы.",
+    en: "An open space for questions, ideas and discussions about the Charter, the Manifesto and the future of the platform.",
+    de: "Ein offener Raum für Fragen, Ideen und Diskussionen über Charta, Manifest und die Zukunft der Plattform.",
+    es: "Un espacio abierto para preguntas, ideas y debates sobre la Carta, el Manifiesto y el futuro de la plataforma.",
+  };
+
+  const forumCardButton: Record<Language, string> = {
+    ru: "Перейти на форум",
+    en: "Go to forum",
+    de: "Zum Forum",
+    es: "Ir al foro",
   };
 
   return (
@@ -217,7 +275,23 @@ function MainScreen() {
             </p>
           </header>
 
-          <LanguageSwitcher />
+          <div className="flex flex-col items-end gap-2">
+            <LanguageSwitcher />
+            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
+              <a
+                href="/join"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
+              >
+                {t.navigation.join}
+              </a>
+              <a
+                href="/forum"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
+              >
+                {forumNavLabel[language]}
+              </a>
+            </nav>
+          </div>
         </div>
 
         {/* Счётчики */}
@@ -313,27 +387,44 @@ function MainScreen() {
           </div>
         </section>
 
-        {/* ПРИСОЕДИНИТЬСЯ + ЧАТ */}
-        <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 space-y-3 shadow-sm">
-          <h2 className="text-lg font-semibold text-zinc-900">
-            {t.navigation.join}
-          </h2>
-          <p className="text-sm text-zinc-600 max-w-2xl">
-            {joinText[language]}
-          </p>
-          <a
-            href="/join"
-            className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
-          >
-            {joinButtonLabel[language]}
-          </a>
+        {/* ПРИСОЕДИНИТЬСЯ + ФОРУМ */}
+        <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 shadow-sm">
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold text-zinc-900">
+                {t.navigation.join}
+              </h2>
+              <p className="text-sm text-zinc-600 max-w-2xl">
+                {joinText[language]}
+              </p>
+              <a
+                href="/join"
+                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+              >
+                {joinButtonLabel[language]}
+              </a>
+            </div>
+
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold text-zinc-900">
+                {forumCardTitle[language]}
+              </h2>
+              <p className="text-sm text-zinc-600 max-w-2xl">
+                {forumCardText[language]}
+              </p>
+              <a
+                href="/forum"
+                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+              >
+                {forumCardButton[language]}
+              </a>
+            </div>
+          </div>
         </section>
       </div>
     </main>
   );
 }
-
-
 
 /* ---------- Корневой компонент ---------- */
 
@@ -351,6 +442,7 @@ export default function App() {
   if (pathname === "/Charter-en") return <CharterEn />;
   if (pathname === "/Charter-de") return <CharterDe />;
   if (pathname === "/Charter-es") return <CharterEs />;
+
   if (pathname === "/forum")
     return (
       <>

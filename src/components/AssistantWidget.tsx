@@ -89,12 +89,22 @@ const AssistantWidget: React.FC = () => {
       }
 
       const data = await res.json();
+
+      if (data.error) {
+        // Показываем текст ошибки домового пользователю (укоротим до 200 символов)
+        setError(
+          `${labelError[language]} (${String(data.error).slice(0, 200)})`
+        );
+        return;
+      }
+
       const reply = (data.reply || "").toString();
 
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: reply },
       ]);
+
     } catch (err) {
       console.error(err);
       setError(labelError[language]);

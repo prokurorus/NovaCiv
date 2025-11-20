@@ -31,7 +31,7 @@ function AndroidCard() {
       {/* сама картинка без лишних подложек */}
       <div className="overflow-hidden rounded-[2rem]">
         <img
-          src="/lovable-uploads/android-clean.png" // <- твой файл
+          src="/lovable-uploads/android.png" // <- твой файл
           alt="NovaCiv Android"
           className="block w-full h-auto"
         />

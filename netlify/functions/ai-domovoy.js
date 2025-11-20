@@ -1,5 +1,7 @@
 // netlify/functions/ai-domovoy.js
 
+const fetch = require("node-fetch");
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return {
@@ -10,6 +12,7 @@ exports.handler = async (event) => {
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
+    console.error("OPENAI_API_KEY is not set");
     return {
       statusCode: 500,
       body: JSON.stringify({
@@ -38,7 +41,7 @@ exports.handler = async (event) => {
         "Speak briefly, warmly and honestly. " +
         "You know about NovaCiv as a digital civilization project with a Charter and Manifesto, " +
         "but if you are not sure about something, say so openly. " +
-        "Avoid flattery. Be friendly, but objective. Answer in the language of the user message.",
+        "Avoid flattery. Be friendly but objective. Answer in the language of the user message.",
     },
     ...userMessages,
   ];
@@ -58,16 +61,30 @@ exports.handler = async (event) => {
       }),
     });
 
+    const text = await response.text();
+
     if (!response.ok) {
-      const text = await response.text();
       console.error("OpenAI error:", text);
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: "OpenAI request failed" }),
+        body: JSON.stringify({
+          error: "OpenAI request failed",
+          details: text,
+        }),
       };
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error("Failed to parse OpenAI JSON:", text);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Invalid OpenAI JSON response" }),
+      };
+    }
+
     const reply =
       (data.choices &&
         data.choices[0] &&

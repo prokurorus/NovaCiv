@@ -1,20 +1,17 @@
 // netlify/functions/ai-domovoy.js
 
-const fetch = require("node-fetch");
-
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
-      body: "Method Not Allowed",
+      body: JSON.stringify({ error: "Method Not Allowed" }),
     };
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.error("OPENAI_API_KEY is not set");
     return {
-      statusCode: 500,
+      statusCode: 200,
       body: JSON.stringify({
         error: "OPENAI_API_KEY is not set on the server",
       }),
@@ -26,8 +23,8 @@ exports.handler = async (event) => {
     body = JSON.parse(event.body || "{}");
   } catch (e) {
     return {
-      statusCode: 400,
-      body: JSON.stringify({ error: "Invalid JSON" }),
+      statusCode: 200,
+      body: JSON.stringify({ error: "Invalid JSON in request body" }),
     };
   }
 
@@ -47,6 +44,7 @@ exports.handler = async (event) => {
   ];
 
   try {
+    // В Node 18+ fetch есть глобально
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -64,12 +62,11 @@ exports.handler = async (event) => {
     const text = await response.text();
 
     if (!response.ok) {
-      console.error("OpenAI error:", text);
+      // Возвращаем текст ошибки в тело, чтобы видеть, что именно не так
       return {
-        statusCode: 500,
+        statusCode: 200,
         body: JSON.stringify({
-          error: "OpenAI request failed",
-          details: text,
+          error: `OpenAI error: ${text}`,
         }),
       };
     }
@@ -78,10 +75,11 @@ exports.handler = async (event) => {
     try {
       data = JSON.parse(text);
     } catch (e) {
-      console.error("Failed to parse OpenAI JSON:", text);
       return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "Invalid OpenAI JSON response" }),
+        statusCode: 200,
+        body: JSON.stringify({
+          error: "Failed to parse OpenAI JSON response",
+        }),
       };
     }
 
@@ -97,10 +95,11 @@ exports.handler = async (event) => {
       body: JSON.stringify({ reply: String(reply).trim() }),
     };
   } catch (err) {
-    console.error("ai-domovoy function error:", err);
     return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Internal server error" }),
+      statusCode: 200,
+      body: JSON.stringify({
+        error: `Function runtime error: ${String(err)}`,
+      }),
     };
   }
 };

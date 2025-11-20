@@ -352,12 +352,28 @@ export default function App() {
   if (pathname === "/Charter-de") return <CharterDe />;
   if (pathname === "/Charter-es") return <CharterEs />;
 
-  if (pathname === "/join") return <Join />;
+  if (pathname === "/join")
+    return (
+      <>
+        <Join />
+        <AssistantWidget />
+      </>
+    );
 
   // Корень — сначала вступительный экран, затем простая навигация
   if (!entered) {
-    return <IntroScreen onEnter={() => setEntered(true)} />;
+    return (
+      <>
+        <IntroScreen onEnter={() => setEntered(true)} />
+        <AssistantWidget />
+      </>
+    );
   }
 
-  return <MainScreen />;
+  return (
+    <>
+      <MainScreen />
+      <AssistantWidget />
+    </>
+  );
 }

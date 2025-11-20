@@ -27,37 +27,32 @@ const forumNavLabel: Record<Language, string> = {
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-sm">
-      <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-zinc-100 via-white to-zinc-200 shadow-[0_18px_60px_rgba(15,23,42,0.22)]" />
-      <div className="relative rounded-[1.75rem] bg-white overflow-hidden border border-zinc-200">
-        <div className="aspect-[4/5] bg-gradient-to-b from-zinc-50 via-zinc-100 to-zinc-200 flex items-end justify-center p-6">
-          <div className="relative w-full h-full max-h-[420px] flex items-center justify-center">
-            <div className="absolute inset-10 rounded-[1.75rem] bg-gradient-to-br from-white/70 via-white/30 to-zinc-200/60 backdrop-blur-xl shadow-[0_22px_70px_rgba(15,23,42,0.25)]" />
-            <img
-              src="/lovable-uploads/android.png"
-              alt="NovaCiv Android"
-              className="relative max-h-full w-auto object-contain drop-shadow-[0_25px_60px_rgba(15,23,42,0.55)]"
-            />
-          </div>
-        </div>
+    <div className="w-full max-w-md">
+      {/* сама картинка без лишних подложек */}
+      <div className="overflow-hidden rounded-[2rem]">
+        <img
+          src="/lovable-uploads/android-clean.png" // <- твой файл
+          alt="NovaCiv Android"
+          className="block w-full h-auto"
+        />
+      </div>
 
-        <div className="border-t border-zinc-200 bg-white/80 px-5 py-4">
-          <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-600">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-              <span className="uppercase tracking-[0.12em] text-zinc-500 font-semibold">
-                DIGITAL CONSCIOUSNESS
-              </span>
-            </div>
-            <span className="text-[10px] text-zinc-400">
-              Prototype node • alpha
-            </span>
-          </div>
+      {/* аккуратная подпись под картинкой */}
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-600">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          <span className="uppercase tracking-[0.12em] text-zinc-500 font-semibold">
+            DIGITAL CONSCIOUSNESS
+          </span>
         </div>
+        <span className="text-[10px] text-zinc-400">
+          Prototype node • alpha
+        </span>
       </div>
     </div>
   );
 }
+
 
 /* ---------- Панель статистики ---------- */
 

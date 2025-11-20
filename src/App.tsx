@@ -27,18 +27,18 @@ const forumNavLabel: Record<Language, string> = {
 
 function AndroidCard() {
   return (
-    <div className="w-full max-w-md">
-      {/* сама картинка без лишних подложек */}
+    <div className="w-full max-w-2xl mx-auto">
+      {/* Картинка — крупная, чистая, без подложек */}
       <div className="overflow-hidden rounded-[2rem]">
         <img
-          src="/lovable-uploads/android.png" // <- твой файл
+          src="/lovable-uploads/android-clean.png" // <-- твой файл
           alt="NovaCiv Android"
           className="block w-full h-auto"
         />
       </div>
 
-      {/* аккуратная подпись под картинкой */}
-      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-600">
+      {/* Подпись под изображением */}
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-600 px-1">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
           <span className="uppercase tracking-[0.12em] text-zinc-500 font-semibold">
@@ -52,6 +52,7 @@ function AndroidCard() {
     </div>
   );
 }
+
 
 
 /* ---------- Панель статистики ---------- */

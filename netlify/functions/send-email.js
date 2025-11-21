@@ -39,7 +39,7 @@ exports.handler = async (event, context) => {
 
   try {
     await sgMail.send({
-      to: "prokurorus2@gmail.com", // твой email
+      to: "prokurorus3@gmail.com", // твой email
       from: "noreply@novaciv.space",
       subject: "Новое обращение на сайте NovaCiv",
       text: `

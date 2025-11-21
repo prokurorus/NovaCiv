@@ -408,6 +408,7 @@ const JoinPage: React.FC = () => {
 
     setContactSending(true);
     try {
+      // 1. Сохраняем обращение в Firebase
       await push(ref(db, "contactRequests"), {
         createdAt: Date.now(),
         createdAtServer: serverTimestamp(),
@@ -420,10 +421,31 @@ const JoinPage: React.FC = () => {
         status: "new",
       });
 
+      // 2. Пытаемся отправить письмо через Netlify Function (мягкая ошибка)
+      try {
+        const resp = await fetch("/.netlify/functions/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nickname: name || null,
+            contact: method,
+            message: msg,
+            language,
+            memberId: member.memberId || null,
+          }),
+        });
+
+        if (!resp.ok) {
+          console.error("send-email function responded with status", resp.status);
+        }
+      } catch (emailErr) {
+        console.error("Failed to call send-email function", emailErr);
+      }
+
       setContactSuccess(contactSuccessText[language]);
       setContactMessage("");
       setContactMethod("");
-      // Имя и согласие можно оставить, чтобы не вводить повторно
+      // Имя и согласие оставляем — удобно, если человек пишет повторно
     } catch (err) {
       console.error("Failed to send contact request", err);
       setContactError(contactSendError[language]);

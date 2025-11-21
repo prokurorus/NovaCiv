@@ -5,12 +5,14 @@ import { useMember } from "../hooks/useMember";
 import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
 import LanguageSwitcher from "../components/LanguageSwitcher";
+import { db } from "../lib/firebase";
+import { push, ref, serverTimestamp } from "firebase/database";
 
 const topIntro: Record<Language, string> = {
   ru: "Это открытая платформа. Счётчики и чат отражают реальных людей, которые сюда пришли, поставили «Нравится» и решили помочь развитию проекта.",
   en: "This is an open platform. The counters and chat reflect real people who came here, clicked “Like”, and decided to help the project grow.",
   de: "Dies ist eine offene Plattform. Zähler und Chat zeigen reale Menschen, die hierher gekommen sind, „Gefällt mir“ gedrückt haben und beschlossen haben, beim Aufbau des Projekts zu helfen.",
-  es: "Esta es una plataforma abierta. Los contadores y el chat reflejan a personas reales que llegaron aquí, pusieron «Me gusta» y decidieron ayudar al desarrollo del proyecto."
+  es: "Esta es una plataforma abierta. Los contadores y el chat reflejan a personas reales que llegaron aquí, pusieron «Me gusta» y decidieron ayudar al desarrollo del proyecto.",
 };
 
 const statsLabels: Record<
@@ -221,10 +223,104 @@ const waitLabel = (lang: Language, seconds: number): string => {
   }
 };
 
+/** Блок связи с основателем */
+
+const contactTitle: Record<Language, string> = {
+  ru: "Связь с основателем",
+  en: "Contact the founder",
+  de: "Kontakt zum Gründer",
+  es: "Contacto con el fundador",
+};
+
+const contactIntro: Record<Language, string> = {
+  ru: "Если ты хочешь помочь развивать NovaCiv, взять на себя участок работы или предложить идею — напиши. Сообщение попадёт напрямую к основателю.",
+  en: "If you want to help develop NovaCiv, take responsibility for a part of the work or propose an idea — write here. Your message will go directly to the founder.",
+  de: "Wenn du NovaCiv mitentwickeln, Verantwortung für einen Bereich übernehmen oder eine Idee vorschlagen möchtest – schreib hier. Deine Nachricht geht direkt an den Gründer.",
+  es: "Si quieres ayudar a desarrollar NovaCiv, asumir una parte del trabajo o proponer una idea, escribe aquí. Tu mensaje irá directamente al fundador.",
+};
+
+const contactNameLabel: Record<Language, string> = {
+  ru: "Как тебя называть",
+  en: "How to call you",
+  de: "Wie dürfen wir dich nennen",
+  es: "Cómo llamarte",
+};
+
+const contactNamePlaceholder: Record<Language, string> = {
+  ru: "Ник или имя (необязательно)",
+  en: "Nickname or name (optional)",
+  de: "Nickname oder Name (optional)",
+  es: "Alias o nombre (opcional)",
+};
+
+const contactMethodLabel: Record<Language, string> = {
+  ru: "Как с тобой связаться",
+  en: "How to contact you",
+  de: "Wie wir dich erreichen",
+  es: "Cómo contactarte",
+};
+
+const contactMethodPlaceholder: Record<Language, string> = {
+  ru: "Email, Telegram или другой удобный способ",
+  en: "Email, Telegram or other preferred way",
+  de: "E-Mail, Telegram oder anderer Weg",
+  es: "Email, Telegram u otro medio",
+};
+
+const contactMessageLabel: Record<Language, string> = {
+  ru: "Чем ты хочешь помочь или какой у тебя вопрос",
+  en: "How you want to help or what you ask",
+  de: "Wobei du helfen möchtest oder welche Frage du hast",
+  es: "En qué quieres ayudar o cuál es tu pregunta",
+};
+
+const contactMessagePlaceholder: Record<Language, string> = {
+  ru: "Коротко опиши, что ты умеешь или чем хочешь заняться.",
+  en: "Briefly describe what you can do or what you want to work on.",
+  de: "Beschreibe kurz, was du kannst oder woran du arbeiten möchtest.",
+  es: "Describe brevemente lo que sabes hacer o en qué quieres trabajar.",
+};
+
+const contactConsentLabel: Record<Language, string> = {
+  ru: "Я согласен использовать указанные данные только для связи по проекту NovaCiv.",
+  en: "I agree that these details will be used only to contact me about the NovaCiv project.",
+  de: "Ich bin einverstanden, dass diese Daten nur zur Kontaktaufnahme bezüglich des NovaCiv-Projekts genutzt werden.",
+  es: "Acepto que estos datos se utilicen solo para contactarme sobre el proyecto NovaCiv.",
+};
+
+const contactSubmitLabel: Record<Language, string> = {
+  ru: "Отправить основателю",
+  en: "Send to founder",
+  de: "An den Gründer senden",
+  es: "Enviar al fundador",
+};
+
+const contactValidationError: Record<Language, string> = {
+  ru: "Укажи способ связи, напиши сообщение и поставь галочку согласия.",
+  en: "Please provide a contact method, write a message and check the consent box.",
+  de: "Bitte gib eine Kontaktmöglichkeit an, schreibe eine Nachricht und setze das Häkchen für die Zustimmung.",
+  es: "Indica un medio de contacto, escribe un mensaje y marca la casilla de consentimiento.",
+};
+
+const contactSendError: Record<Language, string> = {
+  ru: "Не удалось отправить сообщение. Попробуй ещё раз чуть позже.",
+  en: "Failed to send your message. Please try again a bit later.",
+  de: "Die Nachricht konnte nicht gesendet werden. Bitte versuche es später erneut.",
+  es: "No se pudo enviar tu mensaje. Inténtalo de nuevo más tarde.",
+};
+
+const contactSuccessText: Record<Language, string> = {
+  ru: "Сообщение передано основателю NovaCiv. Спасибо за готовность помочь.",
+  en: "Your message has been delivered to the founder of NovaCiv. Thank you for your willingness to help.",
+  de: "Deine Nachricht wurde an den Gründer von NovaCiv übermittelt. Danke für deine Bereitschaft zu helfen.",
+  es: "Tu mensaje ha sido enviado al fundador de NovaCiv. Gracias por tu disposición a ayudar.",
+};
+
 const JoinPage: React.FC = () => {
   const { stats, ensureVisitorCounted, like, joined } = useStats();
   const { member, registerNickname } = useMember();
-  const { messages, sendMessage, isSending, cooldownLeft, maxLength } = useChat();
+  const { messages, sendMessage, isSending, cooldownLeft, maxLength } =
+    useChat();
   const { language, t } = useLanguage();
 
   const [nicknameInput, setNicknameInput] = useState("");
@@ -240,53 +336,100 @@ const JoinPage: React.FC = () => {
     }
   });
 
+  // Состояние формы связи с основателем
+  const [contactName, setContactName] = useState("");
+  const [contactMethod, setContactMethod] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactAgree, setContactAgree] = useState(false);
+  const [contactSending, setContactSending] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [contactSuccess, setContactSuccess] = useState<string | null>(null);
+
   useEffect(() => {
     ensureVisitorCounted();
   }, [ensureVisitorCounted]);
-
 
   const handleLike = async () => {
     await like();
   };
 
-const handleRegister = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setRegisterError(null);
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegisterError(null);
 
-  const result = await registerNickname(nicknameInput);
-  if (!result) {
-    setRegisterError(
-      language === "ru"
-        ? "Введите ник."
-        : language === "de"
-        ? "Bitte Nickname eingeben."
-        : language === "es"
-        ? "Introduce un alias."
-        : "Please enter a nickname."
-    );
-    return;
-  }
-
-  setNicknameInput("");
-
-  try {
-    if (!hasJoinedFlag) {
-      await joined();
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("novaciv_joined_counted", "1");
-      }
-      setHasJoinedFlag(true);
+    const result = await registerNickname(nicknameInput);
+    if (!result) {
+      setRegisterError(
+        language === "ru"
+          ? "Введите ник."
+          : language === "de"
+          ? "Bitte Nickname eingeben."
+          : language === "es"
+          ? "Introduce un alias."
+          : "Please enter a nickname."
+      );
+      return;
     }
-  } catch (e) {
-    console.error("Failed to increment joined counter", e);
-  }
-};
 
+    setNicknameInput("");
+
+    try {
+      if (!hasJoinedFlag) {
+        await joined();
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("novaciv_joined_counted", "1");
+        }
+        setHasJoinedFlag(true);
+      }
+    } catch (e) {
+      console.error("Failed to increment joined counter", e);
+    }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     await sendMessage(member, messageInput);
     setMessageInput("");
+  };
+
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setContactError(null);
+    setContactSuccess(null);
+
+    const name = contactName.trim() || member.nickname || "";
+    const method = contactMethod.trim();
+    const msg = contactMessage.trim();
+
+    if (!contactAgree || !method || !msg) {
+      setContactError(contactValidationError[language]);
+      return;
+    }
+
+    setContactSending(true);
+    try {
+      await push(ref(db, "contactRequests"), {
+        createdAt: Date.now(),
+        createdAtServer: serverTimestamp(),
+        source: "direct",
+        language,
+        memberId: member.memberId || null,
+        nickname: name || null,
+        contact: method,
+        message: msg,
+        status: "new",
+      });
+
+      setContactSuccess(contactSuccessText[language]);
+      setContactMessage("");
+      setContactMethod("");
+      // Имя и согласие можно оставить, чтобы не вводить повторно
+    } catch (err) {
+      console.error("Failed to send contact request", err);
+      setContactError(contactSendError[language]);
+    } finally {
+      setContactSending(false);
+    }
   };
 
   const isMember = Boolean(member.memberId && member.nickname);
@@ -314,11 +457,15 @@ const handleRegister = async (e: React.FormEvent) => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="border rounded-xl p-4 shadow-sm">
             <div className="text-sm text-gray-500">{statsText.visitors}</div>
-            <div className="text-2xl font-semibold mt-1">{stats.visitors}</div>
+            <div className="text-2xl font-semibold mt-1">
+              {stats.visitors}
+            </div>
           </div>
           <div className="border rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify_between">
-              <span className="text-sm text-gray-500">{statsText.likes}</span>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">
+                {statsText.likes}
+              </span>
               <button
                 onClick={handleLike}
                 className="text-xs border rounded-full px-3 py-1 hover:bg-gray-100 transition"
@@ -336,7 +483,9 @@ const handleRegister = async (e: React.FormEvent) => {
 
         {/* Те, кто уже здесь */}
         <div className="border rounded-xl p-4 shadow-sm">
-          <h2 className="text-lg font-medium mb-2">{alreadyHereTitle[language]}</h2>
+          <h2 className="text-lg font-medium mb-2">
+            {alreadyHereTitle[language]}
+          </h2>
           <p className="text-sm text-gray-600 mb-1">
             {alreadyHereSubtitle[language]}
           </p>
@@ -371,39 +520,122 @@ const handleRegister = async (e: React.FormEvent) => {
           <p className="text-xs text-gray-500">{whoWeSeekNote[language]}</p>
         </div>
 
-{/* Регистрация / смена ника */}
-<div className="border rounded-xl p-4 shadow-sm space-y-3">
-  <h2 className="text-lg font-medium">
-    {isMember ? nicknameChangeTitle[language] : nicknameTitle[language]}
-  </h2>
-  <p className="text-sm text-gray-600">
-    {nicknameDescription[language]}
-  </p>
-  <form
-    onSubmit={handleRegister}
-    className="flex flex-col sm:flex-row gap-3"
-  >
-    <input
-      type="text"
-      className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
-      placeholder={nicknamePlaceholder[language]}
-      value={nicknameInput}
-      onChange={(e) => setNicknameInput(e.target.value)}
-    />
-    <button
-      type="submit"
-      className="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition"
-    >
-      {isMember ? nicknameChangeButton[language] : nicknameButton[language]}
-    </button>
-  </form>
-  {registerError && (
-    <p className="text-xs text-red-600">{registerError}</p>
-  )}
-</div>
+        {/* Связь с основателем */}
+        <div className="border rounded-xl p-4 shadow-sm space-y-3">
+          <h2 className="text-lg font-semibold">{contactTitle[language]}</h2>
+          <p className="text-sm text-gray-600">{contactIntro[language]}</p>
 
-{/* Чат */}
+          <form onSubmit={handleContactSubmit} className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700">
+                  {contactNameLabel[language]}
+                </label>
+                <input
+                  type="text"
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-300"
+                  placeholder={contactNamePlaceholder[language]}
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-gray-700">
+                  {contactMethodLabel[language]}
+                </label>
+                <input
+                  type="text"
+                  className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-300"
+                  placeholder={contactMethodPlaceholder[language]}
+                  value={contactMethod}
+                  onChange={(e) => setContactMethod(e.target.value)}
+                />
+              </div>
+            </div>
 
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-gray-700">
+                {contactMessageLabel[language]}
+              </label>
+              <textarea
+                className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-300 min-h-[80px] resize-y"
+                placeholder={contactMessagePlaceholder[language]}
+                value={contactMessage}
+                onChange={(e) => setContactMessage(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-start gap-2">
+              <input
+                id="contact-agree"
+                type="checkbox"
+                className="mt-1 h-4 w-4"
+                checked={contactAgree}
+                onChange={(e) => setContactAgree(e.target.checked)}
+              />
+              <label
+                htmlFor="contact-agree"
+                className="text-xs text-gray-600"
+              >
+                {contactConsentLabel[language]}
+              </label>
+            </div>
+
+            {contactError && (
+              <p className="text-xs text-red-600">{contactError}</p>
+            )}
+            {contactSuccess && (
+              <p className="text-xs text-green-600">{contactSuccess}</p>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={contactSending}
+                className={`px-4 py-2 rounded-lg text-white text-sm font-medium transition ${
+                  contactSending
+                    ? "bg-gray-300 cursor-not-allowed"
+                    : "bg-gray-900 hover:bg-gray-800"
+                }`}
+              >
+                {contactSending
+                  ? waitLabel(language, 2)
+                  : contactSubmitLabel[language]}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Регистрация / смена ника */}
+        <div className="border rounded-xl p-4 shadow-sm space-y-3">
+          <h2 className="text-lg font-medium">
+            {isMember ? nicknameChangeTitle[language] : nicknameTitle[language]}
+          </h2>
+          <p className="text-sm text-gray-600">
+            {nicknameDescription[language]}
+          </p>
+          <form
+            onSubmit={handleRegister}
+            className="flex flex-col sm:flex-row gap-3"
+          >
+            <input
+              type="text"
+              className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
+              placeholder={nicknamePlaceholder[language]}
+              value={nicknameInput}
+              onChange={(e) => setNicknameInput(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition"
+            >
+              {isMember ? nicknameChangeButton[language] : nicknameButton[language]}
+            </button>
+          </form>
+          {registerError && (
+            <p className="text-xs text-red-600">{registerError}</p>
+          )}
+        </div>
 
         {/* Чат */}
         <div className="border rounded-xl p-4 shadow-sm space-y-4">
@@ -487,8 +719,3 @@ const handleRegister = async (e: React.FormEvent) => {
 };
 
 export default JoinPage;
-
-
-
-
-

@@ -151,6 +151,13 @@ const nicknameButton: Record<Language, string> = {
   es: "Unirme",
 };
 
+const nicknameChangeButton: Record<Language, string> = {
+  ru: "Обновить ник",
+  en: "Update nickname",
+  de: "Nickname aktualisieren",
+  es: "Actualizar alias",
+};
+
 const openChatTitle: Record<Language, string> = {
   ru: "Открытый чат",
   en: "Open chat",
@@ -480,6 +487,7 @@ const handleRegister = async (e: React.FormEvent) => {
 };
 
 export default JoinPage;
+
 
 
 

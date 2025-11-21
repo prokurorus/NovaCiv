@@ -217,9 +217,19 @@ const JoinPage: React.FC = () => {
   const [messageInput, setMessageInput] = useState("");
   const [registerError, setRegisterError] = useState<string | null>(null);
 
+  const [hasJoinedFlag, setHasJoinedFlag] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("novaciv_joined_counted") === "1";
+    } catch {
+      return false;
+    }
+  });
+
   useEffect(() => {
     ensureVisitorCounted();
   }, [ensureVisitorCounted]);
+
 
   const handleLike = async () => {
     await like();
@@ -448,3 +458,4 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+

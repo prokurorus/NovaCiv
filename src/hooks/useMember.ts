@@ -1,8 +1,6 @@
 // src/hooks/useMember.ts
-import { useEffect, useState } from "react";
-import {
-  db
-} from "../lib/firebase";
+import { useEffect, useState, useCallback } from "react";
+import { db } from "../lib/firebase";
 import {
   onValue,
   ref,
@@ -15,99 +13,210 @@ import {
 
 export type MemberInfo = {
   memberId: string;
-  nickname: string;
+  nickname: string | null;
+  createdAt: number;
+  lastActiveAt: number;
 };
 
 const STORAGE_KEY = "novaciv_member";
 
+function createLocalId() {
+  return `local_${Math.random().toString(36).slice(2, 11)}`;
+}
+
 export function useMember() {
   const [member, setMember] = useState<MemberInfo>({
     memberId: "",
-    nickname: "",
+    nickname: null,
+    createdAt: 0,
+    lastActiveAt: 0,
   });
 
+  // На будущее — можно использовать для блока "кто уже здесь"
   const [recentMembers, setRecentMembers] = useState<MemberInfo[]>([]);
 
-  // читаем сохранённого участника из localStorage
+  // Инициализация участника
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed.memberId && parsed.nickname) {
-        setMember({
-          memberId: parsed.memberId,
-          nickname: parsed.nickname,
-        });
-      }
-    } catch (e) {
-      console.error("Failed to read member from localStorage", e);
-    }
-  }, []);
+    let isMounted = true;
 
-  // подписка на список последних участников
-  useEffect(() => {
-    const membersQuery = query(ref(db, "members"), limitToLast(20));
+    const init = async () => {
+      let stored: MemberInfo | null = null;
 
-    const unsubscribe = onValue(membersQuery, (snap) => {
-      const value = snap.val() as
-        | Record<string, { nickname: string }>
-        | null;
-
-      if (!value) {
-        setRecentMembers([]);
-        return;
+      try {
+        const raw =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(STORAGE_KEY)
+            : null;
+        if (raw) {
+          stored = JSON.parse(raw) as MemberInfo;
+        }
+      } catch (e) {
+        console.warn("Failed to read member from localStorage", e);
       }
 
-      const list: MemberInfo[] = Object.entries(value).map(([key, v]) => ({
-        memberId: key,
-        nickname: v.nickname,
-      }));
+      const now = Date.now();
 
-      setRecentMembers(list);
+      // Если уже есть локальный участник — обновим активность
+      if (stored && stored.memberId) {
+        const updated: MemberInfo = {
+          ...stored,
+          lastActiveAt: now,
+        };
+
+        try {
+          await set(ref(db, `members/${updated.memberId}`), {
+            ...updated,
+            createdAtServer: stored.createdAt || now,
+            lastActiveAtServer: serverTimestamp(),
+          });
+        } catch (e) {
+          console.error("Failed to sync existing member to Firebase", e);
+        }
+
+        if (isMounted) {
+          setMember(updated);
+        }
+
+        try {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          }
+        } catch (e) {
+          console.warn("Failed to update member in localStorage", e);
+        }
+      } else {
+        // Иначе создаём нового участника без ника
+        const membersRef = ref(db, "members");
+        const newRef = push(membersRef);
+        const memberId = newRef.key || createLocalId();
+
+        const fresh: MemberInfo = {
+          memberId,
+          nickname: null,
+          createdAt: now,
+          lastActiveAt: now,
+        };
+
+        try {
+          await set(ref(db, `members/${memberId}`), {
+            ...fresh,
+            createdAtServer: serverTimestamp(),
+            lastActiveAtServer: serverTimestamp(),
+          });
+        } catch (e) {
+          console.error("Failed to create member in Firebase", e);
+        }
+
+        if (isMounted) {
+          setMember(fresh);
+        }
+
+        try {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+          }
+        } catch (e) {
+          console.warn("Failed to save new member to localStorage", e);
+        }
+      }
+
+      // Подписка на недавних участников (на будущее)
+      const recentRef = query(ref(db, "members"), limitToLast(20));
+      const unsubscribe = onValue(recentRef, (snapshot) => {
+        const value = snapshot.val() || {};
+        const list: MemberInfo[] = Object.values(value).map((raw: any) => ({
+          memberId: raw.memberId ?? "",
+          nickname: raw.nickname ?? null,
+          createdAt: raw.createdAt ?? 0,
+          lastActiveAt: raw.lastActiveAt ?? 0,
+        }));
+
+        list.sort(
+          (a, b) =>
+            (b.lastActiveAt || b.createdAt || 0) -
+            (a.lastActiveAt || a.createdAt || 0)
+        );
+
+        if (isMounted) {
+          setRecentMembers(list);
+        }
+      });
+
+      return unsubscribe;
+    };
+
+    let cleanup: (() => void) | undefined;
+
+    init().then((unsub) => {
+      cleanup = unsub as any;
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      if (cleanup) cleanup();
+    };
   }, []);
 
-  // регистрация ника
-  async function registerNickname(rawNickname: string) {
-    const nickname = rawNickname.trim();
-    if (!nickname) return null;
+  // Регистрация или смена ника
+  const registerNickname = useCallback(
+    async (rawNickname: string): Promise<boolean> => {
+      const nickname = rawNickname.trim();
 
-    let current = member;
+      if (!nickname) {
+        return false;
+      }
 
-    // если ещё нет id — создаём нового участника
-    if (!current.memberId) {
-      const newRef = push(ref(db, "members"));
-      const memberId = newRef.key ?? "";
+      // Простая защита от слишком длинных ников
+      if (nickname.length > 32) {
+        return false;
+      }
 
-      await set(newRef, {
+      const now = Date.now();
+      let current = member;
+
+      // На всякий случай: если member ещё не инициализирован
+      if (!current.memberId) {
+        const membersRef = ref(db, "members");
+        const newRef = push(membersRef);
+        const memberId = newRef.key || createLocalId();
+
+        current = {
+          memberId,
+          nickname: null,
+          createdAt: now,
+          lastActiveAt: now,
+        };
+      }
+
+      const updated: MemberInfo = {
+        ...current,
         nickname,
-        createdAt: serverTimestamp(),
-      });
+        lastActiveAt: now,
+      };
 
-      current = { memberId, nickname };
-    } else {
-      // обновляем ник существующего участника
-      await set(ref(db, `members/${current.memberId}`), {
-        nickname,
-        updatedAt: serverTimestamp(),
-      });
+      try {
+        await set(ref(db, `members/${updated.memberId}`), {
+          ...updated,
+          lastActiveAtServer: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error("Failed to save nickname to Firebase", e);
+      }
 
-      current = { ...current, nickname };
-    }
+      setMember(updated);
 
-    setMember(current);
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        }
+      } catch (e) {
+        console.warn("Failed to write member to localStorage", e);
+      }
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-    } catch (e) {
-      console.error("Failed to save member to localStorage", e);
-    }
-
-    return current;
-  }
+      return true;
+    },
+    [member]
+  );
 
   return { member, recentMembers, registerNickname };
 }

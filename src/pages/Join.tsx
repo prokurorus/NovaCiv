@@ -235,27 +235,39 @@ const JoinPage: React.FC = () => {
     await like();
   };
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRegisterError(null);
+const handleRegister = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setRegisterError(null);
 
-    const result = await registerNickname(nicknameInput);
-    if (!result) {
-      setRegisterError(
-        language === "ru"
-          ? "Введите ник."
-          : language === "de"
-          ? "Bitte Nickname eingeben."
-          : language === "es"
-          ? "Introduce un alias."
-          : "Please enter a nickname."
-      );
-      return;
+  const result = await registerNickname(nicknameInput);
+  if (!result) {
+    setRegisterError(
+      language === "ru"
+        ? "Введите ник."
+        : language === "de"
+        ? "Bitte Nickname eingeben."
+        : language === "es"
+        ? "Introduce un alias."
+        : "Please enter a nickname."
+    );
+    return;
+  }
+
+  setNicknameInput("");
+
+  try {
+    if (!hasJoinedFlag) {
+      await joined();
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("novaciv_joined_counted", "1");
+      }
+      setHasJoinedFlag(true);
     }
+  } catch (e) {
+    console.error("Failed to increment joined counter", e);
+  }
+};
 
-    setNicknameInput("");
-    joined();
-  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -458,4 +470,5 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+
 

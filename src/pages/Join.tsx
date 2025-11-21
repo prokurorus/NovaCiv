@@ -357,36 +357,39 @@ const handleRegister = async (e: React.FormEvent) => {
           <p className="text-xs text-gray-500">{whoWeSeekNote[language]}</p>
         </div>
 
-        {/* Регистрация ника */}
-        {!isMember && (
-          <div className="border rounded-xl p-4 shadow-sm space-y-3">
-            <h2 className="text-lg font-medium">{nicknameTitle[language]}</h2>
-            <p className="text-sm text-gray-600">
-              {nicknameDescription[language]}
-            </p>
-            <form
-              onSubmit={handleRegister}
-              className="flex flex-col sm:flex-row gap-3"
-            >
-              <input
-                type="text"
-                className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
-                placeholder={nicknamePlaceholder[language]}
-                value={nicknameInput}
-                onChange={(e) => setNicknameInput(e.target.value)}
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition"
-              >
-                {nicknameButton[language]}
-              </button>
-            </form>
-            {registerError && (
-              <div className="text-sm text-red-600">{registerError}</div>
-            )}
-          </div>
-        )}
+{/* Регистрация / смена ника */}
+<div className="border rounded-xl p-4 shadow-sm space-y-3">
+  <h2 className="text-lg font-medium">
+    {isMember ? nicknameChangeTitle[language] : nicknameTitle[language]}
+  </h2>
+  <p className="text-sm text-gray-600">
+    {nicknameDescription[language]}
+  </p>
+  <form
+    onSubmit={handleRegister}
+    className="flex flex-col sm:flex-row gap-3"
+  >
+    <input
+      type="text"
+      className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-gray-300"
+      placeholder={nicknamePlaceholder[language]}
+      value={nicknameInput}
+      onChange={(e) => setNicknameInput(e.target.value)}
+    />
+    <button
+      type="submit"
+      className="px-4 py-2 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition"
+    >
+      {isMember ? nicknameChangeButton[language] : nicknameButton[language]}
+    </button>
+  </form>
+  {registerError && (
+    <p className="text-xs text-red-600">{registerError}</p>
+  )}
+</div>
+
+{/* Чат */}
+
 
         {/* Чат */}
         <div className="border rounded-xl p-4 shadow-sm space-y-4">
@@ -470,5 +473,6 @@ const handleRegister = async (e: React.FormEvent) => {
 };
 
 export default JoinPage;
+
 
 

@@ -21,6 +21,11 @@ type Topic = {
   authorNickname?: string | null;
 };
 
+type PostsMeta = {
+  repliesCount: number;
+  lastReplyAt: number | null;
+};
+
 const sectionLabels: Record<string, Record<Language, string>> = {
   general: {
     ru: "Общее",
@@ -120,20 +125,20 @@ function getSectionLabel(section: string, language: Language): string {
 const ForumPage: React.FC = () => {
   const { language } = useLanguage();
   const { member } = useMember();
+
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [postsMeta, setPostsMeta] = useState<Record<string, PostsMeta>>({});
   const [loading, setLoading] = useState(true);
+
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [section, setSection] = useState<keyof typeof sectionLabels>("general");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // загрузка тем
+  // Загрузка тем
   useEffect(() => {
-    const topicsRef = query(
-      ref(db, "forum/topics"),
-      orderByChild("createdAt")
-    );
+    const topicsRef = query(ref(db, "forum/topics"), orderByChild("createdAt"));
 
     const unsubscribe = onValue(topicsRef, (snapshot) => {
       const value = snapshot.val() || {};
@@ -149,9 +154,39 @@ const ForumPage: React.FC = () => {
         };
       });
 
-      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setTopics(list);
       setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Метаданные по ответам: количество и время последнего ответа
+  useEffect(() => {
+    const postsRef = ref(db, "forum/posts");
+
+    const unsubscribe = onValue(postsRef, (snapshot) => {
+      const value = snapshot.val() || {};
+      const meta: Record<string, PostsMeta> = {};
+
+      Object.entries(value).forEach(([topicId, postsRaw]) => {
+        const postsForTopic = postsRaw as any;
+        let count = 0;
+        let last = 0;
+
+        Object.values(postsForTopic).forEach((p: any) => {
+          count += 1;
+          const ts = p.createdAt || 0;
+          if (ts > last) last = ts;
+        });
+
+        meta[topicId] = {
+          repliesCount: count,
+          lastReplyAt: last || null,
+        };
+      });
+
+      setPostsMeta(meta);
     });
 
     return () => unsubscribe();
@@ -192,6 +227,26 @@ const ForumPage: React.FC = () => {
 
   const t = (key: keyof typeof labels) => labels[key][language];
 
+  const langCode =
+    language === "ru"
+      ? "ru-RU"
+      : language === "de"
+      ? "de-DE"
+      : language === "es"
+      ? "es-ES"
+      : "en-US";
+
+  // Темы, отсортированные по последней активности (ответ или создание)
+  const orderedTopics = [...topics].sort((a, b) => {
+    const aMeta = postsMeta[a.id];
+    const bMeta = postsMeta[b.id];
+
+    const aLast = (aMeta?.lastReplyAt || a.createdAt || 0) as number;
+    const bLast = (bMeta?.lastReplyAt || b.createdAt || 0) as number;
+
+    return bLast - aLast;
+  });
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-white to-zinc-50 text-zinc-900">
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
@@ -222,55 +277,56 @@ const ForumPage: React.FC = () => {
             </h2>
 
             <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-900/5 p-4 space-y-3">
-              {loading && (
-                <p className="text-xs text-zinc-500">…</p>
+              {loading && <p className="text-xs text-zinc-500">…</p>}
+
+              {!loading && orderedTopics.length === 0 && (
+                <p className="text-sm text-zinc-500">{t("noTopics")}</p>
               )}
 
-              {!loading && topics.length === 0 && (
-                <p className="text-sm text-zinc-500">
-                  {t("noTopics")}
-                </p>
-              )}
+              {orderedTopics.map((topic) => {
+                const meta = postsMeta[topic.id];
+                const replies = meta?.repliesCount ?? 0;
+                const lastActivity =
+                  meta?.lastReplyAt || topic.createdAt || null;
 
-              {topics.map((topic) => (
-                <a
-                  key={topic.id}
-                  href={`/forum/${topic.id}`}
-                  className="block rounded-xl border border-zinc-200 px-3 py-2.5 hover:border-zinc-400 hover:bg-zinc-50 transition"
-                >
-                  <div className="flex items-center justify-between gap-3 mb-1">
-                    <h3 className="text-sm font-semibold text-zinc-900">
-                      {topic.title}
-                    </h3>
-                    <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
-                      {getSectionLabel(topic.section, language)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-zinc-600 line-clamp-2">
-                    {topic.content}
-                  </p>
-                  <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
-                    <span>
-                      {topic.authorNickname
-                        ? `@${topic.authorNickname}`
-                        : "anon"}
-                    </span>
-                    {topic.createdAt && (
+                return (
+                  <a
+                    key={topic.id}
+                    href={`/forum/${topic.id}`}
+                    className="block rounded-xl border border-zinc-200 px-3 py-2.5 hover:border-zinc-400 hover:bg-zinc-50 transition"
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <h3 className="text-sm font-semibold text-zinc-900">
+                        {topic.title}
+                      </h3>
+                      <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                        {getSectionLabel(topic.section, language)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-600 line-clamp-2">
+                      {topic.content}
+                    </p>
+                    <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
                       <span>
-                        {new Date(topic.createdAt).toLocaleString(
-                          language === "ru"
-                            ? "ru-RU"
-                            : language === "de"
-                            ? "de-DE"
-                            : language === "es"
-                            ? "es-ES"
-                            : "en-US"
+                        {topic.authorNickname
+                          ? `@${topic.authorNickname}`
+                          : "anon"}
+                      </span>
+                      <span className="inline-flex items-center gap-3">
+                        <span className="inline-flex items-center gap-1">
+                          <span>💬</span>
+                          <span>{replies}</span>
+                        </span>
+                        {lastActivity && (
+                          <span>
+                            {new Date(lastActivity).toLocaleString(langCode)}
+                          </span>
                         )}
                       </span>
-                    )}
-                  </div>
-                </a>
-              ))}
+                    </div>
+                  </a>
+                );
+              })}
             </div>
           </div>
 
@@ -279,9 +335,7 @@ const ForumPage: React.FC = () => {
             <h2 className="text-sm font-semibold text-zinc-700">
               {t("newTopicTitle")}
             </h2>
-            <p className="text-xs text-zinc-500">
-              {labels.intro[language]}
-            </p>
+            <p className="text-xs text-zinc-500">{labels.intro[language]}</p>
 
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1">

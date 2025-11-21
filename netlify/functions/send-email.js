@@ -1,26 +1,61 @@
-import sgMail from "@sendgrid/mail";
+// netlify/functions/send-email.js
+const sgMail = require("@sendgrid/mail");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-export const handler = async (event, context) => {
-  try {
-    const data = JSON.parse(event.body);
+exports.handler = async (event, context) => {
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({ error: "Method not allowed" }),
+    };
+  }
 
+  let data;
+  try {
+    data = JSON.parse(event.body || "{}");
+  } catch (e) {
+    console.error("Invalid JSON body", e);
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Invalid JSON" }),
+    };
+  }
+
+  const {
+    nickname = "Без ника",
+    contact = "Не указан",
+    message = "",
+    language = "ru",
+    memberId = null,
+  } = data;
+
+  if (!message || !contact) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "Missing message or contact" }),
+    };
+  }
+
+  try {
     await sgMail.send({
       to: "prokurorus2@gmail.com", // твой email
       from: "noreply@novaciv.space",
       subject: "Новое обращение на сайте NovaCiv",
       text: `
-Новый запрос от участника:
-Имя/ник: ${data.nickname}
-Контакт: ${data.contact}
-Сообщение:
-${data.message}
+Новое обращение на NovaCiv.
 
-Язык: ${data.language}
-memberId: ${data.memberId}
+Имя/ник: ${nickname}
+Контакт: ${contact}
+
+Сообщение:
+${message}
+
+Язык: ${language}
+memberId: ${memberId ?? "нет"}
+
 Дата: ${new Date().toLocaleString("ru-RU")}
-      `,
+      `.trim(),
     });
 
     return {

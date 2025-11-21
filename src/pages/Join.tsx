@@ -123,6 +123,13 @@ const nicknameTitle: Record<Language, string> = {
   es: "Elige tu alias",
 };
 
+const nicknameChangeTitle: Record<Language, string> = {
+  ru: "Смена ника",
+  en: "Change nickname",
+  de: "Nickname ändern",
+  es: "Cambiar alias",
+};
+
 const nicknameDescription: Record<Language, string> = {
   ru: "Ник будет виден в общем чате. Позже можно будет усложнить систему регистрации, но сейчас главное — живая лента и реальные люди.",
   en: "Your nickname will be visible in the public chat. Later we can make registration more complex, but for now the main thing is a live feed and real people.",
@@ -473,6 +480,7 @@ const handleRegister = async (e: React.FormEvent) => {
 };
 
 export default JoinPage;
+
 
 
 

@@ -20,11 +20,21 @@ exports.handler = async (event) => {
     const memberId = data.memberId || "unknown";
 
     const msg = {
-      to: "prokurorus3@gmail.com", // куда отправляем
+      // КУДА отправляем — остаётся твой Gmail
+      to: "prokurorus3@gmail.com",
+
+      // ОТ КОГО — теперь доменный адрес NovaCiv
       from: {
-        email: "prokurorus3@gmail.com", // ОТПРАВИТЕЛЬ — ТВОЙ ПОДТВЕРЖДЁННЫЙ АДРЕС
+        email: "no-reply@novaciv.space",
         name: "NovaCiv Website",
       },
+
+      // Куда пойдут ответы при нажатии "Ответить" в почте
+      replyTo: {
+        email: "prokurorus3@gmail.com",
+        name: "Ruslan Nejerenco",
+      },
+
       subject: "Новое обращение на сайте NovaCiv",
       text: `
 Новое обращение на сайте NovaCiv

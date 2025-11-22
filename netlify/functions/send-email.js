@@ -6,9 +6,46 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 function isValidEmail(value) {
   if (!value) return false;
   const trimmed = String(value).trim();
-  // Без пробелов, один @, есть точка после @
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(trimmed);
+}
+
+// Отправка уведомления в Telegram
+async function sendTelegramNotification({ nickname, contact, message, language, memberId }) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    console.warn("Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID");
+    return;
+  }
+
+  const text =
+    `Новое обращение на сайте NovaCiv\n\n` +
+    `Псевдоним: ${nickname}\n` +
+    `Контакт: ${contact}\n` +
+    `Язык сайта: ${language}\n` +
+    `ID участника: ${memberId}\n\n` +
+    `Сообщение:\n${message}`;
+
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Telegram API error:", res.status, body);
+    }
+  } catch (err) {
+    console.error("Telegram send error:", err);
+  }
 }
 
 exports.handler = async (event) => {
@@ -159,7 +196,7 @@ https://novaciv.space
       messages.push(userMsg);
     }
 
-    // Отправляем одно или два письма сразу
+    // 3) Отправляем одно или два письма
     const response = await sgMail.send(messages);
 
     console.log(
@@ -168,6 +205,9 @@ https://novaciv.space
         ? response.map((r) => r.statusCode).join(", ")
         : response.statusCode
     );
+
+    // 4) Отправляем уведомление в Telegram (не ломает функцию при ошибке)
+    await sendTelegramNotification({ nickname, contact, message, language, memberId });
 
     return {
       statusCode: 200,

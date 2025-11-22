@@ -312,30 +312,51 @@ function MainScreen() {
                   {t.home.manifestoSummary.content}
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
                   href="/Manifesto-ru"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Manifesto (RU)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    RU
+                  </span>
                 </a>
                 <a
                   href="/Manifesto-en"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Manifesto (EN)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    EN
+                  </span>
                 </a>
                 <a
                   href="/Manifesto-de"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Manifesto (DE)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifest
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    DE
+                  </span>
                 </a>
                 <a
                   href="/Manifesto-es"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Manifesto (ES)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifiesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    ES
+                  </span>
                 </a>
               </div>
             </div>
@@ -353,35 +374,57 @@ function MainScreen() {
                   {t.charter.sections[0]?.content}
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
                   href="/Charter-ru"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Charter (RU)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charter
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    RU
+                  </span>
                 </a>
                 <a
                   href="/Charter-en"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Charter (EN)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charter
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    EN
+                  </span>
                 </a>
                 <a
                   href="/Charter-de"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Charter (DE)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charta
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    DE
+                  </span>
                 </a>
                 <a
                   href="/Charter-es"
-                  className="underline text-blue-700 hover:text-zinc-900"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  Charter (ES)
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Carta
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    ES
+                  </span>
                 </a>
               </div>
             </div>
           </div>
         </section>
+
 
         {/* ПРИСОЕДИНИТЬСЯ + ФОРУМ */}
         <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 shadow-sm">

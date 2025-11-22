@@ -2,6 +2,15 @@ const sgMail = require("@sendgrid/mail");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+// Простая проверка, похоже ли поле на email
+function isValidEmail(value) {
+  if (!value) return false;
+  const trimmed = String(value).trim();
+  // Без пробелов, один @, есть точка после @
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(trimmed);
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return {
@@ -19,17 +28,15 @@ exports.handler = async (event) => {
     const language = data.language || "unknown";
     const memberId = data.memberId || "unknown";
 
-    const msg = {
-      // КУДА отправляем — твой Gmail
+    // 1) Письмо основателю
+    const adminMsg = {
       to: "prokurorus3@gmail.com",
 
-      // ОТ КОГО — доменный адрес NovaCiv
       from: {
         email: "no-reply@novaciv.space",
         name: "NovaCiv Website",
       },
 
-      // Куда пойдут ответы при нажатии "Ответить" в почте
       replyTo: {
         email: "prokurorus3@gmail.com",
         name: "Ruslan Nejerenco",
@@ -37,7 +44,6 @@ exports.handler = async (event) => {
 
       subject: "Новое обращение на сайте NovaCiv",
 
-      // Текстовый вариант (fallback)
       text: `
 Новое обращение на сайте NovaCiv
 
@@ -50,7 +56,6 @@ ID участника: ${memberId}
 ${message}
       `.trim(),
 
-      // Красивый HTML-шаблон
       html: `
 <div style="font-family: Arial, sans-serif; background: #ffffff; padding: 24px; border-radius: 8px; border: 1px solid #e5e7eb; max-width: 600px; margin: 0 auto;">
   <h2 style="margin-top: 0; color: #111827; font-size: 20px;">
@@ -77,9 +82,92 @@ ${message}
       `,
     };
 
-    const [response] = await sgMail.send(msg);
+    const messages = [adminMsg];
 
-    console.log("SendGrid response status:", response.statusCode);
+    // 2) Письмо-подтверждение пользователю (если контакт — email)
+    if (isValidEmail(contact)) {
+      const userMsg = {
+        to: contact.trim(),
+
+        from: {
+          email: "no-reply@novaciv.space",
+          name: "NovaCiv",
+        },
+
+        replyTo: {
+          email: "prokurorus3@gmail.com",
+          name: "NovaCiv Foundation",
+        },
+
+        subject: "Твоё обращение получено | NovaCiv",
+
+        text: `
+Привет!
+
+Твоё сообщение успешно отправлено основателю проекта NovaCiv.
+
+Кратко данные обращения:
+Псевдоним: ${nickname}
+Язык сайта: ${language}
+ID участника: ${memberId}
+
+Текст сообщения:
+${message}
+
+Спасибо за готовность участвовать и помогать.
+С уважением,
+NovaCiv
+https://novaciv.space
+        `.trim(),
+
+        html: `
+<div style="font-family: Arial, sans-serif; background: #ffffff; padding: 24px; border-radius: 8px; border: 1px solid #e5e7eb; max-width: 600px; margin: 0 auto;">
+  <h2 style="margin-top: 0; color: #111827; font-size: 20px;">
+    Спасибо за обращение в <strong>NovaCiv</strong>
+  </h2>
+
+  <p style="margin: 0 0 12px 0; color: #374151;">
+    Привет, ${nickname || "друг"}!
+  </p>
+
+  <p style="margin: 0 0 12px 0; color: #374151;">
+    Твоё сообщение успешно отправлено основателю NovaCiv.
+    Ответ придёт на адрес: <strong>${contact}</strong>.
+  </p>
+
+  <p style="margin: 0 0 12px 0; color: #374151;">
+    <strong>Кратко данные обращения:</strong><br>
+    Псевдоним: ${nickname}<br>
+    Язык сайта: ${language}<br>
+    ID участника: ${memberId}
+  </p>
+
+  <div style="margin: 20px 0; padding: 12px 16px; background: #f9fafb; border-left: 3px solid #10b981;">
+    <strong style="color:#111827;">Твой текст:</strong><br>
+    <div style="white-space: pre-wrap; color: #374151;">${message}</div>
+  </div>
+
+  <p style="font-size: 12px; color: #6b7280; margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 12px;">
+    Это автоматическое письмо подтверждения с сайта
+    <a href="https://novaciv.space" style="color:#3b82f6; text-decoration:none;">NovaCiv</a>.<br>
+    Если ты не оставлял это обращение, просто проигнорируй письмо.
+  </p>
+</div>
+        `,
+      };
+
+      messages.push(userMsg);
+    }
+
+    // Отправляем одно или два письма сразу
+    const response = await sgMail.send(messages);
+
+    console.log(
+      "SendGrid response status codes:",
+      Array.isArray(response)
+        ? response.map((r) => r.statusCode).join(", ")
+        : response.statusCode
+    );
 
     return {
       statusCode: 200,

@@ -540,6 +540,22 @@ const JoinPage: React.FC = () => {
             ))}
           </ul>
           <p className="text-xs text-gray-500">{whoWeSeekNote[language]}</p>
+
+          {/* Product Hunt badge */}
+          <div className="pt-3 flex justify-center">
+            <a
+              href="https://www.producthunt.com/products/novaciv-new-civilization?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-novaciv-new-civilization"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block"
+            >
+              <img
+                src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1041241&theme=neutral&t=1763840299165"
+                alt="NovaCiv — New Civilization - A transparent civilization without rulers, only citizens | Product Hunt"
+                className="h-12 w-auto rounded-lg shadow-sm"
+              />
+            </a>
+          </div>
         </div>
 
         {/* Связь с основателем */}

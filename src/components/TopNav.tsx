@@ -75,37 +75,53 @@ export default function TopNav() {
   ];
 
   return (
-    <div className="w-full border-b border-zinc-200 bg-white/90 backdrop-blur-md sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        {/* Логотип */}
-        <a
-          href="/"
-          className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
-        >
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          NovaCiv
-        </a>
+    <header className="w-full border-b border-zinc-200 bg-white/90 backdrop-blur-md sticky top-0 z-40">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3">
+        {/* Логотип / заголовок */}
+        <div className="flex items-center justify-between gap-3">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
+          >
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            NovaCiv
+          </a>
+        </div>
 
-        {/* Меню с переносом строк, как в MobilTruck */}
-        <nav className="w-full md:w-auto">
-          <div className="flex flex-wrap justify-start md:justify-center gap-2">
-            {items.map((item) => (
-              <a
-                key={item.id}
-                href={item.href}
-                className={
-                  "px-4 py-1.5 rounded-full border text-sm flex-shrink-0 transition " +
-                  (item.active
-                    ? "bg-zinc-900 border-zinc-900 text-white shadow-sm"
-                    : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50")
-                }
-              >
-                {item.label[language]}
-              </a>
-            ))}
+        {/* Вертикальное меню-карточки (в стиле Mobil Truck, но под эстетику NovaCiv) */}
+        <nav className="w-full">
+          <div className="flex flex-col gap-2">
+            {items.map((item) => {
+              const isActive = item.active;
+
+              const baseClasses =
+                "w-full inline-flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-medium transition shadow-sm";
+              const activeClasses =
+                "bg-zinc-900 border-zinc-900 text-white shadow-[0_14px_40px_rgba(15,23,42,0.35)]";
+              const defaultClasses =
+                "bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-50 hover:border-zinc-300";
+
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  className={`${baseClasses} ${
+                    isActive ? activeClasses : defaultClasses
+                  }`}
+                >
+                  <span>{item.label[language]}</span>
+                  <span
+                    className={
+                      "h-1.5 w-1.5 rounded-full " +
+                      (isActive ? "bg-emerald-400" : "bg-zinc-200")
+                    }
+                  />
+                </a>
+              );
+            })}
           </div>
         </nav>
       </div>
-    </div>
+    </header>
   );
 }

@@ -1,87 +1,107 @@
-// netlify/functions/ai-domovoy.js
+import fs from "fs";
+import path from "path";
+import OpenAI from "openai";
 
-exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: "Method Not Allowed" }),
-    };
-  }
+let manifestoRU = "";
+let charterRU = "";
+let loaded = false;
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        error: "OPENAI_API_KEY is not set on the server",
-      }),
-    };
-  }
+// ----------- Загружаем Устав и Манифест (один раз при старте функции) ----------
+function loadContext() {
+  if (loaded) return;
 
   try {
+    const base = path.resolve("./src/data");
+    manifestoRU = fs.readFileSync(path.join(base, "manifesto_ru.txt"), "utf8");
+    charterRU = fs.readFileSync(path.join(base, "charter_ru.txt"), "utf8");
+    loaded = true;
+  } catch (e) {
+    console.error("Контекст NovaCiv не загружен:", e);
+    manifestoRU = "";
+    charterRU = "";
+  }
+}
+
+loadContext();
+
+// --------------------- OpenAI --------------------------
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// --------------------- Хелпер --------------------------
+function sliceText(text, maxChars) {
+  if (!text) return "";
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+export const handler = async (event) => {
+  try {
     const body = JSON.parse(event.body || "{}");
+    const { language, page, messages } = body;
 
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    const language = body.language || "ru";
-    const page = body.page || "/";
+    loadContext();
 
-    // Фолбэк — если сообщений нет, задаём системную рамку
-    const finalMessages =
-      messages.length > 0
-        ? messages
-        : [
-            {
-              role: "system",
-              content:
-                "You are a helpful AI assistant (Домовой) of the NovaCiv project (novaciv.space). " +
-                "Answer concisely, clearly and kindly. The user is likely Russian-speaking. " +
-                "Website language: " +
-                language +
-                ". Current page: " +
-                page +
-                ".",
-            },
-          ];
+    // вырезаем первые 20k символов (хватит для смысла)
+    const manifestoSlice = sliceText(manifestoRU, 20000);
+    const charterSlice = sliceText(charterRU, 20000);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-        messages: finalMessages,
-        temperature: 0.4,
-        max_tokens: 600,
-      }),
+    const systemPrompt = `
+Ты — Домовой проекта NovaCiv.  
+Ты — не хозяин и не учитель. Ты — хранитель смысла, спокойный и честный собеседник.
+
+Говори просто, тепло и по делу.  
+Если пользователь обращается по-русски — отвечай по-русски.  
+Если на другом языке — отвечай на том языке, который он использовал.
+
+Ты опираешься на:
+— Манифест NovaCiv (философия, смысл, мировоззрение);
+— Устав NovaCiv (структура, правила, принципы).
+
+Но никогда не цитируешь дословно слишком большие куски.  
+Ты **кратко пересказываешь**, объясняешь по сути и говоришь естественно.
+
+Ты не приказываешь, не морализируешь.  
+Твоя задача — помогать, объяснять, поддерживать и быть честным.
+
+--------- Краткий контекст ----------
+${manifestoSlice}
+-------------------------------------
+
+${charterSlice}
+-------------------------------------
+
+Страница, с которой задают вопрос: ${page}
+Язык интерфейса: ${language}
+
+Отвечай так, как будто ты — живая часть NovaCiv.
+    `;
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      ],
+      max_tokens: 250,
+      temperature: 0.4,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          error: `OpenAI chat API error: HTTP ${response.status} – ${text}`,
-        }),
-      };
-    }
-
-    const data = await response.json();
-    const answer =
-      data.choices?.[0]?.message?.content?.trim() ||
-      "Извини, я сейчас не могу ответить. Попробуй ещё раз чуть позже.";
+    const answer = completion.choices?.[0]?.message?.content || "";
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answer }),
     };
-  } catch (err) {
+  } catch (error) {
+    console.error("Ошибка:", error);
     return {
-      statusCode: 200,
+      statusCode: 500,
       body: JSON.stringify({
-        error: `AI runtime error: ${String(err)}`,
+        error: "Ошибка при обработке запроса.",
       }),
     };
   }

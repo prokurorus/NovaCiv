@@ -1,170 +1,140 @@
-import React from "react";
-import { useLanguage } from "../context/LanguageContext";
-import type { Language } from "../types/language";
+// netlify/functions/ai-domovoy.js
 
-const manifestoPathByLang: Record<Language, string> = {
-  ru: "/Manifesto-ru",
-  en: "/Manifesto-en",
-  de: "/Manifesto-de",
-  es: "/Manifesto-es",
-};
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: JSON.stringify({ error: "Method Not Allowed" }),
+    };
+  }
 
-const charterPathByLang: Record<Language, string> = {
-  ru: "/Charter-ru",
-  en: "/Charter-en",
-  de: "/Charter-de",
-  es: "/Charter-es",
-};
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        error: "OPENAI_API_KEY is not set on the server",
+      }),
+    };
+  }
 
-export default function TopNav() {
-  const { language } = useLanguage();
-  const pathname = window.location.pathname;
-  const [isOpen, setIsOpen] = React.useState(false);
+  let body;
+  try {
+    body = JSON.parse(event.body || "{}");
+  } catch (e) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ error: "Invalid JSON in request body" }),
+    };
+  }
 
-  const items = [
+  const userMessages = Array.isArray(body.messages) ? body.messages : [];
+  const language = body.language || "ru";
+  const page = body.page || "/";
+
+  const projectContext =
+    "NovaCiv is a digital civilization project with a public Charter and Manifesto. " +
+    "It stands for non-violence, direct democracy, transparency of power, scientific development " +
+    "and protection of life and reason as the highest values. " +
+    "The site novaciv.space hosts the Manifesto and the Charter in several languages, " +
+    "a Join page with an open chat and counters (visitors / likes / joined), and a simple forum in development. " +
+    "You are not a decision-maker of the community, only a helper and explainer. " +
+    "If the user asks something that requires legal precision (for example, about the Charter), " +
+    "you should answer carefully and recommend reading the official text on the site.";
+
+const systemPrompt =
+  "You are the AI house spirit of NovaCiv — 'Домовой'. " +
+  "Ты говоришь кратко, по-дружески и честно, без заискивания и выдумок. " +
+  "Твоя задача — помогать людям разобраться, что такое NovaCiv, куда нажать, что посмотреть, " +
+  "и направлять к нужным разделам сайта. " +
+
+  "Говори только то, что действительно известно. Если чего-то нет или ты не уверен — так и скажи. " +
+  "Не обещай функций, которых на сайте ещё нет. " +
+
+  "Отвечай строго на том языке, на котором последний вопрос пользователя. " +
+
+  "Проект NovaCiv: цифровая цивилизация будущего. Основа — Манифест, Устав, принципы ненасилия, " +
+  "прямая демократия, прозрачность решений, ценность жизни и разума, научное развитие, открытость к миру. " +
+  
+  "На сайте есть страницы: " +
+  "— /Manifesto-ru, /en, /de, /es — Манифест; " +
+  "— /Charter-ru, /en, /de, /es — Устав; " +
+  "— /join — присоединиться, реальные счётчики людей; " +
+  "— /forum — обсуждения участников. " +
+
+  "Если вопрос касается участия — предложи страницу /join. " +
+  "Если вопрос философский — упомяни Манифест. " +
+  "Если вопрос юридический о правах — направь читать Устав, без трактовок. " +
+  "Если про общение — предложи форум. " +
+
+  "Ты не власть, не представитель Совета и не принимаешь решений — ты только помогаешь. " +
+  "Будь спокойным, тёплым, умным и чуть ироничным. " +
+  "Текущая страница: " + page + ".";
+
+
+  const messages = [
     {
-      id: "home",
-      href: "/",
-      label: { ru: "Главная", en: "Home", de: "Start", es: "Inicio" },
-      active: pathname === "/",
+      role: "system",
+      content: systemPrompt,
     },
-    {
-      id: "vision",
-      href: "/vision",
-      label: {
-        ru: "Наше видение",
-        en: "Vision",
-        de: "Vision",
-        es: "Visión",
-      },
-      active: pathname === "/vision",
-    },
-    {
-      id: "manifesto",
-      href: manifestoPathByLang[language],
-      label: {
-        ru: "Манифест",
-        en: "Manifesto",
-        de: "Manifest",
-        es: "Manifiesto",
-      },
-      active: pathname.startsWith("/Manifesto"),
-    },
-    {
-      id: "charter",
-      href: charterPathByLang[language],
-      label: { ru: "Устав", en: "Charter", de: "Charta", es: "Carta" },
-      active: pathname.startsWith("/Charter"),
-    },
-    {
-      id: "join",
-      href: "/join",
-      label: {
-        ru: "Присоединиться",
-        en: "Join",
-        de: "Beitreten",
-        es: "Unirse",
-      },
-      active: pathname === "/join",
-    },
-    {
-      id: "forum",
-      href: "/forum",
-      label: { ru: "Форум", en: "Forum", de: "Forum", es: "Foro" },
-      active: pathname === "/forum" || pathname.startsWith("/forum/"),
-    },
+    ...userMessages,
   ];
 
-  const handleItemClick = () => {
-    // На телефоне после клика сворачиваем меню
-    if (window.innerWidth < 768) {
-      setIsOpen(false);
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages,
+        temperature: 0.4,
+        max_tokens: 500,
+      }),
+    });
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          error: `OpenAI error: ${text}`,
+        }),
+      };
     }
-  };
 
-  return (
-    <header className="w-full border-b border-zinc-200 bg-white/90 backdrop-blur-md sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        {/* Логотип */}
-        <div className="flex items-center justify-between gap-3">
-          <a
-            href="/"
-            className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
-          >
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-            NovaCiv
-          </a>
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          error: "Failed to parse OpenAI JSON response",
+        }),
+      };
+    }
 
-          {/* Кнопка раскрытия меню (только мобильный) */}
-          <button
-            type="button"
-            onClick={() => setIsOpen((v) => !v)}
-            className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm"
-          >
-            <span className="sr-only">Toggle navigation</span>
-            <div className="flex flex-col gap-[3px]">
-              <span
-                className={
-                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-transform " +
-                  (isOpen ? "translate-y-[5px] rotate-45" : "")
-                }
-              />
-              <span
-                className={
-                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-opacity " +
-                  (isOpen ? "opacity-0" : "opacity-100")
-                }
-              />
-              <span
-                className={
-                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-transform " +
-                  (isOpen ? "-translate-y-[5px] -rotate-45" : "")
-                }
-              />
-            </div>
-          </button>
-        </div>
+    const reply =
+      (data.choices &&
+        data.choices[0] &&
+        data.choices[0].message &&
+        data.choices[0].message.content) ||
+      "…";
 
-        {/* Меню: скрыто на мобиле, пока не открыто; на ПК всегда видно */}
-        <nav className="w-full md:w-auto">
-          <div
-            className={
-              "mt-2 flex-col gap-2 md:mt-0 md:flex md:flex-row md:flex-wrap md:justify-start " +
-              (isOpen ? "flex" : "hidden md:flex")
-            }
-          >
-            {items.map((item) => {
-              const isActive = item.active;
-
-              const baseClasses =
-                "inline-flex items-center justify-between gap-3 rounded-2xl border px-4 py-2 text-sm font-medium transition shadow-sm w-full md:w-auto";
-              const activeClasses =
-                "bg-zinc-900 border-zinc-900 text-white shadow-[0_14px_40px_rgba(15,23,42,0.35)]";
-              const defaultClasses =
-                "bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-50 hover:border-zinc-300";
-
-              return (
-                <a
-                  key={item.id}
-                  href={item.href}
-                  onClick={handleItemClick}
-                  className={`${baseClasses} ${
-                    isActive ? activeClasses : defaultClasses
-                  }`}
-                >
-                  <span>{item.label[language]}</span>
-                  <span
-                    className={
-                      "h-1.5 w-1.5 rounded-full " +
-                      (isActive ? "bg-emerald-400" : "bg-zinc-200")
-                    }
-                  />
-                </a>
-              );
-            })}
-          </div>
-        </nav>
-      </div>
-    </header>
-  );
-}
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ reply: String(reply).trim() }),
+    };
+  } catch (err) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        error: `Function runtime error: ${String(err)}`,
+      }),
+    };
+  }
+};

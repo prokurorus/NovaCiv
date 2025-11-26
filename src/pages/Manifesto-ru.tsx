@@ -7,13 +7,7 @@ export default function ManifestoRu() {
 
         {/* Верхняя панель */}
         <header className="flex items-center justify-between">
-          <button
-            onClick={() => (window.location.href = "/")}
-            className="inline-flex items-center gap-2 rounded-full border border-zinc-300 px-4 py-1.5 text-xs font-medium text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
-          >
-            ← На главную
-          </button>
-
+          
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             Manifesto • Russian

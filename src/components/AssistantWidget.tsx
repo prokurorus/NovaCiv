@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import { ref, push, query, orderByChild, limitToLast, get } from "firebase/database";
+import { db } from "../lib/firebase";
 
 type Role = "user" | "assistant";
 
@@ -14,6 +16,24 @@ declare global {
     SpeechRecognition?: any;
   }
 }
+
+// ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПАМЯТИ ----------
+
+const MESSAGES_LIMIT = 30; // сколько последних сообщений храним
+
+const getOrCreateClientId = (): string | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const key = "novaciv_client_id";
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+    const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    window.localStorage.setItem(key, id);
+    return id;
+  } catch {
+    return null;
+  }
+};
 
 const detectLanguage = (): string => {
   if (typeof document !== "undefined") {
@@ -35,24 +55,77 @@ const AssistantWidget: React.FC = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pendingText, setPendingText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [loadedFromFirebase, setLoadedFromFirebase] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lang = detectLanguage();
 
-  // Скроллим вниз при новых сообщениях
+  // ---------- Скролл вниз при новых сообщениях ----------
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, isOpen]);
 
-  // Инициализация SpeechRecognition
+  // ---------- clientId из localStorage ----------
+  useEffect(() => {
+    const id = getOrCreateClientId();
+    setClientId(id);
+  }, []);
+
+  // ---------- Загрузка последних сообщений из Firebase ----------
+  useEffect(() => {
+    if (!clientId || loadedFromFirebase) return;
+    const load = async () => {
+      try {
+        const messagesRef = ref(db, `assistantSessions/${clientId}/messages`);
+        const q = query(messagesRef, orderByChild("ts"), limitToLast(MESSAGES_LIMIT));
+        const snap = await get(q);
+        if (!snap.exists()) {
+          setLoadedFromFirebase(true);
+          return;
+        }
+
+        const data: { role: Role; text: string; ts?: number }[] = [];
+        snap.forEach((child) => {
+          const v = child.val();
+          if (v && v.text && (v.role === "user" || v.role === "assistant")) {
+            data.push({
+              role: v.role,
+              text: v.text,
+              ts: typeof v.ts === "number" ? v.ts : undefined,
+            });
+          }
+        });
+
+        data.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+
+        const restored: ChatMessage[] = data.map((m, index) => ({
+          id: `${m.role}-${m.ts ?? index}`,
+          role: m.role,
+          text: m.text,
+        }));
+
+        setMessages(restored);
+      } catch (err) {
+        // не ломаем UI, просто молча продолжаем
+        console.error("Firebase load error:", err);
+      } finally {
+        setLoadedFromFirebase(true);
+      }
+    };
+    load();
+  }, [clientId, loadedFromFirebase]);
+
+  // ---------- Инициализация SpeechRecognition ----------
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const SR =
-      window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    const SR = (window.SpeechRecognition ||
+      window.webkitSpeechRecognition ||
+      null) as any;
 
     if (!SR) return;
 
@@ -93,7 +166,9 @@ const AssistantWidget: React.FC = () => {
     return () => {
       try {
         recognition.stop();
-      } catch (_) {}
+      } catch {
+        // ignore
+      }
       recognitionRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,6 +179,8 @@ const AssistantWidget: React.FC = () => {
   };
 
   const handleNewDialog = () => {
+    // очищаем только локальное окно и контекст,
+    // историю в Firebase оставляем как архив
     setMessages([]);
     setError(null);
   };
@@ -121,12 +198,13 @@ const AssistantWidget: React.FC = () => {
       try {
         setError(null);
         recognitionRef.current.start();
-      } catch (err) {
+      } catch {
         setError("Не удалось запустить микрофон.");
       }
     }
   };
 
+  // ---------- Вызов Netlify-функции с текстом ----------
   const sendToBackend = async (
     userText: string
   ): Promise<{ answer?: string; error?: string }> => {
@@ -165,6 +243,7 @@ const AssistantWidget: React.FC = () => {
     }
   };
 
+  // ---------- Запрос на озвучку ----------
   const requestVoice = async (text: string) => {
     try {
       const res = await fetch("/.netlify/functions/ai-voice", {
@@ -185,11 +264,40 @@ const AssistantWidget: React.FC = () => {
       audio.onended = () => setIsSpeaking(false);
       audio.onerror = () => setIsSpeaking(false);
       audio.play().catch(() => setIsSpeaking(false));
-    } catch (err) {
+    } catch {
       setIsSpeaking(false);
     }
   };
 
+  // ---------- Сохранение пары сообщений в Firebase ----------
+  const savePairToFirebase = async (
+    userMsg: ChatMessage,
+    assistantMsg: ChatMessage
+  ) => {
+    if (!clientId) return;
+    try {
+      const messagesRef = ref(db, `assistantSessions/${clientId}/messages`);
+      const ts = Date.now();
+
+      // user
+      await push(messagesRef, {
+        role: "user",
+        text: userMsg.text,
+        ts,
+      });
+
+      // assistant
+      await push(messagesRef, {
+        role: "assistant",
+        text: assistantMsg.text,
+        ts: ts + 1,
+      });
+    } catch (err) {
+      console.error("Firebase save error:", err);
+    }
+  };
+
+  // ---------- Отправка сообщения ----------
   const handleSend = async (text: string, fromVoice = false) => {
     const clean = text.trim();
     if (!clean) return;
@@ -203,6 +311,7 @@ const AssistantWidget: React.FC = () => {
       text: clean,
     };
 
+    // оптимистично добавляем в локальное состояние
     setMessages((prev) => [...prev, userMessage]);
 
     const { answer, error: backendError } = await sendToBackend(clean);
@@ -220,7 +329,10 @@ const AssistantWidget: React.FC = () => {
 
     setMessages((prev) => [...prev, assistantMessage]);
 
-    // Озвучка ответа голосом OpenAI
+    // сохраняем пару в Firebase
+    savePairToFirebase(userMessage, assistantMessage);
+
+    // озвучиваем
     requestVoice(answer);
   };
 
@@ -229,6 +341,8 @@ const AssistantWidget: React.FC = () => {
     if (!pendingText.trim()) return;
     handleSend(pendingText, false);
   };
+
+  // ---------- РЕНДЕР ----------
 
   return (
     <>
@@ -239,7 +353,6 @@ const AssistantWidget: React.FC = () => {
         className="fixed bottom-4 right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full border border-zinc-300 bg-white/90 shadow-lg backdrop-blur hover:bg-zinc-50 transition"
         aria-label="Открыть помощника"
       >
-        {/* Простая иконка чата */}
         <span className="text-xl">💬</span>
       </button>
 
@@ -280,8 +393,8 @@ const AssistantWidget: React.FC = () => {
           >
             {messages.length === 0 && (
               <div className="text-xs text-zinc-500">
-                Задай вопрос голосом или текстом. Голосовой вопрос после
-                паузы отправится автоматически.
+                Задай вопрос голосом или текстом. Голосовой вопрос после паузы
+                отправится автоматически.
               </div>
             )}
             {messages.map((m) => (
@@ -309,7 +422,7 @@ const AssistantWidget: React.FC = () => {
             )}
           </div>
 
-          {/* Полоса статуса */}
+          {/* Статус */}
           <div className="px-3 pb-1 text-[11px] text-zinc-500 flex items-center justify-between">
             <span>
               {isListening

@@ -89,13 +89,7 @@ const labels = {
     en: "Create topic",
     de: "Thema erstellen",
     es: "Crear tema",
-  },
-  backToMain: {
-    ru: "← На главную",
-    en: "← Back to main",
-    de: "← Zur Startseite",
-    es: "← Página principal",
-  },
+  }, 
   topicsList: {
     ru: "Темы",
     en: "Topics",

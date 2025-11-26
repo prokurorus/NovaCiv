@@ -29,16 +29,14 @@ const forumNavLabel: Record<Language, string> = {
 function AndroidCard() {
   return (
     <div className="w-full max-w-2xl mx-auto">
-      {/* Картинка — крупная, чистая, без подложек */}
       <div className="overflow-hidden rounded-[2rem]">
         <img
-          src="/lovable-uploads/android.png" // <-- твой файл
+          src="/lovable-uploads/android.png"
           alt="NovaCiv Android"
           className="block w-full h-auto"
         />
       </div>
 
-      {/* Подпись под изображением */}
       <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-600 px-1">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -141,12 +139,12 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
 /* ---------- ПЕРВАЯ СТРАНИЦА: вход в сознание ---------- */
 
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
 
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Бейдж + переключатель языка + mini-nav */}
+        {/* Бейдж + переключатель языка (без меню) */}
         <div className="flex justify-between items-start gap-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -154,31 +152,15 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
           </div>
           <div className="flex flex-col items-end gap-2">
             <LanguageSwitcher />
-            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
-              <a
-                href="/join"
-                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
-              >
-                {t.navigation.join}
-              </a>
-              <a
-                href="/forum"
-                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
-              >
-                {forumNavLabel[language]}
-              </a>
-            </nav>
           </div>
         </div>
 
         {/* Основной блок: андроид + текст */}
         <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
-          {/* Андроид слева */}
           <div className="order-0 flex items-center justify-center lg:justify-start">
             <AndroidCard />
           </div>
 
-          {/* Текст справа */}
           <div className="order-1 space-y-6 lg:pl-6 flex flex-col justify-center">
             <div className="space-y-4">
               <h1 className="text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-zinc-900">
@@ -207,7 +189,7 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-/* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
+/* ---------- ВТОРАЯ СТРАНИЦА: "Наше видение" ---------- */
 
 function MainScreen() {
   const { stats, ensureVisitorCounted, like } = useStats();
@@ -255,7 +237,7 @@ function MainScreen() {
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Верхний блок: бейдж, заголовок, переключатель языка */}
+        {/* Верхний блок: бейдж, заголовок, переключатель языка (без мини-меню) */}
         <div className="flex items-start justify-between gap-4">
           <header className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
@@ -272,20 +254,6 @@ function MainScreen() {
 
           <div className="flex flex-col items-end gap-2">
             <LanguageSwitcher />
-            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
-              <a
-                href="/join"
-                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
-              >
-                {t.navigation.join}
-              </a>
-              <a
-                href="/forum"
-                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
-              >
-                {forumNavLabel[language]}
-              </a>
-            </nav>
           </div>
         </div>
 
@@ -561,7 +529,7 @@ export default function App() {
       </>
     );
 
-  // Корень — сначала вступительный экран, затем простая навигация
+  // Корень — сначала вступительный экран (без меню), затем главная с меню
   if (!entered) {
     return (
       <>
@@ -573,6 +541,7 @@ export default function App() {
 
   return (
     <>
+      <Header />
       <MainScreen />
       <AssistantWidget />
     </>

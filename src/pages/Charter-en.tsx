@@ -6,13 +6,7 @@ const CharterEn: React.FC = () => {
       <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
         {/* Верхняя панель */}
         <header className="flex items-center justify-between">
-          <button
-            onClick={() => (window.location.href = "/")}
-            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
-          >
-            ← Back to home
-          </button>
-
+         
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-50/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             <span>Charter • English</span>

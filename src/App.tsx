@@ -434,8 +434,31 @@ function MainScreen() {
 /* ---------- Корневой компонент ---------- */
 
 export default function App() {
-  const [entered, setEntered] = React.useState(false);
   const pathname = window.location.pathname;
+
+  if (pathname === "/") {
+    return (
+      <>
+        <IntroScreen onEnter={() => {}} />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/vision") {
+    return (
+      <>
+        <Header />
+        <MainScreen />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // дальше оставь все твои блоки:
+  // Manifesto-ru/en/de/es, Charter-ru/en/de/es, /forum, /forum/*, /join
+  // только убери ссылки на entered / setEntered, если они ещё остались.
+}
 
   // Прямые переходы по адресам — сразу нужная страница
   if (pathname === "/Manifesto-ru")

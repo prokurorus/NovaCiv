@@ -17,13 +17,6 @@ import type { Language } from "./types/language";
 import AssistantWidget from "./components/AssistantWidget";
 import Header from "./components/Header";
 
-const forumNavLabel: Record<Language, string> = {
-  ru: "Форум",
-  en: "Forum",
-  de: "Forum",
-  es: "Foro",
-};
-
 /* ---------- Карточка андроида (левая колонка) ---------- */
 
 function AndroidCard() {
@@ -237,7 +230,7 @@ function MainScreen() {
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Верхний блок: бейдж, заголовок, переключатель языка (без мини-меню) */}
+        {/* Верхний блок: бейдж, заголовок, переключатель языка */}
         <div className="flex items-start justify-between gap-4">
           <header className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
@@ -436,6 +429,7 @@ function MainScreen() {
 export default function App() {
   const pathname = window.location.pathname;
 
+  // 1) Чистая главная с андроидом
   if (pathname === "/") {
     return (
       <>
@@ -445,6 +439,7 @@ export default function App() {
     );
   }
 
+  // 2) Страница "Наше видение"
   if (pathname === "/vision") {
     return (
       <>
@@ -455,17 +450,13 @@ export default function App() {
     );
   }
 
-  // дальше оставь все твои блоки:
-  // Manifesto-ru/en/de/es, Charter-ru/en/de/es, /forum, /forum/*, /join
-  // только убери ссылки на entered / setEntered, если они ещё остались.
-}
-
-  // Прямые переходы по адресам — сразу нужная страница
+  // 3) Манифесты
   if (pathname === "/Manifesto-ru")
     return (
       <>
         <Header />
         <ManifestoRu />
+        <AssistantWidget />
       </>
     );
 
@@ -474,6 +465,7 @@ export default function App() {
       <>
         <Header />
         <ManifestoEn />
+        <AssistantWidget />
       </>
     );
 
@@ -482,6 +474,7 @@ export default function App() {
       <>
         <Header />
         <ManifestoDe />
+        <AssistantWidget />
       </>
     );
 
@@ -490,14 +483,17 @@ export default function App() {
       <>
         <Header />
         <ManifestoEs />
+        <AssistantWidget />
       </>
     );
 
+  // 4) Устав
   if (pathname === "/Charter-ru")
     return (
       <>
         <Header />
         <CharterRu />
+        <AssistantWidget />
       </>
     );
 
@@ -506,6 +502,7 @@ export default function App() {
       <>
         <Header />
         <CharterEn />
+        <AssistantWidget />
       </>
     );
 
@@ -514,6 +511,7 @@ export default function App() {
       <>
         <Header />
         <CharterDe />
+        <AssistantWidget />
       </>
     );
 
@@ -522,9 +520,11 @@ export default function App() {
       <>
         <Header />
         <CharterEs />
+        <AssistantWidget />
       </>
     );
 
+  // 5) Форум
   if (pathname === "/forum")
     return (
       <>
@@ -543,6 +543,7 @@ export default function App() {
       </>
     );
 
+  // 6) Присоединиться
   if (pathname === "/join")
     return (
       <>
@@ -552,16 +553,7 @@ export default function App() {
       </>
     );
 
-  // Корень — сначала вступительный экран (без меню), затем главная с меню
-  if (!entered) {
-    return (
-      <>
-        <IntroScreen onEnter={() => setEntered(true)} />
-        <AssistantWidget />
-      </>
-    );
-  }
-
+  // 7) На всякий случай — всё остальное ведём на "Наше видение"
   return (
     <>
       <Header />

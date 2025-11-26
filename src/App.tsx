@@ -15,6 +15,7 @@ import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { Language } from "./types/language";
 import AssistantWidget from "./components/AssistantWidget";
+import Header from "./components/Header";
 
 const forumNavLabel: Record<Language, string> = {
   ru: "Форум",
@@ -52,8 +53,6 @@ function AndroidCard() {
     </div>
   );
 }
-
-
 
 /* ---------- Панель статистики ---------- */
 
@@ -147,7 +146,7 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Бейдж + переключатель языка */}
+        {/* Бейдж + переключатель языка + mini-nav */}
         <div className="flex justify-between items-start gap-4">
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -425,7 +424,6 @@ function MainScreen() {
           </div>
         </section>
 
-
         {/* ПРИСОЕДИНИТЬСЯ + ФОРУМ */}
         <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 shadow-sm">
           <div className="grid gap-5 md:grid-cols-2">
@@ -472,19 +470,74 @@ export default function App() {
   const pathname = window.location.pathname;
 
   // Прямые переходы по адресам — сразу нужная страница
-  if (pathname === "/Manifesto-ru") return <ManifestoRu />;
-  if (pathname === "/Manifesto-en") return <ManifestoEn />;
-  if (pathname === "/Manifesto-de") return <ManifestoDe />;
-  if (pathname === "/Manifesto-es") return <ManifestoEs />;
+  if (pathname === "/Manifesto-ru")
+    return (
+      <>
+        <Header />
+        <ManifestoRu />
+      </>
+    );
 
-  if (pathname === "/Charter-ru") return <CharterRu />;
-  if (pathname === "/Charter-en") return <CharterEn />;
-  if (pathname === "/Charter-de") return <CharterDe />;
-  if (pathname === "/Charter-es") return <CharterEs />;
+  if (pathname === "/Manifesto-en")
+    return (
+      <>
+        <Header />
+        <ManifestoEn />
+      </>
+    );
+
+  if (pathname === "/Manifesto-de")
+    return (
+      <>
+        <Header />
+        <ManifestoDe />
+      </>
+    );
+
+  if (pathname === "/Manifesto-es")
+    return (
+      <>
+        <Header />
+        <ManifestoEs />
+      </>
+    );
+
+  if (pathname === "/Charter-ru")
+    return (
+      <>
+        <Header />
+        <CharterRu />
+      </>
+    );
+
+  if (pathname === "/Charter-en")
+    return (
+      <>
+        <Header />
+        <CharterEn />
+      </>
+    );
+
+  if (pathname === "/Charter-de")
+    return (
+      <>
+        <Header />
+        <CharterDe />
+      </>
+    );
+
+  if (pathname === "/Charter-es")
+    return (
+      <>
+        <Header />
+        <CharterEs />
+      </>
+    );
 
   if (pathname === "/forum")
     return (
       <>
+        <Header />
         <ForumPage />
         <AssistantWidget />
       </>
@@ -493,6 +546,7 @@ export default function App() {
   if (pathname.startsWith("/forum/"))
     return (
       <>
+        <Header />
         <TopicPage />
         <AssistantWidget />
       </>
@@ -501,6 +555,7 @@ export default function App() {
   if (pathname === "/join")
     return (
       <>
+        <Header />
         <Join />
         <AssistantWidget />
       </>

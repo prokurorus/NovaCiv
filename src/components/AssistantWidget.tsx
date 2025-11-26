@@ -18,7 +18,6 @@ declare global {
 }
 
 // ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПАМЯТИ ----------
-
 const MESSAGES_LIMIT = 30; // сколько последних сообщений храним
 
 const getOrCreateClientId = (): string | null => {
@@ -58,9 +57,16 @@ const AssistantWidget: React.FC = () => {
   const [clientId, setClientId] = useState<string | null>(null);
   const [loadedFromFirebase, setLoadedFromFirebase] = useState(false);
 
+  const [showGestureHint, setShowGestureHint] = useState(false);
+  const [gestureVoiceHintDone, setGestureVoiceHintDone] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const touchStartYRef = useRef<number | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+
   const lang = detectLanguage();
 
   // ---------- Скролл вниз при новых сообщениях ----------
@@ -74,6 +80,23 @@ const AssistantWidget: React.FC = () => {
   useEffect(() => {
     const id = getOrCreateClientId();
     setClientId(id);
+  }, []);
+
+  // ---------- Флаги подсказок из localStorage ----------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const gestureSeen = window.localStorage.getItem("novaciv_gesture_hint_shown");
+      if (!gestureSeen) {
+        setShowGestureHint(true);
+      }
+      const voiceSeen = window.localStorage.getItem("novaciv_gesture_voice_hint_done");
+      if (voiceSeen) {
+        setGestureVoiceHintDone(true);
+      }
+    } catch {
+      // игнорируем
+    }
   }, []);
 
   // ---------- Загрузка последних сообщений из Firebase ----------
@@ -111,7 +134,6 @@ const AssistantWidget: React.FC = () => {
 
         setMessages(restored);
       } catch (err) {
-        // не ломаем UI, просто молча продолжаем
         console.error("Firebase load error:", err);
       } finally {
         setLoadedFromFirebase(true);
@@ -174,15 +196,49 @@ const AssistantWidget: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang]);
 
+  // ---------- Функция скрытия текстовой подсказки о жестах ----------
+  const hideGestureHint = () => {
+    setShowGestureHint(false);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem("novaciv_gesture_hint_shown", "1");
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  // ---------- Голосовая подсказка о жестах при первом открытии на телефоне ----------
+  useEffect(() => {
+    if (!isOpen) return;
+    if (gestureVoiceHintDone) return;
+    if (typeof window === "undefined") return;
+
+    const isMobile = window.innerWidth <= 768;
+    if (!isMobile) return;
+
+    const hintText =
+      "Небольшая подсказка: на телефоне мной можно управлять жестами. " +
+      "Свайп вверх — новый диалог. Свайп вниз — свернуть окно.";
+
+    requestVoice(hintText).catch(() => {});
+
+    setGestureVoiceHintDone(true);
+    try {
+      window.localStorage.setItem("novaciv_gesture_voice_hint_done", "1");
+    } catch {
+      // ignore
+    }
+  }, [isOpen, gestureVoiceHintDone]);
+
   const toggleOpen = () => {
     setIsOpen((prev) => !prev);
   };
 
   const handleNewDialog = () => {
-    // очищаем только локальное окно и контекст,
-    // историю в Firebase оставляем как архив
     setMessages([]);
     setError(null);
+    hideGestureHint();
   };
 
   const handleMicClick = () => {
@@ -238,13 +294,13 @@ const AssistantWidget: React.FC = () => {
 
       const data = await res.json();
       return { answer: data.answer, error: data.error };
-    } catch (err) {
+    } catch {
       return { error: "Сеть недоступна. Попробуй ещё раз." };
     }
   };
 
-  // ---------- Запрос на озвучку ----------
-  const requestVoice = async (text: string) => {
+  // ---------- Запрос на озвучку (используем и для ответов, и для подсказок) ----------
+  async function requestVoice(text: string): Promise<void> {
     try {
       const res = await fetch("/.netlify/functions/ai-voice", {
         method: "POST",
@@ -267,7 +323,7 @@ const AssistantWidget: React.FC = () => {
     } catch {
       setIsSpeaking(false);
     }
-  };
+  }
 
   // ---------- Сохранение пары сообщений в Firebase ----------
   const savePairToFirebase = async (
@@ -279,14 +335,12 @@ const AssistantWidget: React.FC = () => {
       const messagesRef = ref(db, `assistantSessions/${clientId}/messages`);
       const ts = Date.now();
 
-      // user
       await push(messagesRef, {
         role: "user",
         text: userMsg.text,
         ts,
       });
 
-      // assistant
       await push(messagesRef, {
         role: "assistant",
         text: assistantMsg.text,
@@ -311,7 +365,6 @@ const AssistantWidget: React.FC = () => {
       text: clean,
     };
 
-    // оптимистично добавляем в локальное состояние
     setMessages((prev) => [...prev, userMessage]);
 
     const { answer, error: backendError } = await sendToBackend(clean);
@@ -329,10 +382,9 @@ const AssistantWidget: React.FC = () => {
 
     setMessages((prev) => [...prev, assistantMessage]);
 
-    // сохраняем пару в Firebase
     savePairToFirebase(userMessage, assistantMessage);
 
-    // озвучиваем
+    // озвучиваем ответ
     requestVoice(answer);
   };
 
@@ -340,6 +392,44 @@ const AssistantWidget: React.FC = () => {
     e.preventDefault();
     if (!pendingText.trim()) return;
     handleSend(pendingText, false);
+  };
+
+  // ---------- ЖЕСТЫ: свайп вверх / вниз ----------
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const t = e.touches[0];
+    touchStartYRef.current = t.clientY;
+    touchStartXRef.current = t.clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (touchStartYRef.current === null || touchStartXRef.current === null) {
+      return;
+    }
+
+    const t = e.changedTouches[0];
+    const deltaY = t.clientY - touchStartYRef.current;
+    const deltaX = t.clientX - touchStartXRef.current;
+
+    touchStartYRef.current = null;
+    touchStartXRef.current = null;
+
+    const absY = Math.abs(deltaY);
+    const absX = Math.abs(deltaX);
+
+    // игнорируем мелкие движения
+    if (Math.max(absX, absY) < 40) return;
+
+    // вертикальный свайп важнее
+    if (absY > absX) {
+      if (deltaY < 0) {
+        // свайп вверх — новый диалог
+        handleNewDialog();
+      } else {
+        // свайп вниз — свернуть окно
+        hideGestureHint();
+        setIsOpen(false);
+      }
+    }
   };
 
   // ---------- РЕНДЕР ----------
@@ -357,7 +447,11 @@ const AssistantWidget: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="fixed bottom-20 right-4 z-40 w-80 max-h-[70vh] rounded-2xl border border-zinc-200 bg-white/95 shadow-xl backdrop-blur flex flex-col overflow-hidden">
+        <div
+          className="fixed bottom-20 right-4 z-40 w-80 max-h-[70vh] rounded-2xl border border-zinc-200 bg-white/95 shadow-xl backdrop-blur flex flex-col overflow-hidden"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           {/* Заголовок */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 bg-zinc-50/80">
             <div className="flex flex-col">
@@ -378,7 +472,10 @@ const AssistantWidget: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={toggleOpen}
+                onClick={() => {
+                  hideGestureHint();
+                  setIsOpen(false);
+                }}
                 className="text-zinc-500 hover:text-zinc-900 text-lg leading-none"
               >
                 ×
@@ -422,15 +519,24 @@ const AssistantWidget: React.FC = () => {
             )}
           </div>
 
-          {/* Статус */}
-          <div className="px-3 pb-1 text-[11px] text-zinc-500 flex items-center justify-between">
-            <span>
-              {isListening
-                ? "Слушаю тебя…"
-                : isSpeaking
-                ? "Произношу ответ…"
-                : ""}
-            </span>
+          {/* Статус + текстовая подсказка жестов */}
+          <div className="px-3 pb-1 text-[11px] text-zinc-500 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span>
+                {isListening
+                  ? "Слушаю тебя…"
+                  : isSpeaking
+                  ? "Произношу ответ…"
+                  : ""}
+              </span>
+            </div>
+            {showGestureHint && (
+              <div className="text-[10px] text-zinc-400">
+                На телефоне можно управлять жестами:
+                {" "}
+                свайп вверх — новый диалог, свайп вниз — свернуть окно.
+              </div>
+            )}
           </div>
 
           {/* Ввод */}

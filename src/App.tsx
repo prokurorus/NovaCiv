@@ -324,7 +324,7 @@ function MainScreen() {
           </div>
 
           {/* Устав */}
-          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg:white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
             <div className="absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
             <div className="relative space-y-4">
               <div className="space-y-1">
@@ -462,12 +462,119 @@ export default function App() {
     );
   }
 
-  // дальше оставляешь всё, как у тебя уже есть:
-  // if (pathname === "/Manifesto-ru") ...
-  // if (pathname === "/Manifesto-en") ...
-  // и т.д.
-}
+  // 3) Манифесты
+  if (pathname === "/Manifesto-ru") {
+    return (
+      <>
+        <Header />
+        <ManifestoRu />
+        <AssistantWidget />
+      </>
+    );
+  }
 
+  if (pathname === "/Manifesto-en") {
+    return (
+      <>
+        <Header />
+        <ManifestoEn />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/Manifesto-de") {
+    return (
+      <>
+        <Header />
+        <ManifestoDe />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/Manifesto-es") {
+    return (
+      <>
+        <Header />
+        <ManifestoEs />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // 4) Уставы
+  if (pathname === "/Charter-ru") {
+    return (
+      <>
+        <Header />
+        <CharterRu />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/Charter-en") {
+    return (
+      <>
+        <Header />
+        <CharterEn />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/Charter-de") {
+    return (
+      <>
+        <Header />
+        <CharterDe />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname === "/Charter-es") {
+    return (
+      <>
+        <Header />
+        <CharterEs />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // 5) Присоединиться
+  if (pathname === "/join") {
+    return (
+      <>
+        <Header />
+        <Join />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // 6) Форум и темы
+  if (pathname === "/forum") {
+    return (
+      <>
+        <Header />
+        <ForumPage />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  if (pathname.startsWith("/forum/topic")) {
+    return (
+      <>
+        <Header />
+        <TopicPage />
+        <AssistantWidget />
+      </>
+    );
+  }
 
   // 7) На всякий случай — всё остальное ведём на "Наше видение"
   return (

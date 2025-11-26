@@ -50,23 +50,23 @@ const Header: React.FC = () => {
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/95 backdrop-blur-sm">
+      <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:px-6 sm:py-3">
         {/* Логотип / переход на главную */}
-        <a href="/" className="flex items-center gap-2">
+        <a href="/" className="flex items-center gap-2 flex-shrink-0">
           <div className="h-7 w-7 rounded-full border border-zinc-300 bg-zinc-50 shadow-sm" />
-          <span className="text-base font-semibold tracking-tight text-zinc-900">
+          <span className="text-sm sm:text-base font-semibold tracking-tight text-zinc-900">
             NovaCiv
           </span>
         </a>
 
         {/* Навигация */}
-        <nav className="flex flex-1 justify-center">
+        <nav className="flex-1">
           <div
             className="
-              flex w-full sm:w-auto flex-nowrap items-center gap-2
-              overflow-x-auto whitespace-nowrap
-              text-sm
+              flex flex-nowrap items-center justify-center gap-2
+              w-full overflow-x-auto whitespace-nowrap
+              text-xs sm:text-sm
               [-webkit-overflow-scrolling:touch]
             "
           >
@@ -76,7 +76,7 @@ const Header: React.FC = () => {
                 (item.href !== "/" && pathname.startsWith(item.href));
 
               const baseClasses =
-                "inline-flex items-center justify-center rounded-full border px-3 sm:px-4 py-1.5 sm:py-2 transition text-xs sm:text-sm flex-shrink-0";
+                "inline-flex items-center justify-center rounded-full border px-3 sm:px-4 py-1.5 sm:py-2 transition flex-shrink-0";
               const activeClasses =
                 "border-zinc-900 bg-zinc-900 text-white shadow-sm";
               const defaultClasses =
@@ -100,7 +100,7 @@ const Header: React.FC = () => {
         </nav>
 
         {/* Переключатель языка */}
-        <div className="flex items-center justify-end">
+        <div className="ml-1 flex items-center justify-end flex-shrink-0">
           <LanguageSwitcher />
         </div>
       </div>

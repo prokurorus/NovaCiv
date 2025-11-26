@@ -166,11 +166,12 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
 
             <div className="space-y-3">
               <button
-                onClick={() => (window.location.href = "/vision")}
+                onClick={onEnter}
                 className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-zinc-900/30 hover:bg-zinc-800 active:bg-zinc-950 transition"
               >
                 {t.home.enterButton}
               </button>
+
               <p className="text-xs text-zinc-500 max-w-sm">
                 {t.home.hintText}
               </p>

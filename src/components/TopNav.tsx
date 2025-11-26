@@ -16,63 +16,76 @@ const charterPathByLang: Record<Language, string> = {
   es: "/Charter-es",
 };
 
-function TopNav() {
+export default function TopNav() {
   const { language } = useLanguage();
   const pathname = window.location.pathname;
 
-  const NAV = [
+  const items = [
     {
       id: "home",
-      label: { ru: "Главная", en: "Home", de: "Start", es: "Inicio" },
       href: "/",
+      label: { ru: "Главная", en: "Home", de: "Start", es: "Inicio" },
       active: pathname === "/",
     },
     {
       id: "manifesto",
-      label: { ru: "Манифест", en: "Manifesto", de: "Manifest", es: "Manifiesto" },
       href: manifestoPathByLang[language],
+      label: {
+        ru: "Манифест",
+        en: "Manifesto",
+        de: "Manifest",
+        es: "Manifiesto",
+      },
       active: pathname.startsWith("/Manifesto"),
     },
     {
       id: "charter",
-      label: { ru: "Устав", en: "Charter", de: "Charta", es: "Carta" },
       href: charterPathByLang[language],
+      label: { ru: "Устав", en: "Charter", de: "Charta", es: "Carta" },
       active: pathname.startsWith("/Charter"),
     },
     {
       id: "join",
-      label: { ru: "Присоединиться", en: "Join", de: "Beitreten", es: "Unirse" },
       href: "/join",
+      label: {
+        ru: "Присоединиться",
+        en: "Join",
+        de: "Beitreten",
+        es: "Unirse",
+      },
       active: pathname === "/join",
     },
     {
       id: "forum",
-      label: { ru: "Форум", en: "Forum", de: "Forum", es: "Foro" },
       href: "/forum",
-      active: pathname.startsWith("/forum"),
+      label: { ru: "Форум", en: "Forum", de: "Forum", es: "Foro" },
+      active: pathname === "/forum" || pathname.startsWith("/forum/"),
     },
   ];
 
   return (
     <div className="w-full border-b border-zinc-200 bg-white/90 backdrop-blur-md sticky top-0 z-40">
-      <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
-        {/* ЛОГО */}
-        <a href="/" className="flex items-center gap-2 text-lg font-semibold text-zinc-900">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        {/* Логотип */}
+        <a
+          href="/"
+          className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
+        >
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
           NovaCiv
         </a>
 
-        {/* ГОРИЗОНТАЛЬНОЕ МЕНЮ */}
-        <nav className="flex-1 mx-4 overflow-x-auto whitespace-nowrap scrollbar-none">
-          <div className="flex gap-2">
-            {NAV.map((item) => (
+        {/* Меню с переносом строк */}
+        <nav className="w-full md:w-auto">
+          <div className="flex flex-wrap justify-start md:justify-center gap-2">
+            {items.map((item) => (
               <a
                 key={item.id}
                 href={item.href}
                 className={
-                  "px-4 py-1.5 rounded-full border flex-shrink-0 text-sm transition " +
+                  "px-4 py-1.5 rounded-full border text-sm flex-shrink-0 transition " +
                   (item.active
-                    ? "bg-zinc-900 border-zinc-900 text-white"
+                    ? "bg-zinc-900 border-zinc-900 text-white shadow-sm"
                     : "bg-white border-zinc-300 text-zinc-700 hover:bg-zinc-50")
                 }
               >
@@ -81,30 +94,7 @@ function TopNav() {
             ))}
           </div>
         </nav>
-
-        {/* ПЕРЕКЛЮЧАТЕЛЬ ЯЗЫКОВ */}
-        <div>
-          <div className="flex gap-1 px-2 py-1 rounded-full border border-zinc-300">
-            {["ru", "en", "de", "es"].map((lng) => (
-              <a
-                key={lng}
-                href={`/${lng}`}
-                onClick={(e) => e.preventDefault()}
-                className={
-                  "px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer " +
-                  (language === lng
-                    ? "bg-zinc-900 text-white"
-                    : "text-zinc-600 hover:bg-zinc-100")
-                }
-              >
-                {lng.toUpperCase()}
-              </a>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );
 }
-
-export default TopNav;

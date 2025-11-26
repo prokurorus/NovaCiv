@@ -28,6 +28,17 @@ export default function TopNav() {
       active: pathname === "/",
     },
     {
+      id: "vision",
+      href: "/vision",
+      label: {
+        ru: "Наше видение",
+        en: "Vision",
+        de: "Vision",
+        es: "Visión",
+      },
+      active: pathname === "/vision",
+    },
+    {
       id: "manifesto",
       href: manifestoPathByLang[language],
       label: {
@@ -75,7 +86,7 @@ export default function TopNav() {
           NovaCiv
         </a>
 
-        {/* Меню с переносом строк */}
+        {/* Меню с переносом строк, как в MobilTruck */}
         <nav className="w-full md:w-auto">
           <div className="flex flex-wrap justify-start md:justify-center gap-2">
             {items.map((item) => (

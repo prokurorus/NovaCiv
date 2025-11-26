@@ -14,31 +14,41 @@ import { useStats } from "./hooks/useStats";
 import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { Language } from "./types/language";
-import { LanguageProvider } from "./context/LanguageContext";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import AssistantWidget from "./components/AssistantWidget";
+import Header from "./components/Header";
+
+const forumNavLabel: Record<Language, string> = {
+  ru: "Форум",
+  en: "Forum",
+  de: "Forum",
+  es: "Foro",
+};
 
 /* ---------- Карточка андроида (левая колонка) ---------- */
 
 function AndroidCard() {
   return (
-    <div className="relative w-full max-w-xl">
-      <div className="relative rounded-[32px] bg-white shadow-[0_18px_60px_rgba(15,23,42,0.12)] overflow-hidden">
-        <div className="flex justify-center items-center px-6 pt-6 pb-4">
-          <img
-            src="/lovable-uploads/android.png"
-            alt="Digital consciousness"
-            className="w-full h-auto object-contain"
-          />
-        </div>
-        <div className="flex justify-between items-center px-6 pb-4 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+    <div className="w-full max-w-2xl mx-auto">
+      {/* Картинка — крупная, чистая, без подложек */}
+      <div className="overflow-hidden rounded-[2rem]">
+        <img
+          src="/lovable-uploads/android.png" // <-- твой файл
+          alt="NovaCiv Android"
+          className="block w-full h-auto"
+        />
+      </div>
+
+      {/* Подпись под изображением */}
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-zinc-600 px-1">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          <span className="uppercase tracking-[0.12em] text-zinc-500 font-semibold">
             DIGITAL CONSCIOUSNESS
           </span>
-          <span className="text-[10px] text-zinc-400">
-            Prototype node • alpha
-          </span>
         </div>
+        <span className="text-[10px] text-zinc-400">
+          Prototype node • alpha
+        </span>
       </div>
     </div>
   );
@@ -81,7 +91,7 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
     es: {
       visitors: "Visitantes",
       likes: "Me gusta",
-      joined: "Se han unido",
+      joined: "Unidos",
       likeButton: "♥ Me gusta",
     },
   };
@@ -89,7 +99,7 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
   const current = labels[language];
 
   return (
-    <section className="grid gap-3 sm:grid-cols-3 text-xs sm:text-sm">
+    <section className="mt-8 grid gap-4 sm:grid-cols-3">
       <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
         <div className="text-xs font-medium text-zinc-500">
           {current.visitors}
@@ -99,25 +109,22 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onLike}
-        className="border rounded-xl px-5 py-4 shadow-sm bg-white/80 text-left hover:bg-zinc-50 transition"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-medium text-zinc-500">
-              {current.likes}
-            </div>
-            <div className="mt-2 text-2xl font-semibold text-zinc-900">
-              {likes}
-            </div>
-          </div>
-          <span className="inline-flex items-center justify-center rounded-full border border-emerald-500 text-emerald-600 text-[11px] px-3 py-1 font-medium">
-            {current.likeButton}
+      <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-zinc-500">
+            {current.likes}
           </span>
+          <button
+            onClick={onLike}
+            className="text-[11px] border rounded-full px-3 py-1 hover:bg-zinc-50 active:bg-zinc-100 transition"
+          >
+            {current.likeButton}
+          </button>
         </div>
-      </button>
+        <div className="mt-2 text-2xl font-semibold text-zinc-900">
+          {likes}
+        </div>
+      </div>
 
       <div className="border rounded-xl px-5 py-4 shadow-sm bg-white/80">
         <div className="text-xs font-medium text-zinc-500">
@@ -136,13 +143,6 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
 function IntroScreen({ onEnter }: { onEnter: () => void }) {
   const { t, language } = useLanguage();
 
-  const forumNavLabel: Record<Language, string> = {
-    ru: "Форум",
-    en: "Forum",
-    de: "Forum",
-    es: "Foro",
-  };
-
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
@@ -154,26 +154,16 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
           </div>
           <div className="flex flex-col items-end gap-2">
             <LanguageSwitcher />
-            {/* обновлённое мини-меню */}
-            <nav
-              className="
-                flex flex-nowrap items-center gap-2
-                text-[11px] text-zinc-600 mt-1
-                w-full sm:w-auto
-                overflow-x-auto
-                whitespace-nowrap
-                [-webkit-overflow-scrolling:touch]
-              "
-            >
+            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
               <a
                 href="/join"
-                className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 transition flex-shrink-0"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
               >
                 {t.navigation.join}
               </a>
               <a
                 href="/forum"
-                className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 transition flex-shrink-0"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
               >
                 {forumNavLabel[language]}
               </a>
@@ -181,8 +171,8 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
           </div>
         </div>
 
-        {/* Основной блок: андроид + текст + кнопка */}
-        <section className="grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.05fr)] gap-10 items-center">
+        {/* Основной блок: андроид + текст */}
+        <section className="grid gap-10 lg:grid-cols-2 lg:items-center">
           {/* Андроид слева */}
           <div className="order-0 flex items-center justify-center lg:justify-start">
             <AndroidCard />
@@ -199,21 +189,16 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3 items-center">
+            <div className="space-y-3">
               <button
-                type="button"
                 onClick={onEnter}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-medium text-white shadow-[0_18px_40px_rgba(15,23,42,0.35)] hover:bg-zinc-800 transition"
+                className="inline-flex items-center gap-2 rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-zinc-900/30 hover:bg-zinc-800 active:bg-zinc-950 transition"
               >
                 {t.home.enterButton}
               </button>
-              <button
-                type="button"
-                onClick={onEnter}
-                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition"
-              >
-                {t.home.moreButton}
-              </button>
+              <p className="text-xs text-zinc-500 max-w-sm">
+                {t.home.hintText}
+              </p>
             </div>
           </div>
         </section>
@@ -222,11 +207,36 @@ function IntroScreen({ onEnter }: { onEnter: () => void }) {
   );
 }
 
-/* ---------- ОСНОВНАЯ ГЛАВНАЯ СТРАНИЦА ---------- */
+/* ---------- ВТОРАЯ СТРАНИЦА: с чего начать ---------- */
 
 function MainScreen() {
+  const { stats, ensureVisitorCounted, like } = useStats();
   const { t, language } = useLanguage();
-  const { stats, like } = useStats();
+
+  React.useEffect(() => {
+    ensureVisitorCounted();
+  }, [ensureVisitorCounted]);
+
+  const joinText: Record<Language, string> = {
+    ru: "NovaCiv не просит веры или клятвы. Важно только понимание того, во что ты входишь: цифровое сообщество, основанное на свободе, ненасилии, прямой демократии и честных правилах. Мы не обещаем рай — мы обещаем прозрачность и добровольность. Прочитай Манифест и Устав, загляни в открытый чат на странице «Присоединиться» и реши, хочешь ли ты вкладывать часть себя в такой проект.",
+    en: "NovaCiv does not ask for faith or oaths. What matters is understanding what you are entering: a digital community built on freedom, non-violence, direct democracy and clear rules. We do not promise paradise — we promise transparency and voluntariness. Read the Manifesto and the Charter, visit the open chat on the Join page and decide whether you want to invest a part of yourself in this project.",
+    de: "NovaCiv verlangt keinen Glauben und keine Eide. Wichtig ist das Verständnis, worin du eintrittst: eine digitale Gemeinschaft, die auf Freiheit, Gewaltlosigkeit, direkter Demokratie und klaren Regeln basiert. Wir versprechen kein Paradies – wir versprechen Transparenz und Freiwilligkeit. Lies das Manifest und die Charta, wirf einen Blick in den offenen Chat auf der Seite „Beitreten“ und entscheide, ob du einen Teil von dir in dieses Projekt investieren möchtest.",
+    es: "NovaCiv no pide fe ni juramentos. Lo que importa es entender en qué entras: una comunidad digital basada en la libertad, la no violencia, la democracia directa y reglas claras. No prometemos un paraíso: prometemos transparencia y voluntariedad. Lee el Manifiesto y la Carta, visita el chat abierto en la página «Unirse» y decide si quieres invertir una parte de ti en este proyecto.",
+  };
+
+  const joinButtonLabel: Record<Language, string> = {
+    ru: "Открыть страницу «Присоединиться»",
+    en: "Open the “Join” page",
+    de: "Seite „Beitreten“ öffnen",
+    es: "Abrir página «Unirse»",
+  };
+
+  const forumCardTitle: Record<Language, string> = {
+    ru: "Форум NovaCiv",
+    en: "NovaCiv Forum",
+    de: "NovaCiv-Forum",
+    es: "Foro de NovaCiv",
+  };
 
   const forumCardText: Record<Language, string> = {
     ru: "Открытое пространство для вопросов, идей и обсуждений Устава, Манифеста и будущего платформы.",
@@ -242,93 +252,55 @@ function MainScreen() {
     es: "Ir al foro",
   };
 
-  const forumNavLabel: Record<Language, string> = {
-    ru: "Форум",
-    en: "Forum",
-    de: "Forum",
-    es: "Foro",
-  };
-
   return (
     <main className="min-h-screen bg-white">
       <div className="max-w-6xl mx-auto py-10 px-4 space-y-10">
-        {/* Верхний блок: бейдж, заголовок, язык, мини-меню */}
-        <header className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-4 max-w-xl">
+        {/* Верхний блок: бейдж, заголовок, переключатель языка */}
+        <div className="flex items-start justify-between gap-4">
+          <header className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
               {t.home.title} • {t.home.subtitle}
             </div>
-            <div className="space-y-2">
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-semibold tracking-tight text-zinc-900">
-                {t.home.title}
-              </h1>
-              <p className="text-sm sm:text-base text-zinc-600 leading-relaxed">
-                {t.home.manifestoSummary.content}
-              </p>
-            </div>
-          </div>
+            <h1 className="text-2xl sm:text-3xl font-semibold text-zinc-900">
+              {t.home.manifestoSummary.title}
+            </h1>
+            <p className="text-sm text-zinc-600 max-w-2xl">
+              {t.home.manifestoSummary.content}
+            </p>
+          </header>
 
           <div className="flex flex-col items-end gap-2">
             <LanguageSwitcher />
-            {/* обновлённое мини-меню */}
-            <nav
-              className="
-                flex flex-nowrap items-center gap-2
-                text-[11px] text-zinc-600 mt-1
-                w-full sm:w-auto
-                overflow-x-auto
-                whitespace-nowrap
-                [-webkit-overflow-scrolling:touch]
-              "
-            >
+            <nav className="flex flex-wrap gap-2 text-[11px] text-zinc-600 mt-1">
               <a
                 href="/join"
-                className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 transition flex-shrink-0"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
               >
                 {t.navigation.join}
               </a>
               <a
                 href="/forum"
-                className="inline-flex items-center justify-center rounded-full border border-zinc-200 bg-white px-3 py-1 hover:bg-zinc-50 transition flex-shrink-0"
+                className="rounded-full border border-zinc-200 px-3 py-1 hover:bg-zinc-50 transition"
               >
                 {forumNavLabel[language]}
               </a>
             </nav>
           </div>
-        </header>
+        </div>
 
-        {/* Секция: андроид + текст о платформе */}
-        <section className="grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1.05fr)] gap-10 items-center">
-          <div className="order-0 flex items-center justify-center lg:justify-start">
-            <AndroidCard />
-          </div>
-
-          <div className="order-1 space-y-6 lg:pl-6 flex flex-col justify-center">
-            <header className="space-y-3">
-              <h2 className="text-xl sm:text-2xl font-semibold text-zinc-900">
-                {t.home.platformTitle}
-              </h2>
-              <p className="text-sm sm:text-base text-zinc-600 leading-relaxed">
-                {t.home.platformDescription}
-              </p>
-            </header>
-
-            <div className="flex flex-col gap-4">
-              <StatsBar
-                visitors={stats.visitors}
-                likes={stats.likes}
-                joined={stats.joined}
-                onLike={like}
-              />
-            </div>
-          </div>
-        </section>
+        {/* Счётчики */}
+        <StatsBar
+          visitors={stats.visitors}
+          likes={stats.likes}
+          joined={stats.joined}
+          onLike={like}
+        />
 
         {/* МАНИФЕСТ / УСТАВ */}
         <section className="grid gap-6 lg:grid-cols-2 pt-4">
           {/* Манифест */}
-          <div className="relative overflow-hidden rounded-[24px] bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
             <div className="absolute -top-10 -right-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
             <div className="relative space-y-4">
               <div className="space-y-1">
@@ -339,61 +311,150 @@ function MainScreen() {
                   {t.home.manifestoSummary.content}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-3 items-center">
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
-                  href="/manifesto"
-                  className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-medium text-white shadow-[0_16px_40px_rgba(15,23,42,0.35)] hover:bg-zinc-800 transition"
+                  href="/Manifesto-ru"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  {t.home.manifestoSummary.readButton}
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    RU
+                  </span>
+                </a>
+                <a
+                  href="/Manifesto-en"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    EN
+                  </span>
+                </a>
+                <a
+                  href="/Manifesto-de"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifest
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    DE
+                  </span>
+                </a>
+                <a
+                  href="/Manifesto-es"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Manifiesto
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    ES
+                  </span>
                 </a>
               </div>
             </div>
           </div>
 
           {/* Устав */}
-          <div className="relative overflow-hidden rounded-[24px] bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
-            <div className="absolute -bottom-12 -left-12 h-28 w-28 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
+            <div className="absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
             <div className="relative space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-semibold text-zinc-900">
                   {t.navigation.charter}
                 </h2>
                 <p className="text-sm text-zinc-600">
-                  {t.home.charterSummary.content}
+                  {t.charter.sections[0]?.content}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-3 items-center">
+
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
-                  href="/charter"
-                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 transition"
+                  href="/Charter-ru"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
                 >
-                  {t.home.charterSummary.readButton}
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charter
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    RU
+                  </span>
+                </a>
+                <a
+                  href="/Charter-en"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charter
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    EN
+                  </span>
+                </a>
+                <a
+                  href="/Charter-de"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Charta
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    DE
+                  </span>
+                </a>
+                <a
+                  href="/Charter-es"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                >
+                  <span className="text-[11px] uppercase tracking-wide text-gray-400">
+                    Carta
+                  </span>
+                  <span className="text-sm text-gray-900 group-hover:text-gray-800">
+                    ES
+                  </span>
                 </a>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Форум */}
-        <section className="pt-4">
-          <div className="relative overflow-hidden rounded-[24px] bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
-            <div className="relative flex flex-col sm:flex-row gap-6 sm:items-center">
-              <div className="space-y-3 flex-1 min-w-0">
-                <h2 className="text-xl font-semibold text-zinc-900">
-                  {t.home.forumTitle}
-                </h2>
-                <p className="text-sm text-zinc-600">
-                  {forumCardText[language]}
-                </p>
-              </div>
-              <div className="flex-shrink-0">
-                <a
-                  href="/forum"
-                  className="inline-flex items-center justify-center rounded-full bg-emerald-500 px-5 py-2 text-sm font-medium text-white shadow-[0_16px_40px_rgba(16,185,129,0.35)] hover:bg-emerald-600 transition"
-                >
-                  {forumCardButton[language]}
-                </a>
-              </div>
+        {/* ПРИСОЕДИНИТЬСЯ + ФОРУМ */}
+        <section className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white/90 px-5 py-6 shadow-sm">
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold text-zinc-900">
+                {t.navigation.join}
+              </h2>
+              <p className="text-sm text-zinc-600 max-w-2xl">
+                {joinText[language]}
+              </p>
+              <a
+                href="/join"
+                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+              >
+                {joinButtonLabel[language]}
+              </a>
+            </div>
+
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold text-zinc-900">
+                {forumCardTitle[language]}
+              </h2>
+              <p className="text-sm text-zinc-600 max-w-2xl">
+                {forumCardText[language]}
+              </p>
+              <a
+                href="/forum"
+                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+              >
+                {forumCardButton[language]}
+              </a>
             </div>
           </div>
         </section>
@@ -402,27 +463,105 @@ function MainScreen() {
   );
 }
 
-/* ---------- ВИДЖЕТ ДОМОВОГО ---------- */
+/* ---------- Корневой компонент ---------- */
 
-function AssistantWidget() {
-  return (
-    <a
-      href="/ask"
-      className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full bg-black text-white text-sm font-medium px-4 py-2 shadow-lg hover:bg-zinc-800 transition"
-    >
-      <span className="inline-flex items-center justify-center rounded-full bg-emerald-500 text-xs h-5 w-5">
-        AI
-      </span>
-      <span>Спросить домового</span>
-    </a>
-  );
-}
-
-/* ---------- КОРНЕВОЙ КОМПОНЕНТ ---------- */
-
-function App() {
+export default function App() {
   const [entered, setEntered] = React.useState(false);
+  const pathname = window.location.pathname;
 
+  // Прямые переходы по адресам — сразу нужная страница
+  if (pathname === "/Manifesto-ru")
+    return (
+      <>
+        <Header />
+        <ManifestoRu />
+      </>
+    );
+
+  if (pathname === "/Manifesto-en")
+    return (
+      <>
+        <Header />
+        <ManifestoEn />
+      </>
+    );
+
+  if (pathname === "/Manifesto-de")
+    return (
+      <>
+        <Header />
+        <ManifestoDe />
+      </>
+    );
+
+  if (pathname === "/Manifesto-es")
+    return (
+      <>
+        <Header />
+        <ManifestoEs />
+      </>
+    );
+
+  if (pathname === "/Charter-ru")
+    return (
+      <>
+        <Header />
+        <CharterRu />
+      </>
+    );
+
+  if (pathname === "/Charter-en")
+    return (
+      <>
+        <Header />
+        <CharterEn />
+      </>
+    );
+
+  if (pathname === "/Charter-de")
+    return (
+      <>
+        <Header />
+        <CharterDe />
+      </>
+    );
+
+  if (pathname === "/Charter-es")
+    return (
+      <>
+        <Header />
+        <CharterEs />
+      </>
+    );
+
+  if (pathname === "/forum")
+    return (
+      <>
+        <Header />
+        <ForumPage />
+        <AssistantWidget />
+      </>
+    );
+
+  if (pathname.startsWith("/forum/"))
+    return (
+      <>
+        <Header />
+        <TopicPage />
+        <AssistantWidget />
+      </>
+    );
+
+  if (pathname === "/join")
+    return (
+      <>
+        <Header />
+        <Join />
+        <AssistantWidget />
+      </>
+    );
+
+  // Корень — сначала вступительный экран, затем простая навигация
   if (!entered) {
     return (
       <>
@@ -434,63 +573,8 @@ function App() {
 
   return (
     <>
-      <Routes>
-        <Route path="/" element={<MainScreen />} />
-        <Route path="/manifesto" element={<ManifestoWrapper />} />
-        <Route path="/charter" element={<CharterWrapper />} />
-        <Route path="/join" element={<Join />} />
-        <Route path="/forum" element={<ForumPage />} />
-        <Route path="/topic/:topicId" element={<TopicPage />} />
-      </Routes>
+      <MainScreen />
       <AssistantWidget />
     </>
-  );
-}
-
-/* ---------- ОБЁРТКИ ДЛЯ МАНИФЕСТА И УСТАВА ---------- */
-
-function ManifestoWrapper() {
-  const { language } = useLanguage();
-
-  switch (language) {
-    case "ru":
-      return <ManifestoRu />;
-    case "en":
-      return <ManifestoEn />;
-    case "de":
-      return <ManifestoDe />;
-    case "es":
-      return <ManifestoEs />;
-    default:
-      return <ManifestoEn />;
-  }
-}
-
-function CharterWrapper() {
-  const { language } = useLanguage();
-
-  switch (language) {
-    case "ru":
-      return <CharterRu />;
-    case "en":
-      return <CharterEn />;
-    case "de":
-      return <CharterDe />;
-    case "es":
-      return <CharterEs />;
-    default:
-      return <CharterEn />;
-  }
-}
-
-/* ---------- ROOT РЕНДЕР ---------- */
-
-export default function RootApp() {
-  return (
-    <Router>
-      <LanguageProvider>
-        <App />
-      </LanguageProvider>
-    </Router>
   );
 }

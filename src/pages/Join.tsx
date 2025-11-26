@@ -468,40 +468,41 @@ const JoinPage: React.FC = () => {
       <div className="max-w-5xl mx-auto px-4 py-10 space-y-8">
         {/* Заголовок + переключатель языка */}
         <div className="flex items-start justify-between gap-4">
-          {/* Навигация по сайту (как в MobilTruck) */}
-    <div className="flex flex-wrap gap-2 mb-6">
-      <a
-        href="/"
-        className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-      >
-        Главная
-      </a>
-      <a
-        href="/manifest"
-        className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-      >
-        Наше видение
-      </a>
-      <a
-        href="/charter"
-        className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-      >
-        Устав
-      </a>
-      <a
-        href="/forum"
-        className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-      >
-        Форум
-      </a>
-    </div>
-
           <div>
             <h1 className="text-3xl font-semibold mb-2">{t.join.title}</h1>
             <p className="text-gray-600">{topIntro[language]}</p>
           </div>
           <LanguageSwitcher />
         </div>
+        
+        {/* Навигация по сайту */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          <a
+            href="/"
+            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
+          >
+            Главная
+          </a>
+          <a
+            href="/manifest"
+            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
+          >
+            Наше видение
+          </a>
+          <a
+            href="/charter"
+            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
+          >
+            Устав
+          </a>
+          <a
+            href="/forum"
+            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
+          >
+            Форум
+          </a>
+        </div>
+
 
         {/* Счётчики */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -768,5 +769,6 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+
 
 

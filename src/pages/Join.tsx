@@ -398,7 +398,7 @@ const JoinPage: React.FC = () => {
     setContactSuccess(null);
 
     const name = contactName.trim() || member.nickname || "";
-    const method = contactMethod.trim();
+       const method = contactMethod.trim();
     const msg = contactMessage.trim();
 
     if (!contactAgree || !method || !msg) {
@@ -436,7 +436,10 @@ const JoinPage: React.FC = () => {
         });
 
         if (!resp.ok) {
-          console.error("send-email function responded with status", resp.status);
+          console.error(
+            "send-email function responded with status",
+            resp.status
+          );
         }
       } catch (emailErr) {
         console.error("Failed to call send-email function", emailErr);
@@ -474,7 +477,7 @@ const JoinPage: React.FC = () => {
           </div>
           <LanguageSwitcher />
         </div>
-        
+
         {/* Навигация по сайту */}
         <div className="flex flex-wrap gap-2 mb-6">
           <a
@@ -502,7 +505,6 @@ const JoinPage: React.FC = () => {
             Форум
           </a>
         </div>
-
 
         {/* Счётчики */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -559,7 +561,7 @@ const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* Кого мы сейчас ищем + Product Hunt */}
+        {/* Кого мы сейчас ищем */}
         <div className="border rounded-xl p-4 shadow-sm space-y-3">
           <h2 className="text-lg font-semibold">{whoWeSeekTitle[language]}</h2>
           <p className="text-sm text-gray-600">{whoWeSeekIntro[language]}</p>
@@ -569,8 +571,7 @@ const JoinPage: React.FC = () => {
             ))}
           </ul>
           <p className="text-xs text-gray-500">{whoWeSeekNote[language]}</p>
-
-         
+        </div>
 
         {/* Связь с основателем */}
         <div className="border rounded-xl p-4 shadow-sm space-y-3">
@@ -756,7 +757,9 @@ const JoinPage: React.FC = () => {
                   : "characters."}
               </span>
               <span
-                className={nearLimit ? "text-red-500 font-medium" : "text-gray-400"}
+                className={
+                  nearLimit ? "text-red-500 font-medium" : "text-gray-400"
+                }
               >
                 {length} / {maxLength}
               </span>
@@ -769,6 +772,3 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
-
-
-

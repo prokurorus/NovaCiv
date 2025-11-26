@@ -19,6 +19,7 @@ const charterPathByLang: Record<Language, string> = {
 export default function TopNav() {
   const { language } = useLanguage();
   const pathname = window.location.pathname;
+  const [isOpen, setIsOpen] = React.useState(false);
 
   const items = [
     {
@@ -74,21 +75,64 @@ export default function TopNav() {
     },
   ];
 
+  const handleItemClick = () => {
+    // На телефоне после клика сворачиваем меню
+    if (window.innerWidth < 768) {
+      setIsOpen(false);
+    }
+  };
+
   return (
     <header className="w-full border-b border-zinc-200 bg-white/90 backdrop-blur-md sticky top-0 z-40">
       <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Логотип */}
-        <a
-          href="/"
-          className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
-        >
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          NovaCiv
-        </a>
+        <div className="flex items-center justify-between gap-3">
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 text-lg font-semibold text-zinc-900"
+          >
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            NovaCiv
+          </a>
 
-        {/* Меню: вертикальное на мобильном, горизонтальное на ПК */}
+          {/* Кнопка раскрытия меню (только мобильный) */}
+          <button
+            type="button"
+            onClick={() => setIsOpen((v) => !v)}
+            className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm"
+          >
+            <span className="sr-only">Toggle navigation</span>
+            <div className="flex flex-col gap-[3px]">
+              <span
+                className={
+                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-transform " +
+                  (isOpen ? "translate-y-[5px] rotate-45" : "")
+                }
+              />
+              <span
+                className={
+                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-opacity " +
+                  (isOpen ? "opacity-0" : "opacity-100")
+                }
+              />
+              <span
+                className={
+                  "h-[2px] w-4 rounded-full bg-zinc-800 transition-transform " +
+                  (isOpen ? "-translate-y-[5px] -rotate-45" : "")
+                }
+              />
+            </div>
+          </button>
+        </div>
+
+        {/* Меню: скрыто на мобиле, пока не открыто; на ПК всегда видно */}
         <nav className="w-full md:w-auto">
-          <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:justify-start">
+          <div
+            className={
+              "mt-2 flex-col gap-2 md:mt-0 md:flex md:flex-row md:flex-wrap md:justify-start " +
+              (isOpen ? "flex" : "hidden md:flex")
+            }
+          >
             {items.map((item) => {
               const isActive = item.active;
 
@@ -103,6 +147,7 @@ export default function TopNav() {
                 <a
                   key={item.id}
                   href={item.href}
+                  onClick={handleItemClick}
                   className={`${baseClasses} ${
                     isActive ? activeClasses : defaultClasses
                   }`}

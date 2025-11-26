@@ -569,22 +569,7 @@ const JoinPage: React.FC = () => {
           </ul>
           <p className="text-xs text-gray-500">{whoWeSeekNote[language]}</p>
 
-          {/* Product Hunt badge */}
-          <div className="pt-3">
-            <a
-              href="https://www.producthunt.com/products/novaciv-new-civilization?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-novaciv&#0045;new&#0045;civilization"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center"
-            >
-              <img
-                src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1041241&theme=neutral&t=1763840299165"
-                alt="NovaCiv — New Civilization - A transparent civilization without rulers, only citizens | Product Hunt"
-                className="h-8 w-auto rounded-lg shadow-sm"
-              />
-            </a>
-          </div>
-        </div>
+         
 
         {/* Связь с основателем */}
         <div className="border rounded-xl p-4 shadow-sm space-y-3">
@@ -783,4 +768,5 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+
 

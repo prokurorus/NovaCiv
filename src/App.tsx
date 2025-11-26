@@ -428,19 +428,30 @@ function MainScreen() {
 /* ---------- Корневой компонент ---------- */
 
 export default function App() {
+  const [entered, setEntered] = React.useState(false);
   const pathname = window.location.pathname;
 
-  // 1) Чистая главная с андроидом
+  // 1) Главная: сначала «вход в сознание», после нажатия — «Наше видение»
   if (pathname === "/") {
+    if (!entered) {
+      return (
+        <>
+          <IntroScreen onEnter={() => setEntered(true)} />
+          <AssistantWidget />
+        </>
+      );
+    }
+
     return (
       <>
-        <IntroScreen onEnter={() => {}} />
+        <Header />
+        <MainScreen />
         <AssistantWidget />
       </>
     );
   }
 
-  // 2) Страница "Наше видение"
+  // 2) Страница "Наше видение" по прямой ссылке /vision
   if (pathname === "/vision") {
     return (
       <>
@@ -451,108 +462,12 @@ export default function App() {
     );
   }
 
-  // 3) Манифесты
-  if (pathname === "/Manifesto-ru")
-    return (
-      <>
-        <Header />
-        <ManifestoRu />
-        <AssistantWidget />
-      </>
-    );
+  // дальше оставляешь всё, как у тебя уже есть:
+  // if (pathname === "/Manifesto-ru") ...
+  // if (pathname === "/Manifesto-en") ...
+  // и т.д.
+}
 
-  if (pathname === "/Manifesto-en")
-    return (
-      <>
-        <Header />
-        <ManifestoEn />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname === "/Manifesto-de")
-    return (
-      <>
-        <Header />
-        <ManifestoDe />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname === "/Manifesto-es")
-    return (
-      <>
-        <Header />
-        <ManifestoEs />
-        <AssistantWidget />
-      </>
-    );
-
-  // 4) Устав
-  if (pathname === "/Charter-ru")
-    return (
-      <>
-        <Header />
-        <CharterRu />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname === "/Charter-en")
-    return (
-      <>
-        <Header />
-        <CharterEn />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname === "/Charter-de")
-    return (
-      <>
-        <Header />
-        <CharterDe />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname === "/Charter-es")
-    return (
-      <>
-        <Header />
-        <CharterEs />
-        <AssistantWidget />
-      </>
-    );
-
-  // 5) Форум
-  if (pathname === "/forum")
-    return (
-      <>
-        <Header />
-        <ForumPage />
-        <AssistantWidget />
-      </>
-    );
-
-  if (pathname.startsWith("/forum/"))
-    return (
-      <>
-        <Header />
-        <TopicPage />
-        <AssistantWidget />
-      </>
-    );
-
-  // 6) Присоединиться
-  if (pathname === "/join")
-    return (
-      <>
-        <Header />
-        <Join />
-        <AssistantWidget />
-      </>
-    );
 
   // 7) На всякий случай — всё остальное ведём на "Наше видение"
   return (

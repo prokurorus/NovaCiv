@@ -478,34 +478,7 @@ const JoinPage: React.FC = () => {
           <LanguageSwitcher />
         </div>
 
-        {/* Навигация по сайту */}
-        <div className="flex flex-wrap gap-2 mb-6">
-          <a
-            href="/"
-            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-          >
-            Главная
-          </a>
-          <a
-            href="/manifest"
-            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-          >
-            Наше видение
-          </a>
-          <a
-            href="/charter"
-            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-          >
-            Устав
-          </a>
-          <a
-            href="/forum"
-            className="px-4 py-1.5 rounded-full border border-gray-300 text-sm hover:bg-gray-100 transition"
-          >
-            Форум
-          </a>
-        </div>
-
+ 
         {/* Счётчики */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="border rounded-xl p-4 shadow-sm">
@@ -772,3 +745,4 @@ const JoinPage: React.FC = () => {
 };
 
 export default JoinPage;
+

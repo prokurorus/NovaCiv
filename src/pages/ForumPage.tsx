@@ -11,6 +11,7 @@ import {
 import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
 import { useMember } from "../hooks/useMember";
+import LanguageSwitcher from "../components/LanguageSwitcher";
 
 type Topic = {
   id: string;
@@ -89,7 +90,7 @@ const labels = {
     en: "Create topic",
     de: "Thema erstellen",
     es: "Crear tema",
-  }, 
+  },
   topicsList: {
     ru: "Темы",
     en: "Topics",
@@ -155,7 +156,7 @@ const ForumPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Метаданные по ответам: количество и время последнего ответа
+  // Метаданные по ответам
   useEffect(() => {
     const postsRef = ref(db, "forum/posts");
 
@@ -230,7 +231,6 @@ const ForumPage: React.FC = () => {
       ? "es-ES"
       : "en-US";
 
-  // Темы, отсортированные по последней активности (ответ или создание)
   const orderedTopics = [...topics].sort((a, b) => {
     const aMeta = postsMeta[a.id];
     const bMeta = postsMeta[b.id];
@@ -242,25 +242,22 @@ const ForumPage: React.FC = () => {
   });
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-white to-zinc-50 text-zinc-900">
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-        {/* Верхняя панель */}
-        <header className="flex items-center justify-between gap-3">
-          <button
-            onClick={() => (window.location.href = "/")}
-            className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 transition"
-          >
-            {t("backToMain")}
-          </button>
+    <main className="min-h-screen bg-white text-zinc-900">
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
 
-          <div className="text-right">
-            <div className="text-xs uppercase tracking-wide text-zinc-400">
-              NovaCiv
-            </div>
-            <div className="text-sm font-semibold text-zinc-800">
+        {/* НОВАЯ ШАПКА — без кнопки "На главную" */}
+        <header className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold text-zinc-900">
               {t("title")}
-            </div>
+            </h1>
+            <p className="text-sm text-zinc-600 max-w-lg">
+              {labels.intro[language]}
+            </p>
           </div>
+
+          {/* Языковой переключатель */}
+          <LanguageSwitcher />
         </header>
 
         <section className="grid gap-6 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] items-start">
@@ -274,7 +271,9 @@ const ForumPage: React.FC = () => {
               {loading && <p className="text-xs text-zinc-500">…</p>}
 
               {!loading && orderedTopics.length === 0 && (
-                <p className="text-sm text-zinc-500">{t("noTopics")}</p>
+                <p className="text-sm text-zinc-500">
+                  {t("noTopics")}
+                </p>
               )}
 
               {orderedTopics.map((topic) => {
@@ -297,24 +296,26 @@ const ForumPage: React.FC = () => {
                         {getSectionLabel(topic.section, language)}
                       </span>
                     </div>
+
                     <p className="text-xs text-zinc-600 line-clamp-2">
                       {topic.content}
                     </p>
+
                     <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
                       <span>
                         {topic.authorNickname
                           ? `@${topic.authorNickname}`
                           : "anon"}
                       </span>
+
                       <span className="inline-flex items-center gap-3">
                         <span className="inline-flex items-center gap-1">
                           <span>💬</span>
                           <span>{replies}</span>
                         </span>
+
                         {lastActivity && (
-                          <span>
-                            {new Date(lastActivity).toLocaleString(langCode)}
-                          </span>
+                          <span>{new Date(lastActivity).toLocaleString(langCode)}</span>
                         )}
                       </span>
                     </div>
@@ -329,7 +330,9 @@ const ForumPage: React.FC = () => {
             <h2 className="text-sm font-semibold text-zinc-700">
               {t("newTopicTitle")}
             </h2>
-            <p className="text-xs text-zinc-500">{labels.intro[language]}</p>
+            <p className="text-xs text-zinc-500">
+              {labels.intro[language]}
+            </p>
 
             <form className="space-y-3" onSubmit={handleSubmit}>
               <div className="space-y-1">
@@ -376,9 +379,7 @@ const ForumPage: React.FC = () => {
               </div>
 
               {error && (
-                <p className="text-xs text-red-500">
-                  {error}
-                </p>
+                <p className="text-xs text-red-500">{error}</p>
               )}
 
               <div className="flex justify-end">

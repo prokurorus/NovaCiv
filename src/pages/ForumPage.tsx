@@ -20,7 +20,9 @@ type Topic = {
   section: string;
   createdAt?: number;
   authorNickname?: string | null;
+  lang?: Language; // язык, в котором создана тема
 };
+
 
 type PostsMeta = {
   repliesCount: number;

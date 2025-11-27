@@ -261,36 +261,43 @@ const AssistantWidget: React.FC = () => {
   };
 
   // ---------- Вызов Netlify-функции с текстом ----------
-  const sendToBackend = async (
-    userText: string
-  ): Promise<{ answer?: string; error?: string }> => {
-    const page =
-      typeof window !== "undefined" ? window.location.pathname : "/";
+const sendToBackend = async (
+  userText: string
+): Promise<{ answer?: string; error?: string }> => {
+  const page =
+    typeof window !== "undefined" ? window.location.pathname : "/";
 
-    try {
-      const res = await fetch("/.netlify/functions/ai-domovoy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language: lang,
-          page,
-          messages: [
-            {
-              role: "system",
-              content:
-                "Ты — Домовой проекта NovaCiv. Отвечай кратко, по существу, дружелюбно. Если к тебе обращаются на русском — отвечай по-русски. Если на другом языке — отвечай на нём.",
-            },
-            ...messages.map((m) => ({
-              role: m.role,
-              content: m.text,
-            })),
-            {
-              role: "user",
-              content: userText,
-            },
-          ],
-        }),
-      });
+  // Берём только последние 20 сообщений
+  const recentMessages = messages
+    .slice(-20)
+    .map((m) => ({
+      role: m.role,
+      content: m.text,
+    }));
+
+  try {
+    const res = await fetch("/.netlify/functions/ai-domovoy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        language: lang,
+        page,
+        messages: recentMessages.concat([
+          {
+            role: "user",
+            content: userText,
+          }
+        ]),
+      }),
+    });
+
+    const data = await res.json();
+    return { answer: data.answer, error: data.error };
+  } catch {
+    return { error: "Сеть недоступна. Попробуй ещё раз." };
+  }
+};
+
 
       const data = await res.json();
       return { answer: data.answer, error: data.error };

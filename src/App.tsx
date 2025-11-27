@@ -7,6 +7,7 @@ import CharterRu from "./pages/Charter-ru";
 import CharterEn from "./pages/Charter-en";
 import CharterDe from "./pages/Charter-de";
 import CharterEs from "./pages/Charter-es";
+import NewsPage from "./pages/News";
 import Join from "./pages/Join";
 import ForumPage from "./pages/ForumPage";
 import TopicPage from "./pages/TopicPage";

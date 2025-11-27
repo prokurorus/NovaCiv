@@ -46,6 +46,12 @@ const sectionLabels: Record<string, Record<Language, string>> = {
     de: "Technik & Website",
     es: "Tecnología y sitio",
   },
+  news: {
+    ru: "Новости движения",
+    en: "Movement news",
+    de: "Bewegungsnachrichten",
+    es: "Noticias del movimiento",
+  },
 };
 
 const labels = {

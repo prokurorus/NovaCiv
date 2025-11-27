@@ -244,8 +244,7 @@ const ForumPage: React.FC = () => {
   return (
     <main className="min-h-screen bg-white text-zinc-900">
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
-
-        {/* НОВАЯ ШАПКА — без кнопки "На главную" */}
+        {/* Шапка */}
         <header className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl font-semibold text-zinc-900">
@@ -256,7 +255,6 @@ const ForumPage: React.FC = () => {
             </p>
           </div>
 
-          {/* Языковой переключатель */}
           <LanguageSwitcher />
         </header>
 
@@ -271,9 +269,7 @@ const ForumPage: React.FC = () => {
               {loading && <p className="text-xs text-zinc-500">…</p>}
 
               {!loading && orderedTopics.length === 0 && (
-                <p className="text-sm text-zinc-500">
-                  {t("noTopics")}
-                </p>
+                <p className="text-sm text-zinc-500">{t("noTopics")}</p>
               )}
 
               {orderedTopics.map((topic) => {
@@ -315,7 +311,9 @@ const ForumPage: React.FC = () => {
                         </span>
 
                         {lastActivity && (
-                          <span>{new Date(lastActivity).toLocaleString(langCode)}</span>
+                          <span>
+                            {new Date(lastActivity).toLocaleString(langCode)}
+                          </span>
                         )}
                       </span>
                     </div>
@@ -378,9 +376,7 @@ const ForumPage: React.FC = () => {
                 />
               </div>
 
-              {error && (
-                <p className="text-xs text-red-500">{error}</p>
-              )}
+              {error && <p className="text-xs text-red-500">{error}</p>}
 
               <div className="flex justify-end">
                 <button

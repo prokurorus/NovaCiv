@@ -212,6 +212,109 @@ function tryHandleCitation(userText, historyMessages) {
   return null;
 }
 
+// ---------- Логика объяснения смысла последнего процитированного пункта ----------
+async function tryHandleExplain(userText, historyMessages, language, apiKey) {
+  const t = normalize(userText);
+  if (!t) return null;
+
+  const hasExplainWord =
+    t.includes("объясни") ||
+    t.includes("объясните") ||
+    t.includes("поясни") ||
+    t.includes("поясните") ||
+    (t.includes("помоги") && t.includes("разобрать")) ||
+    t.includes("разобрать смысл") ||
+    t.includes("объясни смысл") ||
+    t.includes("разъясни");
+
+  const hasPointRef =
+    t.includes("пункт") ||
+    t.includes("пункта") ||
+    t.includes("пункты") ||
+    t.includes("этот пункт") ||
+    t.includes("этого пункта") ||
+    (t.includes("этот") && t.includes("смысл"));
+
+  if (!hasExplainWord || !hasPointRef) {
+    return null;
+  }
+
+  const lastId = extractLastCitedIdFromHistory(historyMessages);
+  if (!lastId) {
+    return null;
+  }
+
+  const section = findSectionById(lastId);
+  if (!section) {
+    return null;
+  }
+
+  const explainLanguage = language || "ru";
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  const systemPrompt = `
+Ты — помощник проекта NovaCiv.
+Твоя задача — спокойно и понятно объяснить смысл одного пункта Устава NovaCiv для обычного человека.
+Не придумывай новых норм и не меняй формулировок Устава — только поясняй, как это можно понять и применить.
+Отвечай на языке кода "${explainLanguage}" (ru — по-русски, en — по-английски и т.п.).
+  `.trim();
+
+  const userPrompt = `
+Объясни, пожалуйста, смысл следующего пункта Устава NovaCiv:
+
+"${section.text}"
+
+Не переписывай его полностью ещё раз (можно цитировать отдельные фразы, если нужно),
+а разложи по полочкам: о чём этот пункт, какие права и обязанности он задаёт, и что он означает для Гражданина.
+  `.trim();
+
+  try {
+    const response = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 400,
+          temperature: 0.4,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(
+        "OpenAI explain-point error:",
+        response.status,
+        text
+      );
+      return null;
+    }
+
+    const data = await response.json();
+    const answer =
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content
+        ? data.choices[0].message.content.trim()
+        : "";
+
+    return answer || null;
+  } catch (e) {
+    console.error("tryHandleExplain runtime error:", e);
+    return null;
+  }
+}
+
 // ---------- Основной handler ----------
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -257,7 +360,21 @@ exports.handler = async (event) => {
       };
     }
 
-    // 2) Во всех остальных случаях — обычный диалог с OpenAI
+    // 2) Пытаемся обработать как "объясни смысл этого пункта"
+    const explanation = await tryHandleExplain(
+      userText,
+      incomingMessages,
+      language,
+      apiKey
+    );
+    if (explanation) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ answer: explanation }),
+      };
+    }
+
+    // 3) Во всех остальных случаях — обычный диалог с OpenAI
 
     const manifestoSlice = sliceText(manifestoRU, 20000);
     const charterSlice = sliceText(charterRU, 20000);

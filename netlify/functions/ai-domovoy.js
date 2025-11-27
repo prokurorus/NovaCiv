@@ -3,9 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 
-// ---------- Глобальные переменные для контекста ----------
+// ---------- Глобальные переменные ----------
 let manifestoRU = "";
 let charterRU = "";
+let charterSections = []; // [{ id: "0.0", text: "0.0. ..." }, ...]
 let loaded = false;
 
 // ---------- Загрузка контекста из файлов (один раз) ----------
@@ -14,14 +15,71 @@ function loadContext() {
 
   try {
     const base = path.resolve("./src/data");
-    manifestoRU = fs.readFileSync(path.join(base, "manifesto_ru.txt"), "utf8");
-    charterRU = fs.readFileSync(path.join(base, "charter_ru.txt"), "utf8");
+    manifestoRU = fs.readFileSync(
+      path.join(base, "manifesto_ru.txt"),
+      "utf8"
+    );
+    charterRU = fs.readFileSync(
+      path.join(base, "charter_ru.txt"),
+      "utf8"
+    );
+
+    parseCharterSections(charterRU);
     loaded = true;
   } catch (e) {
     console.error("Контекст NovaCiv не загружен:", e);
     manifestoRU = "";
     charterRU = "";
+    charterSections = [];
   }
+}
+
+// ---------- Разбор устава в структурированные пункты ----------
+function parseCharterSections(text) {
+  charterSections = [];
+  if (!text) return;
+
+  const lines = text.split(/\r?\n/);
+
+  let currentId = null;
+  let buffer = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine; // не трогаем пробелы внутри строки
+    // Ищем строки вида "0.0.", "1.1.", "10.2" и т.п. в начале строки
+    const m = line.match(/^\s*(\d+\.\d+)\.?\s*(.*)$/);
+    if (m) {
+      // Сохраняем предыдущий пункт
+      if (currentId) {
+        const fullText =
+          `${currentId}. ` + buffer.join("\n").trim();
+        charterSections.push({
+          id: currentId,
+          text: fullText.trim(),
+        });
+      }
+      currentId = m[1]; // "0.0"
+      const rest = m[2] || "";
+      buffer = [rest];
+    } else if (currentId) {
+      buffer.push(line);
+    } else {
+      // Текст до первого пронумерованного пункта игнорируем для схемы
+    }
+  }
+
+  if (currentId) {
+    const fullText =
+      `${currentId}. ` + buffer.join("\n").trim();
+    charterSections.push({
+      id: currentId,
+      text: fullText.trim(),
+    });
+  }
+
+  console.log(
+    `Разобрано пунктов устава: ${charterSections.length}`
+  );
 }
 
 function sliceText(text, maxChars) {
@@ -29,8 +87,133 @@ function sliceText(text, maxChars) {
   return text.length > maxChars ? text.slice(0, maxChars) : text;
 }
 
+// ---------- Вспомогательные функции для цитирования ----------
+function normalize(str) {
+  return (str || "").toLowerCase();
+}
+
+// Находим последний ответ ассистента и выдираем оттуда ид пункта (0.0, 1.1 и т.п.)
+function extractLastCitedIdFromHistory(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant" || !m.content) continue;
+    const match = m.content.match(/(\d+\.\d+)/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+// Находим пункт по id
+function findSectionById(id) {
+  if (!id || !charterSections.length) return null;
+  return charterSections.find((s) => s.id === id) || null;
+}
+
+// Находим "следующий" пункт относительно указанного id
+function findNextSection(id) {
+  if (!id || !charterSections.length) return null;
+  const idx = charterSections.findIndex((s) => s.id === id);
+  if (idx === -1 || idx >= charterSections.length - 1) return null;
+  return charterSections[idx + 1];
+}
+
+// Находим "предыдущий" пункт
+function findPrevSection(id) {
+  if (!id || !charterSections.length) return null;
+  const idx = charterSections.findIndex((s) => s.id === id);
+  if (idx <= 0) return null;
+  return charterSections[idx - 1];
+}
+
+// Пытаемся вытащить явно указанный номер пункта из текста
+function extractExplicitIdFromText(text) {
+  const t = normalize(text);
+
+  // Сначала ищем "пункт 0.0", "пункт 1.1" и т.п.
+  let m = t.match(/пункт[^0-9]*?(\d+\.\d+)/);
+  if (m) return m[1];
+
+  // Обработка "0 0", "1 1" после слова "пункт"
+  if (t.includes("пункт")) {
+    m = t.match(/пункт[^0-9]*?(\d+)\s*[.,]?\s*(\d+)/);
+    if (m) {
+      return `${m[1]}.${m[2]}`;
+    }
+  }
+
+  return null;
+}
+
+// Основная логика: вернуть точную цитату (или null, если не надо цитировать напрямую)
+function tryHandleCitation(userText, historyMessages) {
+  if (!charterSections.length) return null;
+
+  const t = normalize(userText);
+
+  const asksForCitation =
+    t.includes("процитируй") ||
+    t.includes("процитируете") ||
+    t.includes("цитируй") ||
+    t.includes("дай текст") ||
+    t.includes("приведи");
+
+  const mentionsPunkt =
+    t.includes("пункт") || t.includes("пункта") || t.includes("пункты");
+
+  // 1) Явно указан id: "процитируй пункт 0.0", "процитируй пункт 1 1"
+  const explicitId = extractExplicitIdFromText(t);
+  if (explicitId) {
+    const section = findSectionById(explicitId);
+    if (section) {
+      return section.text;
+    }
+    return `Я не нашёл в Уставе пункта с номером "${explicitId}". Проверь, пожалуйста, правильность номера.`;
+  }
+
+  // 2) "самый первый пункт", "первый пункт устава"
+  const asksFirst =
+    (t.includes("самый первый") || t.includes("первый")) &&
+    t.includes("пункт");
+  if (asksFirst && charterSections.length > 0) {
+    return charterSections[0].text;
+  }
+
+  // 3) "следующий пункт"
+  if (asksForCitation && mentionsPunkt && t.includes("следующ")) {
+    const lastId = extractLastCitedIdFromHistory(historyMessages);
+    if (!lastId) {
+      return "Я не вижу, какой пункт был процитирован до этого. Скажи, пожалуйста, номер пункта, который тебя интересует (например, 0.0 или 1.1).";
+    }
+    const nextSection = findNextSection(lastId);
+    if (!nextSection) {
+      return `После пункта ${lastId} в Уставе нет следующего пункта.`;
+    }
+    return nextSection.text;
+  }
+
+  // 4) "предыдущий пункт"
+  if (asksForCitation && mentionsPunkt && t.includes("предыдущ")) {
+    const lastId = extractLastCitedIdFromHistory(historyMessages);
+    if (!lastId) {
+      return "Я не вижу, какой пункт был процитирован до этого. Скажи, пожалуйста, номер пункта, от которого нужно оттолкнуться.";
+    }
+    const prevSection = findPrevSection(lastId);
+    if (!prevSection) {
+      return `До пункта ${lastId} нет предыдущего пункта.`;
+    }
+    return prevSection.text;
+  }
+
+  // Если просто "процитируй пункт устава", но без номера — спросим номер
+  if (asksForCitation && mentionsPunkt) {
+    return "Уточни, пожалуйста, номер пункта Устава, который нужно процитировать (например, 0.0, 1.1 и т.п.), или скажи: «самый первый пункт устава».";
+  }
+
+  return null;
+}
+
+// ---------- Основной handler ----------
 exports.handler = async (event) => {
-  // Только POST
   if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
@@ -54,7 +237,27 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || "{}");
     const language = body.language || "ru";
     const page = body.page || "/";
-    const incomingMessages = Array.isArray(body.messages) ? body.messages : [];
+    const incomingMessages = Array.isArray(body.messages)
+      ? body.messages
+      : [];
+
+    // Последнее сообщение пользователя
+    const lastUser =
+      [...incomingMessages]
+        .reverse()
+        .find((m) => m.role === "user" && m.content) || null;
+    const userText = lastUser?.content || "";
+
+    // 1) Пытаемся обработать запрос как "жёсткую" цитату из Устава
+    const citation = tryHandleCitation(userText, incomingMessages);
+    if (citation) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ answer: citation }),
+      };
+    }
+
+    // 2) Во всех остальных случаях — обычный диалог с OpenAI
 
     const manifestoSlice = sliceText(manifestoRU, 20000);
     const charterSlice = sliceText(charterRU, 20000);
@@ -73,19 +276,18 @@ exports.handler = async (event) => {
 
 ПРАВИЛА ОТВЕТОВ:
 
-1) Если пользователь просит процитировать текст Устава или Манифеста
-   (использует слова "процитируй", "дословно", "дай текст пункта", "приведи пункт", "как написано в уставе" и т.п.),
-   ты обязан привести оригинальный текст соответствующего пункта или абзаца БЕЗ изменений формулировок.
-   Допустимая длина цитаты — до одного-двух абзацев или одного пункта.
+1) Если пользователь прямо просит процитировать текст Устава или Манифеста дословно,
+   ты можешь процитировать один-два абзаца или один пункт, но не целые большие разделы.
+   Старайся быть точным, но не перегружай ответ.
 
 2) Если запрос общий и не содержит прямой просьбы о цитате,
    лучше отвечай кратким и понятным пересказом, объясняй суть своими словами.
 
-3) Не цитируй очень большие куски подряд (целые разделы).
-   Если пользователь просит слишком много, честно скажи об этом, предложи пересказ
-   и при необходимости процитируй только ключевой абзац.
+3) Если пользователь просит слишком большой объём текста (целый раздел),
+   честно скажи, что это слишком много для одного сообщения,
+   и предложи краткое содержание или разбор по частям.
 
---------- Текущий контекст (Устав и Манифест, русская версия) ----------
+--------- Краткий контекст (фрагменты Устава и Манифеста, русская версия) ----------
 ${manifestoSlice}
 -------------------------------------
 ${charterSlice}
@@ -96,7 +298,7 @@ ${charterSlice}
 Отвечай так, как будто ты — живая часть NovaCiv.
     `.trim();
 
-    // Собираем сообщения для OpenAI
+    // Собираем сообщения для OpenAI: наш системный промпт + история
     const messages = [
       { role: "system", content: systemPrompt },
       ...incomingMessages.map((m) => ({

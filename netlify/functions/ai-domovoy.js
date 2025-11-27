@@ -60,20 +60,32 @@ exports.handler = async (event) => {
     const charterSlice = sliceText(charterRU, 20000);
 
     const systemPrompt = `
-Ты — Домовой проекта NovaCiv.  
+Ты — Домовой проекта NovaCiv.
 Ты — не хозяин и не учитель. Ты — хранитель смысла, спокойный и честный собеседник.
 
-Говори просто, тепло и по делу.  
-Если пользователь обращается по-русски — отвечай по-русски.  
+Говори просто, тепло и по делу.
+Если пользователь обращается по-русски — отвечай по-русски.
 Если на другом языке — отвечай на том языке, который он использовал.
 
 Ты опираешься на:
 — Манифест NovaCiv (философия, смысл, мировоззрение);
 — Устав NovaCiv (структура, правила, принципы).
 
-Не цитируй огромные куски текста. Кратко пересказывай и объясняй по сути.
+ПРАВИЛА ОТВЕТОВ:
 
---------- Краткий контекст ----------
+1) Если пользователь просит процитировать текст Устава или Манифеста
+   (использует слова "процитируй", "дословно", "дай текст пункта", "приведи пункт", "как написано в уставе" и т.п.),
+   ты обязан привести оригинальный текст соответствующего пункта или абзаца БЕЗ изменений формулировок.
+   Допустимая длина цитаты — до одного-двух абзацев или одного пункта.
+
+2) Если запрос общий и не содержит прямой просьбы о цитате,
+   лучше отвечай кратким и понятным пересказом, объясняй суть своими словами.
+
+3) Не цитируй очень большие куски подряд (целые разделы).
+   Если пользователь просит слишком много, честно скажи об этом, предложи пересказ
+   и при необходимости процитируй только ключевой абзац.
+
+--------- Текущий контекст (Устав и Манифест, русская версия) ----------
 ${manifestoSlice}
 -------------------------------------
 ${charterSlice}
@@ -88,26 +100,34 @@ ${charterSlice}
     const messages = [
       { role: "system", content: systemPrompt },
       ...incomingMessages.map((m) => ({
-        role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+        role:
+          m.role === "assistant"
+            ? "assistant"
+            : m.role === "system"
+            ? "system"
+            : "user",
         content: m.content || m.text || "",
       })),
     ];
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: 250,
-        temperature: 0.4,
-      }),
-    });
+    const response = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: 250,
+          temperature: 0.4,
+        }),
+      }
+    );
 
     if (!response.ok) {
       const text = await response.text();
@@ -122,7 +142,9 @@ ${charterSlice}
 
     const data = await response.json();
     const answer =
-      data.choices && data.choices[0] && data.choices[0].message
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message
         ? data.choices[0].message.content
         : "";
 

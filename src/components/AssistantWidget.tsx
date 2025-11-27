@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ref, push, query, orderByChild, limitToLast, get } from "firebase/database";
+import {
+  ref,
+  push,
+  query,
+  orderByChild,
+  limitToLast,
+  get,
+} from "firebase/database";
 import { db } from "../lib/firebase";
 
 type Role = "user" | "assistant";
@@ -26,7 +33,9 @@ const getOrCreateClientId = (): string | null => {
     const key = "novaciv_client_id";
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
-    const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const id = `u-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
     window.localStorage.setItem(key, id);
     return id;
   } catch {
@@ -86,11 +95,15 @@ const AssistantWidget: React.FC = () => {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const gestureSeen = window.localStorage.getItem("novaciv_gesture_hint_shown");
+      const gestureSeen = window.localStorage.getItem(
+        "novaciv_gesture_hint_shown",
+      );
       if (!gestureSeen) {
         setShowGestureHint(true);
       }
-      const voiceSeen = window.localStorage.getItem("novaciv_gesture_voice_hint_done");
+      const voiceSeen = window.localStorage.getItem(
+        "novaciv_gesture_voice_hint_done",
+      );
       if (voiceSeen) {
         setGestureVoiceHintDone(true);
       }
@@ -104,8 +117,15 @@ const AssistantWidget: React.FC = () => {
     if (!clientId || loadedFromFirebase) return;
     const load = async () => {
       try {
-        const messagesRef = ref(db, `assistantSessions/${clientId}/messages`);
-        const q = query(messagesRef, orderByChild("ts"), limitToLast(MESSAGES_LIMIT));
+        const messagesRef = ref(
+          db,
+          `assistantSessions/${clientId}/messages`,
+        );
+        const q = query(
+          messagesRef,
+          orderByChild("ts"),
+          limitToLast(MESSAGES_LIMIT),
+        );
         const snap = await get(q);
         if (!snap.exists()) {
           setLoadedFromFirebase(true);
@@ -115,7 +135,11 @@ const AssistantWidget: React.FC = () => {
         const data: { role: Role; text: string; ts?: number }[] = [];
         snap.forEach((child) => {
           const v = child.val();
-          if (v && v.text && (v.role === "user" || v.role === "assistant")) {
+          if (
+            v &&
+            v.text &&
+            (v.role === "user" || v.role === "assistant")
+          ) {
             data.push({
               role: v.role,
               text: v.text,
@@ -225,7 +249,10 @@ const AssistantWidget: React.FC = () => {
 
     setGestureVoiceHintDone(true);
     try {
-      window.localStorage.setItem("novaciv_gesture_voice_hint_done", "1");
+      window.localStorage.setItem(
+        "novaciv_gesture_voice_hint_done",
+        "1",
+      );
     } catch {
       // ignore
     }
@@ -261,43 +288,33 @@ const AssistantWidget: React.FC = () => {
   };
 
   // ---------- Вызов Netlify-функции с текстом ----------
-const sendToBackend = async (
-  userText: string
-): Promise<{ answer?: string; error?: string }> => {
-  const page =
-    typeof window !== "undefined" ? window.location.pathname : "/";
+  const sendToBackend = async (
+    userText: string,
+  ): Promise<{ answer?: string; error?: string }> => {
+    const page =
+      typeof window !== "undefined" ? window.location.pathname : "/";
 
-  // Берём только последние 20 сообщений
-  const recentMessages = messages
-    .slice(-20)
-    .map((m) => ({
+    // Берём только последние 20 сообщений
+    const recentMessages = messages.slice(-20).map((m) => ({
       role: m.role,
       content: m.text,
     }));
 
-  try {
-    const res = await fetch("/.netlify/functions/ai-domovoy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        language: lang,
-        page,
-        messages: recentMessages.concat([
-          {
-            role: "user",
-            content: userText,
-          }
-        ]),
-      }),
-    });
-
-    const data = await res.json();
-    return { answer: data.answer, error: data.error };
-  } catch {
-    return { error: "Сеть недоступна. Попробуй ещё раз." };
-  }
-};
-
+    try {
+      const res = await fetch("/.netlify/functions/ai-domovoy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: lang,
+          page,
+          messages: recentMessages.concat([
+            {
+              role: "user",
+              content: userText,
+            },
+          ]),
+        }),
+      });
 
       const data = await res.json();
       return { answer: data.answer, error: data.error };
@@ -335,11 +352,14 @@ const sendToBackend = async (
   // ---------- Сохранение пары сообщений в Firebase ----------
   const savePairToFirebase = async (
     userMsg: ChatMessage,
-    assistantMsg: ChatMessage
+    assistantMsg: ChatMessage,
   ) => {
     if (!clientId) return;
     try {
-      const messagesRef = ref(db, `assistantSessions/${clientId}/messages`);
+      const messagesRef = ref(
+        db,
+        `assistantSessions/${clientId}/messages`,
+      );
       const ts = Date.now();
 
       await push(messagesRef, {
@@ -409,7 +429,10 @@ const sendToBackend = async (
   };
 
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (touchStartYRef.current === null || touchStartXRef.current === null) {
+    if (
+      touchStartYRef.current === null ||
+      touchStartXRef.current === null
+    ) {
       return;
     }
 
@@ -440,7 +463,6 @@ const sendToBackend = async (
   };
 
   // ---------- РЕНДЕР ----------
-
   return (
     <>
       {/* Плавающая кнопка */}
@@ -497,8 +519,8 @@ const sendToBackend = async (
           >
             {messages.length === 0 && (
               <div className="text-xs text-zinc-500">
-                Задай вопрос голосом или текстом. Голосовой вопрос после паузы
-                отправится автоматически.
+                Задай вопрос голосом или текстом. Голосовой вопрос после
+                паузы отправится автоматически.
               </div>
             )}
             {messages.map((m) => (
@@ -539,9 +561,8 @@ const sendToBackend = async (
             </div>
             {showGestureHint && (
               <div className="text-[10px] text-zinc-400">
-                На телефоне можно управлять жестами:
-                {" "}
-                свайп вверх — новый диалог, свайп вниз — свернуть окно.
+                На телефоне можно управлять жестами: свайп вверх — новый
+                диалог, свайп вниз — свернуть окно.
               </div>
             )}
           </div>

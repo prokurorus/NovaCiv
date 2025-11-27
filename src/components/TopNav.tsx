@@ -56,6 +56,18 @@ export default function TopNav() {
       label: { ru: "Устав", en: "Charter", de: "Charta", es: "Carta" },
       active: pathname.startsWith("/Charter"),
     },
+        {
+      id: "news",
+      href: "/news",
+      label: {
+        ru: "Лента",
+        en: "News feed",
+        de: "News",
+        es: "Noticias",
+      },
+      active: pathname === "/news",
+    },
+
     {
       id: "join",
       href: "/join",

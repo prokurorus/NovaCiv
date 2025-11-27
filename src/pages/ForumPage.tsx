@@ -213,6 +213,7 @@ const ForumPage: React.FC = () => {
         createdAt: Date.now(),
         createdAtServer: serverTimestamp(),
         authorNickname: member.nickname ?? null,
+        lang: language, // запоминаем, на каком языке создавалась тема
       });
 
       const topicId = newRef.key;

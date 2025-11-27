@@ -545,7 +545,18 @@ export default function App() {
     );
   }
 
-  // 5) Присоединиться
+  // 5) Новостная лента
+  if (pathname === "/news") {
+    return (
+      <>
+        <Header />
+        <NewsPage />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // 6) Присоединиться
   if (pathname === "/join") {
     return (
       <>
@@ -556,7 +567,7 @@ export default function App() {
     );
   }
 
-  // 6) Форум и темы
+  // 7) Форум и темы
   if (pathname === "/forum") {
     return (
       <>

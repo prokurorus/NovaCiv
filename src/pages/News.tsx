@@ -1,129 +1,27 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { db } from "../lib/firebase";
+import { onValue, query, ref, orderByChild } from "firebase/database";
 import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
 import LanguageSwitcher from "../components/LanguageSwitcher";
 
-type Source = "telegram" | "reddit" | "update" | "video" | "essay";
-
-type NewsItem = {
+type ForumTopic = {
   id: string;
-  date: string; // YYYY-MM-DD
-  lang: Language;
-  source: Source;
   title: string;
-  body: string;
+  content: string;
+  section: string;
+  createdAt: number;
+  lang?: Language;
 };
 
-const sourceLabel: Record<Source, Record<Language, string>> = {
-  telegram: {
-    ru: "Пост Telegram",
-    en: "Telegram post",
-    de: "Telegram-Post",
-    es: "Publicación en Telegram",
+const sourceLabel = {
+  news: {
+    ru: "Новости движения",
+    en: "Movement news",
+    de: "News der Bewegung",
+    es: "Noticias del movimiento",
   },
-  reddit: {
-    ru: "Дискуссия на Reddit",
-    en: "Reddit discussion",
-    de: "Reddit-Diskussion",
-    es: "Discusión en Reddit",
-  },
-  update: {
-    ru: "Обновление проекта",
-    en: "Project update",
-    de: "Projektupdate",
-    es: "Actualización del proyecto",
-  },
-  video: {
-    ru: "Видео / сценарий",
-    en: "Video script",
-    de: "Videoskript",
-    es: "Guion de video",
-  },
-  essay: {
-    ru: "Философская заметка",
-    en: "Philosophical note",
-    de: "Philosophische Notiz",
-    es: "Nota filosófica",
-  },
-};
-
-const newsItems: NewsItem[] = [
-  // === RU ===
-  {
-    id: "ru-001",
-    date: "2025-11-27",
-    lang: "ru",
-    source: "telegram",
-    title: "Кто сказал, что цивилизацию нельзя переписать?",
-    body:
-      "Кто сказал, что цивилизацию нельзя переписать?\nМожно.\nГлавное — начать.\n\nNovaCiv — черновик будущего, который уже пишется.\nhttps://novaciv.space",
-  },
-  {
-    id: "ru-002",
-    date: "2025-11-27",
-    lang: "ru",
-    source: "telegram",
-    title: "Голоса, которые нельзя купить",
-    body:
-      "Если убрать власть и оставить только людей — что останется?\nОтвет простой: ответственность.\n\nВ NovaCiv голос нельзя продать, купить или передать. Это не ресурс, а личное право.\nhttps://novaciv.space",
-  },
-  {
-    id: "ru-003",
-    date: "2025-11-27",
-    lang: "ru",
-    source: "telegram",
-    title: "Цивилизация как черновик",
-    body:
-      "Каждая эпоха — это черновик следующей.\nМир, который мы получили, полон иерархий, страха и лжи.\nМир, который мы строим, должен быть другим.\n\nNovaCiv — попытка начать новый черновик осознанно, а не через катастрофу.\nhttps://novaciv.space",
-  },
-  {
-    id: "ru-004",
-    date: "2025-11-27",
-    lang: "ru",
-    source: "essay",
-    title: "Не исправлять, а проектировать заново",
-    body:
-      "Большинство реформ — это попытка подлатать корабль, который уже идёт ко дну.\n\nNovaCiv исходит из другого принципа: не чинить старую архитектуру власти, а спроектировать новую — прозрачную, распределённую и ненасильственную.\nhttps://novaciv.space",
-  },
-
-  // === EN ===
-  {
-    id: "en-001",
-    date: "2025-11-27",
-    lang: "en",
-    source: "telegram",
-    title: "Who said you can't rewrite a civilization?",
-    body:
-      "Who said a civilization can’t be rewritten?\nYou can.\nYou just need to start.\n\nNovaCiv is the first draft of a future being written now.\nhttps://novaciv.space",
-  },
-  {
-    id: "en-002",
-    date: "2025-11-27",
-    lang: "en",
-    source: "telegram",
-    title: "Votes that cannot be sold",
-    body:
-      "Remove authority. Leave only people. What remains?\nResponsibility.\n\nIn NovaCiv a vote cannot be sold, bought or delegated. It is a personal, non-transferable right.\nhttps://novaciv.space",
-  },
-  {
-    id: "en-003",
-    date: "2025-11-27",
-    lang: "en",
-    source: "essay",
-    title: "Not fixing the system, but redesigning it",
-    body:
-      "Most reforms are attempts to patch a system that is already structurally outdated.\n\nNovaCiv starts from a different assumption: the architecture of power itself must change — towards transparency, direct decisions and non-violent governance.\nhttps://novaciv.space",
-  },
-  {
-    id: "en-004",
-    date: "2025-11-27",
-    lang: "en",
-    source: "reddit",
-    title: "Could a civilization run without rulers?",
-    body:
-      "Technological growth has outpaced political structures for decades.\nThe next step might not be a \"better government\" but a entirely new model: citizen-driven decisions, open-source governance, no concentrated power.\n\nNovaCiv is one of the experiments in that direction.\nhttps://novaciv.space",
-  },
-].sort((a, b) => b.date.localeCompare(a.date));
+} as const;
 
 const titleByLang: Record<Language, string> = {
   ru: "Лента движения NovaCiv",
@@ -150,22 +48,58 @@ const introByLang: Record<Language, string> = {
 const emptyTextByLang: Record<Language, string> = {
   ru:
     "Для выбранного языка пока нет записей.\n" +
-    "Но лента будет пополняться по мере того, как движение NovaCiv будет расти.",
+    "Создай тему в разделе «Новости движения» на форуме — и она появится здесь.",
   en:
     "There are no entries yet for the selected language.\n" +
-    "The feed will grow as the NovaCiv movement evolves.",
+    "Create a topic in the “Movement news” section of the forum and it will appear here.",
   de:
     "Für die ausgewählte Sprache gibt es noch keine Einträge.\n" +
-    "Der Feed wird wachsen, während sich die NovaCiv-Bewegung entwickelt.",
+    "Erstelle ein Thema im Bereich „News der Bewegung“ im Forum, und es erscheint hier.",
   es:
     "Todavía no hay entradas para el idioma seleccionado.\n" +
-    "El flujo crecerá a medida que el movimiento NovaCiv se desarrolle.",
+    "Crea un tema en la sección «Noticias del movimiento» del foro y aparecerá aquí.",
 };
 
 const NewsPage: React.FC = () => {
   const { language } = useLanguage();
+  const [items, setItems] = useState<ForumTopic[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const itemsForLang = newsItems.filter((item) => item.lang === language);
+  useEffect(() => {
+    const topicsRef = query(ref(db, "forum/topics"), orderByChild("createdAt"));
+
+    const unsubscribe = onValue(topicsRef, (snapshot) => {
+      const value = snapshot.val() || {};
+
+      const list: ForumTopic[] = Object.entries(value)
+        .map(([id, raw]) => {
+          const t = raw as any;
+          return {
+            id,
+            title: t.title ?? "",
+            content: t.content ?? "",
+            section: t.section ?? "general",
+            createdAt: t.createdAt ?? 0,
+            lang: (t.lang as Language) ?? undefined,
+          };
+        })
+        .filter((topic) => topic.section === "news");
+
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+      setItems(list);
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  const itemsForLang = items.filter((item) => {
+    if (!item.lang) return true;
+    return item.lang === language;
+  });
 
   return (
     <main className="min-h-screen bg-zinc-50">
@@ -184,31 +118,41 @@ const NewsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-4">
-          {itemsForLang.map((item) => (
-            <article key={item.id} className="card space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
-                <span>{item.date}</span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  <span>{sourceLabel[item.source][language]}</span>
-                </span>
-              </div>
-              <h2 className="text-base font-semibold text-zinc-900">
-                {item.title}
-              </h2>
-              <p className="text-sm text-zinc-700 whitespace-pre-wrap text-justify">
-                {item.body}
-              </p>
-            </article>
-          ))}
+        {loading ? (
+          <p className="text-sm text-zinc-500">
+            {language === "ru" ? "Загрузка ленты..." : "Loading feed..."}
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {itemsForLang.map((item) => (
+              <article key={item.id} className="card space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
+                  <span>
+                    {item.createdAt
+                      ? new Date(item.createdAt).toLocaleDateString()
+                      : ""}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    <span>{sourceLabel.news[language]}</span>
+                  </span>
+                </div>
+                <h2 className="text-base font-semibold text-zinc-900">
+                  {item.title}
+                </h2>
+                <p className="text-sm text-zinc-700 whitespace-pre-wrap text-justify">
+                  {item.content}
+                </p>
+              </article>
+            ))}
 
-          {itemsForLang.length === 0 && (
-            <p className="text-sm text-zinc-500 whitespace-pre-wrap">
-              {emptyTextByLang[language]}
-            </p>
-          )}
-        </div>
+            {!itemsForLang.length && !loading && (
+              <p className="text-sm text-zinc-500 whitespace-pre-wrap">
+                {emptyTextByLang[language]}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );

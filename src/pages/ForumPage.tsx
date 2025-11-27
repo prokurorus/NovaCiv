@@ -148,14 +148,15 @@ const ForumPage: React.FC = () => {
       const value = snapshot.val() || {};
       const list: Topic[] = Object.entries(value).map(([id, raw]) => {
         const t = raw as any;
-        return {
-          id,
-          title: t.title ?? "",
-          content: t.content ?? "",
-          section: t.section ?? "general",
-          createdAt: t.createdAt ?? 0,
-          authorNickname: t.authorNickname ?? null,
-        };
+          return {
+            id,
+            title: t.title ?? "",
+            content: t.content ?? "",
+            section: t.section ?? "general",
+            createdAt: t.createdAt ?? 0,
+            authorNickname: t.authorNickname ?? null,
+            lang: (t.lang as Language) ?? undefined,
+          };
       });
 
       setTopics(list);

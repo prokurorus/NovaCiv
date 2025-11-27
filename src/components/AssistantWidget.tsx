@@ -78,6 +78,54 @@ const AssistantWidget: React.FC = () => {
 
   const lang = detectLanguage();
 
+  // ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ЛЕНТЫ ----------
+
+  // Делает аккуратный заголовок из текста ответа
+  const deriveTitleFromText = (text: string): string => {
+    const firstLine = text.split(/\r?\n/)[0].trim();
+    if (firstLine.length >= 10 && firstLine.length <= 120) {
+      return firstLine;
+    }
+    if (firstLine.length > 120) {
+      return firstLine.slice(0, 117) + "...";
+    }
+
+    const sentenceMatch = text.match(/^(.{20,120}?)[.!?](\s|$)/s);
+    if (sentenceMatch) {
+      return sentenceMatch[1].trim();
+    }
+
+    const trimmed = text.trim();
+    if (trimmed.length <= 80) return trimmed;
+    return trimmed.slice(0, 77) + "…";
+  };
+
+  // Публикация новости в раздел "Новости движения" форума
+  const postNewsToForum = async (title: string, content: string) => {
+    try {
+      const topicsRef = ref(db, "forum/topics");
+      const ts = Date.now();
+
+      await push(topicsRef, {
+        title: title.trim(),
+        content: content.trim(),
+        section: "news",
+        createdAt: ts,
+        createdAtServer: ts,
+        authorNickname: clientId || null,
+        lang: lang.toLowerCase().slice(0, 2),
+      });
+    } catch (err) {
+      console.error("News publish error:", err);
+      setError(
+        lang.startsWith("ru")
+          ? "Не получилось отправить в Ленту. Попробуй ещё раз позже."
+          : "Failed to publish to the feed. Please try again later.",
+      );
+      throw err;
+    }
+  };
+
   // ---------- Скролл вниз при новых сообщениях ----------
   useEffect(() => {
     if (scrollRef.current) {
@@ -392,6 +440,56 @@ const AssistantWidget: React.FC = () => {
       text: clean,
     };
 
+    // Проверяем, не команда ли это "добавь в ленту"
+    const lower = clean.toLowerCase();
+
+    const isPublishCommand =
+      lower === "добавь в ленту" ||
+      lower === "в ленту" ||
+      lower === "добавь это в ленту" ||
+      lower === "/feed" ||
+      lower === "/news" ||
+      lower === "/tofeed";
+
+    if (isPublishCommand) {
+      const lastAssistant = [...messages]
+        .slice()
+        .reverse()
+        .find((m) => m.role === "assistant");
+
+      if (!lastAssistant) {
+        setError(
+          lang.startsWith("ru")
+            ? "Пока нечего отправлять в Ленту — нет последнего ответа."
+            : "There is nothing to publish yet — no last answer found.",
+        );
+        return;
+      }
+
+      try {
+        const title = deriveTitleFromText(lastAssistant.text);
+        await postNewsToForum(title, lastAssistant.text);
+
+        const confirmationText = lang.startsWith("ru")
+          ? "Я добавил последний ответ в Ленту движения NovaCiv."
+          : "I have added the last answer to the NovaCiv movement feed.";
+
+        const assistantMessage: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          text: confirmationText,
+        };
+
+        setMessages((prev) => [...prev, userMessage, assistantMessage]);
+        savePairToFirebase(userMessage, assistantMessage);
+        requestVoice(assistantMessage.text);
+      } catch {
+        // Ошибка уже установлена внутри postNewsToForum
+      }
+      return;
+    }
+
+    // Обычный диалог с Домовым
     setMessages((prev) => [...prev, userMessage]);
 
     const { answer, error: backendError } = await sendToBackend(clean);

@@ -447,6 +447,8 @@ const AssistantWidget: React.FC = () => {
       lower === "добавь в ленту" ||
       lower === "в ленту" ||
       lower === "добавь это в ленту" ||
+      lower === "опубликуй в ленту" ||
+      lower === "опубликуй это в ленту" ||
       lower === "/feed" ||
       lower === "/news" ||
       lower === "/tofeed";

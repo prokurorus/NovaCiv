@@ -4,10 +4,8 @@ export default function ManifestoEs() {
   return (
     <main className="min-h-screen bg-white text-zinc-800">
       <div className="max-w-4xl mx-auto px-6 py-10 space-y-10">
-
         {/* Top bar */}
         <header className="flex items-center justify-between">
-         
           <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-50/80 px-4 py-1 text-[11px] font-medium text-zinc-600 shadow-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             <span>Manifiesto • Español</span>
@@ -432,7 +430,6 @@ Si sientes que esto es tuyo, bienvenido a casa.
             </a>
           </div>
         </footer>
-
       </div>
     </main>
   );

@@ -51,10 +51,11 @@ const sectionLabels: Record<string, Record<Language, string>> = {
   news: {
     ru: "Новости движения",
     en: "Movement news",
-    de: "Bewegungsnachrichten",
+    de: "News der Bewegung",
     es: "Noticias del movimiento",
   },
 };
+
 
 const labels = {
   title: {

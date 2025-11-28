@@ -12,26 +12,19 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // например: https:
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
 // Максимум новых новостей за один запуск (чтобы не сжечь токены)
-const MAX_NEW_ITEMS_PER_RUN = 6;
+// Для начала берём мало, чтобы не упираться в лимит 30 секунд у Netlify
+const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Источники новостей (можно расширять)
+// Источники новостей (для теста — только один, самый простой)
 const SOURCES = [
   {
     id: "bbc_world",
     url: "https://feeds.bbci.co.uk/news/world/rss.xml",
     category: "politics",
   },
-  {
-    id: "mit_tech_review",
-    url: "https://www.technologyreview.com/feed/",
-    category: "tech",
-  },
-  {
-    id: "nature_ai",
-    url: "https://www.nature.com/subjects/artificial-intelligence.rss",
-    category: "science",
-  },
+  // Остальные источники добавим позже, когда убедимся, что всё работает стабильно
 ];
+
 
 // Промпт NovaCiv для новостей
 const SYSTEM_PROMPT = `

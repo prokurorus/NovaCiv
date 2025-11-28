@@ -185,18 +185,19 @@ async function analyzeNewsItem(item) {
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
   const userPrompt = `
-Новостной материал:
+News item:
 
-Источник: ${item.sourceId}
-Заголовок: ${item.title || "(нет заголовка)"}
-Ссылка: ${item.link || "(нет ссылки)"}
+Source: ${item.sourceId}
+Title: ${item.title || "(no title)"}
+Link: ${item.link || "(no link)"}
 
-Краткое описание / фрагмент:
-${item.description || "(описание отсутствует)"}
+Short description / fragment:
+${item.description || "(no description provided)"}
 
-Проанализируй эту новость в формате, указанном в инструкциях.
-Не добавляй заголовок — он уже есть, нам нужен только текст анализа.
+Please analyse this news item in the format described in the instructions.
+Do not repeat the title. We only need the analytical text.
 `.trim();
+
 
   const response = await fetch(
     "https://api.openai.com/v1/chat/completions",

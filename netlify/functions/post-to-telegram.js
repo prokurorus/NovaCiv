@@ -35,14 +35,19 @@ exports.handler = async (event) => {
     }
 
     const token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-
+    
+    // Сначала пробуем отдельный чат для новостей, если он есть.
+    // Если нет — используем общий TELEGRAM_CHAT_ID (как сейчас).
+    const chatId =
+      process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+    
     if (!token || !chatId) {
       return {
         statusCode: 500,
-        body: "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID env vars",
+        body: "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID/TELEGRAM_NEWS_CHAT_ID env vars",
       };
     }
+
 
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
 

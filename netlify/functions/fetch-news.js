@@ -4,7 +4,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Telegram: бот и канал для автопостинга новостей (EN сейчас, потом расширим)
+// Telegram: бот и канал для автопостинга новостей (пока EN)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_NEWS_CHAT_ID =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
@@ -137,6 +137,31 @@ async function fetchRssSource(source) {
   return parseRss(xml, source.id);
 }
 
+// Нормализованный заголовок для сравнения (без регулярок)
+function normalizeTitle(title) {
+  if (!title) return "";
+  let s = title.trim().toLowerCase();
+  let result = "";
+  let inSpace = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const isSpace =
+      ch === " " || ch === "\n" || ch === "\t" || ch === "\r" || ch === "\f";
+    if (isSpace) {
+      if (!inSpace) {
+        result += " ";
+        inSpace = true;
+      }
+    } else {
+      result += ch;
+      inSpace = false;
+    }
+  }
+
+  return result;
+}
+
 // Ключ уникальности новости
 function makeNewsKeyFromParts(sourceId, link, guid, title) {
   const s = sourceId || "unknown";
@@ -154,36 +179,43 @@ function makeNewsKeyFromItem(item) {
 }
 
 // Загружаем уже существующие новости из forum/topics
-async function loadExistingNewsKeys() {
-  const set = new Set();
-  if (!FIREBASE_DB_URL) return set;
+async function loadExistingNewsInfo() {
+  const strongKeys = new Set();
+  const titleKeys = new Set();
+
+  if (!FIREBASE_DB_URL) return { strongKeys, titleKeys };
 
   try {
     const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`);
     if (!res.ok) {
       console.error("Failed to read existing topics:", res.status);
-      return set;
+      return { strongKeys, titleKeys };
     }
     const data = await res.json();
-    if (!data || typeof data !== "object") return set;
+    if (!data || typeof data !== "object") return { strongKeys, titleKeys };
 
     for (const id of Object.keys(data)) {
       const t = data[id];
       if (!t || t.section !== "news") continue;
 
-      const key = makeNewsKeyFromParts(
+      const strongKey = makeNewsKeyFromParts(
         t.sourceId,
         t.originalLink,
         t.originalGuid,
         t.title,
       );
-      set.add(key);
+      strongKeys.add(strongKey);
+
+      const titleKey = normalizeTitle(t.title || "");
+      if (titleKey) {
+        titleKeys.add(titleKey);
+      }
     }
   } catch (e) {
     console.error("Error loading existing news keys:", e);
   }
 
-  return set;
+  return { strongKeys, titleKeys };
 }
 
 // Сохраняем новость в forum/topics
@@ -334,7 +366,7 @@ exports.handler = async (event) => {
     }
 
     // 1) Считываем уже существующие новости из форума
-    const existingKeys = await loadExistingNewsKeys();
+    const { strongKeys, titleKeys } = await loadExistingNewsInfo();
 
     // 2) Забираем RSS со всех источников
     let allItems = [];
@@ -368,10 +400,18 @@ exports.handler = async (event) => {
     // 3) Отбираем только те, которых ещё нет в базе
     const fresh = [];
     for (const item of allItems) {
-      const key = makeNewsKeyFromItem(item);
-      if (existingKeys.has(key)) continue;
-      fresh.push({ item, key });
-      existingKeys.add(key); // защита от повторений внутри одного запуска
+      const strongKey = makeNewsKeyFromItem(item);
+      const titleKey = normalizeTitle(item.title || "");
+
+      if (strongKeys.has(strongKey)) continue;
+      if (titleKey && titleKeys.has(titleKey)) continue;
+
+      fresh.push({ item, strongKey, titleKey });
+
+      // Чтобы в этом же запуске не набрать дубли
+      strongKeys.add(strongKey);
+      if (titleKey) titleKeys.add(titleKey);
+
       if (fresh.length >= MAX_NEW_ITEMS_PER_RUN) break;
     }
 

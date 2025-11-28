@@ -4,15 +4,15 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Telegram: бот и канал для автопостинга новостей
+// Telegram: бот и канал для автопостинга новостей (EN сейчас, потом расширим)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_NEWS_CHAT_ID =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
-// Ограничение на количество новостей за один запуск
+// Максимум новостей за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Источники новостей
+// Источники новостей (пока один)
 const SOURCES = [
   {
     id: "bbc_world",
@@ -20,7 +20,8 @@ const SOURCES = [
   },
 ];
 
-// Системный промпт для GPT
+// --------- PROMPTS ---------
+
 const ANALYSIS_SYSTEM_PROMPT = `
 You are an analytical assistant for NovaCiv — a digital civilization project
 built on values of non-violence, science, decentralization and respect for all sentient beings.
@@ -63,6 +64,8 @@ Do not invent facts that are not in the news.
 If information is missing, honestly say what data would be needed.
 `.trim();
 
+// --------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---------
+
 function stripCdata(str) {
   if (!str) return "";
   let s = str.trim();
@@ -89,7 +92,7 @@ function extractTag(xml, tag) {
   return stripCdata(inner);
 }
 
-// Очень простой парсер RSS без регулярных выражений
+// Простой разбор RSS <item>...</item>
 function parseRss(xml, sourceId) {
   const items = [];
   if (!xml) return items;
@@ -124,7 +127,7 @@ function parseRss(xml, sourceId) {
   return items;
 }
 
-// Загрузка RSS источника
+// Загрузка RSS
 async function fetchRssSource(source) {
   const res = await fetch(source.url);
   if (!res.ok) {
@@ -134,55 +137,56 @@ async function fetchRssSource(source) {
   return parseRss(xml, source.id);
 }
 
-// Ключ обработанности новости
-function makeProcessedKey(item) {
-  return `${item.sourceId}__${item.guid}`;
+// Ключ уникальности новости
+function makeNewsKeyFromParts(sourceId, link, guid, title) {
+  const s = sourceId || "unknown";
+  const id = link || guid || title || "";
+  return `${s}__${id}`;
 }
 
-// Читаем, какие новости уже были обработаны
-async function loadProcessedSet() {
-  if (!FIREBASE_DB_URL) return new Set();
+function makeNewsKeyFromItem(item) {
+  return makeNewsKeyFromParts(
+    item.sourceId,
+    item.link,
+    item.guid,
+    item.title,
+  );
+}
+
+// Загружаем уже существующие новости из forum/topics
+async function loadExistingNewsKeys() {
+  const set = new Set();
+  if (!FIREBASE_DB_URL) return set;
 
   try {
-    const res = await fetch(`${FIREBASE_DB_URL}/newsMeta/processed.json`);
-    if (!res.ok) return new Set();
+    const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`);
+    if (!res.ok) {
+      console.error("Failed to read existing topics:", res.status);
+      return set;
+    }
     const data = await res.json();
-    if (!data || typeof data !== "object") return new Set();
-    return new Set(Object.keys(data));
+    if (!data || typeof data !== "object") return set;
+
+    for (const id of Object.keys(data)) {
+      const t = data[id];
+      if (!t || t.section !== "news") continue;
+
+      const key = makeNewsKeyFromParts(
+        t.sourceId,
+        t.originalLink,
+        t.originalGuid,
+        t.title,
+      );
+      set.add(key);
+    }
   } catch (e) {
-    console.error("Failed to load processed news from Firebase:", e);
-    return new Set();
+    console.error("Error loading existing news keys:", e);
   }
+
+  return set;
 }
 
-// Помечаем новость как обработанную
-async function markProcessed(key, item) {
-  if (!FIREBASE_DB_URL) return;
-
-  const body = {
-    sourceId: item.sourceId,
-    guid: item.guid,
-    title: item.title || "",
-    createdAt: Date.now(),
-  };
-
-  try {
-    await fetch(
-      `${FIREBASE_DB_URL}/newsMeta/processed/${encodeURIComponent(
-        key,
-      )}.json`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
-  } catch (e) {
-    console.error("Failed to mark news as processed:", e);
-  }
-}
-
-// Сохраняем новость в forum/topics (section: "news")
+// Сохраняем новость в forum/topics
 async function saveNewsToForum(item, analyticText) {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not set");
@@ -197,6 +201,11 @@ async function saveNewsToForum(item, analyticText) {
     createdAtServer: now,
     authorNickname: "NovaCiv News",
     lang: "en",
+    // дополнительные поля для уникальности и будущей аналитики
+    sourceId: item.sourceId || "",
+    originalGuid: item.guid || "",
+    originalLink: item.link || "",
+    pubDate: item.pubDate || "",
   };
 
   const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
@@ -213,7 +222,7 @@ async function saveNewsToForum(item, analyticText) {
   }
 }
 
-// Отправка новости в Telegram-канал
+// Отправка новости в Telegram
 async function sendNewsToTelegram(item, analyticText) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) return;
 
@@ -227,7 +236,8 @@ async function sendNewsToTelegram(item, analyticText) {
     `📰 ${title}\n` +
     (date ? `${date}\n\n` : "\n") +
     `${analyticText.trim()}\n\n` +
-    (link ? `More: ${link}` : "");
+    (link ? `More: ${link}` : "") +
+    `\n\n— NovaCiv News Engine\nhttps://novaciv.space`;
 
   try {
     const res = await fetch(
@@ -252,7 +262,7 @@ async function sendNewsToTelegram(item, analyticText) {
   }
 }
 
-// Вызов OpenAI для одной новости
+// GPT-анализ одной новости
 async function analyzeNewsItem(item) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");
@@ -278,14 +288,8 @@ ${ANALYSIS_USER_PROMPT_INTRO}
   const body = {
     model,
     messages: [
-      {
-        role: "system",
-        content: ANALYSIS_SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: userPrompt,
-      },
+      { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
     ],
     temperature: 0.3,
   };
@@ -314,7 +318,8 @@ ${ANALYSIS_USER_PROMPT_INTRO}
   return answer;
 }
 
-// Основной handler
+// --------- ОСНОВНОЙ HANDLER ---------
+
 exports.handler = async (event) => {
   try {
     const token = event.queryStringParameters?.token || "";
@@ -328,8 +333,10 @@ exports.handler = async (event) => {
       };
     }
 
-    const processedSet = await loadProcessedSet();
+    // 1) Считываем уже существующие новости из форума
+    const existingKeys = await loadExistingNewsKeys();
 
+    // 2) Забираем RSS со всех источников
     let allItems = [];
     for (const src of SOURCES) {
       try {
@@ -358,12 +365,13 @@ exports.handler = async (event) => {
       return db - da;
     });
 
-    // отбираем свежие, ещё не обработанные
+    // 3) Отбираем только те, которых ещё нет в базе
     const fresh = [];
     for (const item of allItems) {
-      const key = makeProcessedKey(item);
-      if (processedSet.has(key)) continue;
+      const key = makeNewsKeyFromItem(item);
+      if (existingKeys.has(key)) continue;
       fresh.push({ item, key });
+      existingKeys.add(key); // защита от повторений внутри одного запуска
       if (fresh.length >= MAX_NEW_ITEMS_PER_RUN) break;
     }
 
@@ -378,14 +386,14 @@ exports.handler = async (event) => {
       };
     }
 
+    // 4) Обрабатываем свежие новости
     let processedCount = 0;
 
-    for (const { item, key } of fresh) {
+    for (const { item } of fresh) {
       try {
         const analyticText = await analyzeNewsItem(item);
         await saveNewsToForum(item, analyticText);
         await sendNewsToTelegram(item, analyticText);
-        await markProcessed(key, item);
         processedCount++;
       } catch (e) {
         console.error("Failed to process one news item:", e);

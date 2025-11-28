@@ -159,7 +159,7 @@ async function saveNewsToForum(item, analyticText) {
     createdAt: now,
     createdAtServer: now,
     authorNickname: "NovaCiv News",
-    lang: "ru", // сейчас — русская аналитика; позже можно добавить другие языки
+    lang: "en",   
   };
 
   const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {

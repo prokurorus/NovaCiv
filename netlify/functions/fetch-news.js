@@ -278,9 +278,9 @@ function buildTelegramText(item, analyticText) {
 
 // Отправка одной новости в Telegram (не ломает общий процесс при ошибке)
 async function sendNewsToTelegram(item, analyticText) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) {
     console.warn(
-      "Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID",
+      "Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_NEWS_CHAT_ID/TELEGRAM_CHAT_ID",
     );
     return;
   }
@@ -293,11 +293,21 @@ async function sendNewsToTelegram(item, analyticText) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
+        chat_id: TELEGRAM_NEWS_CHAT_ID,
         text,
         disable_web_page_preview: false,
       }),
     });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Telegram API error (news):", res.status, body);
+    }
+  } catch (err) {
+    console.error("Telegram send error (news):", err);
+  }
+}
+
 
     if (!res.ok) {
       const body = await res.text();

@@ -1,14 +1,7 @@
 // netlify/functions/fetch-news.js
 
-// Эта функция:
-// 1) Берёт пару внешних RSS-лент,
-// 2) вытаскивает из них свежие новости,
-// 3) для каждой новости просит OpenAI сделать разбор через призму NovaCiv,
-// 4) записывает результат в Firebase Realtime Database в путь forum/topics
-//    с section: "news" — так же, как это делает Домовой.
-
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // например: https://novaciv-web-default-rtdb.firebaseio.com
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
 // Telegram: бот и канал для автопостинга новостей
@@ -16,21 +9,18 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_NEWS_CHAT_ID =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
-// Максимум новых новостей за один запуск (чтобы не сжечь токены)
-// Для начала берём мало, чтобы не упираться в лимит 30 секунд у Netlify
+// Ограничение на количество новостей за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Источники новостей (для теста — только один, самый простой)
+// Источники новостей
 const SOURCES = [
   {
     id: "bbc_world",
     url: "https://feeds.bbci.co.uk/news/world/rss.xml",
-    category: "politics",
   },
-  // Остальные источники добавим позже, когда убедимся, что всё стабильно
 ];
 
-// Система промпта для GPT
+// Системный промпт для GPT
 const ANALYSIS_SYSTEM_PROMPT = `
 You are an analytical assistant for NovaCiv — a digital civilization project
 built on values of non-violence, science, decentralization and respect for all sentient beings.
@@ -54,55 +44,70 @@ NovaCiv values:
 – personal freedom and responsibility;
 – science, critical thinking and openness to new knowledge;
 – cooperation instead of domination;
-– sustainable attitude to the planet and resources;
-– decentralization of power and distrust of monopolies.
+– sustainable attitude to the planet and resources.
 
 You receive a news item (headline, short description, sometimes a text fragment).
 
 Your task is to briefly and clearly explain the news for NovaCiv readers
 and show how it looks through our values.
 
-Answer in **English** in a calm, neutral tone. Avoid propaganda language and party slogans.
-Do not attack individuals.
+Answer in ENGLISH, in a calm, neutral tone.
 
 Structure of the answer:
 1) Short summary – 3–5 sentences in simple language.
-2) Why it matters – 2–4 sentences about
-   how it affects people, freedoms, the future,
-   technologies, or ecosystems.
-3) NovaCiv perspective – 3–6 sentences: where you see risks of violence, monopolies or
-   manipulation, and where you see chances for science, cooperation and fair social systems.
-4) Question to the reader – 1–2 short questions inviting them to reflect on their own view.
+2) Why it matters – 2–4 sentences.
+3) NovaCiv perspective – 3–6 sentences.
+4) Question to the reader – 1–2 short questions.
 
 Do not invent facts that are not in the news.
-If information is missing, honestly say what data would be needed for solid conclusions.
+If information is missing, honestly say what data would be needed.
 `.trim();
 
+function stripCdata(str) {
+  if (!str) return "";
+  let s = str.trim();
+  const cdataStart = "<![CDATA[";
+  const cdataEnd = "]]>";
+  if (s.startsWith(cdataStart) && s.endsWith(cdataEnd)) {
+    s = s.slice(cdataStart.length, s.length - cdataEnd.length).trim();
+  }
+  return s;
+}
 
-// Очень простой разбор RSS без сторонних библиотек
+// Получить содержимое тега без регулярок
+function extractTag(xml, tag) {
+  if (!xml) return "";
+  const openTag = "<" + tag;
+  let start = xml.indexOf(openTag);
+  if (start === -1) return "";
+  const gtIndex = xml.indexOf(">", start);
+  if (gtIndex === -1) return "";
+  const closeTag = "</" + tag + ">";
+  const end = xml.indexOf(closeTag, gtIndex + 1);
+  if (end === -1) return "";
+  const inner = xml.slice(gtIndex + 1, end);
+  return stripCdata(inner);
+}
+
+// Очень простой парсер RSS без регулярных выражений
 function parseRss(xml, sourceId) {
   const items = [];
-  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-  let m;
+  if (!xml) return items;
 
-  while ((m = itemRegex.exec(xml))) {
-    const itemXml = m[1];
+  let pos = 0;
+  while (true) {
+    const start = xml.indexOf("<item>", pos);
+    if (start === -1) break;
+    const end = xml.indexOf("</item>", start);
+    if (end === -1) break;
 
-    function extract(tag) {
-      const r = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
-      const mm = r.exec(itemXml);
-      if (!mm) return "";
-      return mm[1]
-        .replace(/<!\\[CDATA\\[/g, "")
-        .replace(/\\]\\]>/g, "")
-        .trim();
-    }
+    const itemXml = xml.slice(start + "<item>".length, end);
 
-    const title = extract("title");
-    const link = extract("link");
-    const description = extract("description");
-    const pubDate = extract("pubDate");
-    const guid = extract("guid") || link || title;
+    const title = extractTag(itemXml, "title");
+    const link = extractTag(itemXml, "link");
+    const description = extractTag(itemXml, "description");
+    const pubDate = extractTag(itemXml, "pubDate");
+    const guid = extractTag(itemXml, "guid") || link || title;
 
     items.push({
       sourceId,
@@ -112,12 +117,14 @@ function parseRss(xml, sourceId) {
       description,
       pubDate,
     });
+
+    pos = end + "</item>".length;
   }
 
   return items;
 }
 
-// Загрузка RSS-ленты
+// Загрузка RSS источника
 async function fetchRssSource(source) {
   const res = await fetch(source.url);
   if (!res.ok) {
@@ -127,13 +134,12 @@ async function fetchRssSource(source) {
   return parseRss(xml, source.id);
 }
 
-// Помощник для ключа обработанности новости
+// Ключ обработанности новости
 function makeProcessedKey(item) {
-  // Делаем ключ по sourceId + guid
   return `${item.sourceId}__${item.guid}`;
 }
 
-// Чтение списка уже обработанных новостей
+// Читаем, какие новости уже были обработаны
 async function loadProcessedSet() {
   if (!FIREBASE_DB_URL) return new Set();
 
@@ -149,9 +155,10 @@ async function loadProcessedSet() {
   }
 }
 
-// Пометка новости как обработанной
+// Помечаем новость как обработанную
 async function markProcessed(key, item) {
   if (!FIREBASE_DB_URL) return;
+
   const body = {
     sourceId: item.sourceId,
     guid: item.guid,
@@ -175,8 +182,7 @@ async function markProcessed(key, item) {
   }
 }
 
-// Сохранение новости в forum/topics (section: "news"),
-// чтобы она появилась в Ленте /news
+// Сохраняем новость в forum/topics (section: "news")
 async function saveNewsToForum(item, analyticText) {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not set");
@@ -184,7 +190,7 @@ async function saveNewsToForum(item, analyticText) {
 
   const now = Date.now();
   const payload = {
-    title: item.title || "(без заголовка)",
+    title: item.title || "(no title)",
     content: analyticText.trim(),
     section: "news",
     createdAt: now,
@@ -207,15 +213,15 @@ async function saveNewsToForum(item, analyticText) {
   }
 }
 
-// Отправка новости в Telegram-канал движения
+// Отправка новости в Telegram-канал
 async function sendNewsToTelegram(item, analyticText) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) {
-    return;
-  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) return;
 
   const title = item.title || "(no title)";
   const link = item.link || "";
-  const date = item.pubDate ? new Date(item.pubDate).toISOString().slice(0, 10) : "";
+  const date = item.pubDate
+    ? new Date(item.pubDate).toISOString().slice(0, 10)
+    : "";
 
   const text =
     `📰 ${title}\n` +
@@ -308,10 +314,9 @@ ${ANALYSIS_USER_PROMPT_INTRO}
   return answer;
 }
 
-// Основной handler функции Netlify
+// Основной handler
 exports.handler = async (event) => {
   try {
-    // Простейшая защита по секрету в query ?token=...
     const token = event.queryStringParameters?.token || "";
     if (NEWS_CRON_SECRET && token !== NEWS_CRON_SECRET) {
       return {
@@ -323,10 +328,8 @@ exports.handler = async (event) => {
       };
     }
 
-    // 1) Загружаем уже обработанные новости
     const processedSet = await loadProcessedSet();
 
-    // 2) Тянем RSS со всех источников
     let allItems = [];
     for (const src of SOURCES) {
       try {
@@ -348,14 +351,14 @@ exports.handler = async (event) => {
       };
     }
 
-    // 3) Сортируем по дате (если есть) — новые первыми
+    // сортировка по дате
     allItems.sort((a, b) => {
       const da = a.pubDate ? Date.parse(a.pubDate) : 0;
       const db = b.pubDate ? Date.parse(b.pubDate) : 0;
       return db - da;
     });
 
-    // 4) Фильтруем уже обработанные
+    // отбираем свежие, ещё не обработанные
     const fresh = [];
     for (const item of allItems) {
       const key = makeProcessedKey(item);

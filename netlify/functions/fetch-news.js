@@ -12,7 +12,10 @@ const TELEGRAM_NEWS_CHAT_ID =
 // Максимум новостей за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Источники новостей (пока один)
+// Firebase-путь для метаданных новостей (EN-лента)
+const NEWS_META_PATH = "/newsMeta/en.json";
+
+// Источники новостей (пока один — BBC World)
 const SOURCES = [
   {
     id: "bbc_world",
@@ -163,62 +166,66 @@ function normalizeTitle(title) {
 }
 
 // Ключ уникальности новости
-function makeNewsKeyFromParts(sourceId, link, guid, title) {
-  const s = sourceId || "unknown";
-  const id = link || guid || title || "";
-  return `${s}__${id}`;
-}
-
 function makeNewsKeyFromItem(item) {
-  return makeNewsKeyFromParts(
-    item.sourceId,
-    item.link,
-    item.guid,
-    item.title,
-  );
+  const source = item.sourceId || "unknown";
+  const id = item.link || item.guid || item.title || "";
+  return `${source}__${id}`;
 }
 
-// Загружаем уже существующие новости из forum/topics
-async function loadExistingNewsInfo() {
-  const strongKeys = new Set();
-  const titleKeys = new Set();
+// --------- РАБОТА С FIREBASE-МЕТАДАННЫМИ ---------
 
-  if (!FIREBASE_DB_URL) return { strongKeys, titleKeys };
+async function loadNewsMeta() {
+  const emptyMeta = {
+    processedKeys: {}, // key -> true
+    titleKeys: {}, // normalizedTitle -> true
+  };
+
+  if (!FIREBASE_DB_URL) return emptyMeta;
 
   try {
-    const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`);
+    const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`);
     if (!res.ok) {
-      console.error("Failed to read existing topics:", res.status);
-      return { strongKeys, titleKeys };
+      // если нет узла — вернём пустой
+      return emptyMeta;
     }
     const data = await res.json();
-    if (!data || typeof data !== "object") return { strongKeys, titleKeys };
+    if (!data || typeof data !== "object") return emptyMeta;
 
-    for (const id of Object.keys(data)) {
-      const t = data[id];
-      if (!t || t.section !== "news") continue;
+    const processedKeys =
+      data.processedKeys && typeof data.processedKeys === "object"
+        ? data.processedKeys
+        : {};
+    const titleKeys =
+      data.titleKeys && typeof data.titleKeys === "object"
+        ? data.titleKeys
+        : {};
 
-      const strongKey = makeNewsKeyFromParts(
-        t.sourceId,
-        t.originalLink,
-        t.originalGuid,
-        t.title,
-      );
-      strongKeys.add(strongKey);
-
-      const titleKey = normalizeTitle(t.title || "");
-      if (titleKey) {
-        titleKeys.add(titleKey);
-      }
-    }
+    return { processedKeys, titleKeys };
   } catch (e) {
-    console.error("Error loading existing news keys:", e);
+    console.error("Error loading news meta:", e);
+    return emptyMeta;
   }
-
-  return { strongKeys, titleKeys };
 }
 
-// Сохраняем новость в forum/topics
+async function saveNewsMeta(meta) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(meta),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Failed to write news meta:", res.status, text);
+    }
+  } catch (e) {
+    console.error("Error writing news meta:", e);
+  }
+}
+
+// --------- ЗАПИСЬ В ФОРУМ И ТЕЛЕГУ ---------
+
 async function saveNewsToForum(item, analyticText) {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not set");
@@ -233,7 +240,6 @@ async function saveNewsToForum(item, analyticText) {
     createdAtServer: now,
     authorNickname: "NovaCiv News",
     lang: "en",
-    // дополнительные поля для уникальности и будущей аналитики
     sourceId: item.sourceId || "",
     originalGuid: item.guid || "",
     originalLink: item.link || "",
@@ -254,7 +260,6 @@ async function saveNewsToForum(item, analyticText) {
   }
 }
 
-// Отправка новости в Telegram
 async function sendNewsToTelegram(item, analyticText) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) return;
 
@@ -294,7 +299,8 @@ async function sendNewsToTelegram(item, analyticText) {
   }
 }
 
-// GPT-анализ одной новости
+// --------- GPT АНАЛИЗ ---------
+
 async function analyzeNewsItem(item) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");
@@ -350,7 +356,7 @@ ${ANALYSIS_USER_PROMPT_INTRO}
   return answer;
 }
 
-// --------- ОСНОВНОЙ HANDLER ---------
+// --------- HANDLER ---------
 
 exports.handler = async (event) => {
   try {
@@ -365,8 +371,10 @@ exports.handler = async (event) => {
       };
     }
 
-    // 1) Считываем уже существующие новости из форума
-    const { strongKeys, titleKeys } = await loadExistingNewsInfo();
+    // 1) Загружаем уже обработанные ключи
+    const meta = await loadNewsMeta();
+    const processedKeys = meta.processedKeys || {};
+    const titleKeys = meta.titleKeys || {};
 
     // 2) Забираем RSS со всех источников
     let allItems = [];
@@ -385,43 +393,46 @@ exports.handler = async (event) => {
         body: JSON.stringify({
           ok: true,
           processed: 0,
-          message: "Нет новостей для обработки.",
+          message: "No items in RSS.",
         }),
       };
     }
 
-    // сортировка по дате
+    // сортировка по дате (новые сверху)
     allItems.sort((a, b) => {
       const da = a.pubDate ? Date.parse(a.pubDate) : 0;
       const db = b.pubDate ? Date.parse(b.pubDate) : 0;
       return db - da;
     });
 
-    // 3) Отбираем только те, которых ещё нет в базе
+    // 3) Отбираем ещё не обработанные
     const fresh = [];
     for (const item of allItems) {
-      const strongKey = makeNewsKeyFromItem(item);
-      const titleKey = normalizeTitle(item.title || "");
+      const key = makeNewsKeyFromItem(item);
+      const tKey = normalizeTitle(item.title || "");
 
-      if (strongKeys.has(strongKey)) continue;
-      if (titleKey && titleKeys.has(titleKey)) continue;
+      if (processedKeys[key]) continue;
+      if (tKey && titleKeys[tKey]) continue;
 
-      fresh.push({ item, strongKey, titleKey });
+      fresh.push({ item, key, tKey });
 
-      // Чтобы в этом же запуске не набрать дубли
-      strongKeys.add(strongKey);
-      if (titleKey) titleKeys.add(titleKey);
+      // защищаемся от повторов в этом же запуске
+      processedKeys[key] = true;
+      if (tKey) titleKeys[tKey] = true;
 
       if (fresh.length >= MAX_NEW_ITEMS_PER_RUN) break;
     }
 
     if (!fresh.length) {
+      // просто обновим мету (на случай, если её не было)
+      await saveNewsMeta({ processedKeys, titleKeys });
+
       return {
         statusCode: 200,
         body: JSON.stringify({
           ok: true,
           processed: 0,
-          message: "Все свежие новости уже обработаны ранее.",
+          message: "All recent items are already processed.",
         }),
       };
     }
@@ -429,16 +440,24 @@ exports.handler = async (event) => {
     // 4) Обрабатываем свежие новости
     let processedCount = 0;
 
-    for (const { item } of fresh) {
+    for (const { item, key, tKey } of fresh) {
       try {
         const analyticText = await analyzeNewsItem(item);
         await saveNewsToForum(item, analyticText);
         await sendNewsToTelegram(item, analyticText);
+
+        // ещё раз фиксируем как обработанное (на случай ошибок выше)
+        processedKeys[key] = true;
+        if (tKey) titleKeys[tKey] = true;
+
         processedCount++;
       } catch (e) {
         console.error("Failed to process one news item:", e);
       }
     }
+
+    // 5) Сохраняем обновлённую мету
+    await saveNewsMeta({ processedKeys, titleKeys });
 
     return {
       statusCode: 200,

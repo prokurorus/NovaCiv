@@ -14,7 +14,9 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
 // Для Telegram
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TELEGRAM_NEWS_CHAT_ID =
+  process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+
 
 // Максимум новых новостей за один запуск (чтобы не сжечь токены)
 // Для начала берём мало, чтобы не упираться в лимит 30 секунд у Netlify

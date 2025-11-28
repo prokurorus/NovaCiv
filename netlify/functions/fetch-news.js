@@ -5,11 +5,16 @@
 // 2) вытаскивает из них свежие новости,
 // 3) для каждой новости просит OpenAI сделать разбор через призму NovaCiv,
 // 4) записывает результат в Firebase Realtime Database в путь forum/topics
-//    с section: "news" — так же, как это делает Домовой.
+//    с section: "news" — так же, как это делает Домовой,
+// 5) автоматически отправляет новость в Telegram-канал NovaCiv.
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // например: https://novaciv-web-default-rtdb.firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
+
+// Для Telegram
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 // Максимум новых новостей за один запуск (чтобы не сжечь токены)
 // Для начала берём мало, чтобы не упираться в лимит 30 секунд у Netlify
@@ -24,7 +29,6 @@ const SOURCES = [
   },
   // Остальные источники добавим позже, когда убедимся, что всё работает стабильно
 ];
-
 
 // Промпт NovaCiv для новостей
 const SYSTEM_PROMPT = `
@@ -59,7 +63,6 @@ Structure of the answer:
 Do not invent facts that are not in the news.
 If information is missing, honestly say what data would be needed for solid conclusions.
 `.trim();
-
 
 // Очень простой разбор RSS без сторонних библиотек
 function parseRss(xml, sourceId) {
@@ -159,7 +162,7 @@ async function saveNewsToForum(item, analyticText) {
     createdAt: now,
     createdAtServer: now,
     authorNickname: "NovaCiv News",
-    lang: "en",   
+    lang: "en",
   };
 
   const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
@@ -197,7 +200,6 @@ ${item.description || "(no description provided)"}
 Please analyse this news item in the format described in the instructions.
 Do not repeat the title. We only need the analytical text.
 `.trim();
-
 
   const response = await fetch(
     "https://api.openai.com/v1/chat/completions",
@@ -240,6 +242,68 @@ Do not repeat the title. We only need the analytical text.
   }
 
   return answer;
+}
+
+// Формируем текст для Telegram
+function buildTelegramText(item, analyticText) {
+  const lines = [];
+
+  lines.push("🌐 NovaCiv — Movement news");
+  if (item.pubDate) {
+    const d = new Date(item.pubDate);
+    if (!isNaN(d.getTime())) {
+      lines.push(d.toLocaleDateString("en-GB"));
+    }
+  }
+  lines.push("");
+
+  if (item.title) {
+    lines.push(item.title);
+    lines.push("");
+  }
+
+  if (item.link) {
+    lines.push(`Source: ${item.link}`);
+    lines.push("");
+  }
+
+  lines.push(analyticText.trim());
+  lines.push("");
+  lines.push("Read more on the site: https://novaciv.space/news");
+
+  return lines.join("\n");
+}
+
+// Отправка одной новости в Telegram (не ломает общий процесс при ошибке)
+async function sendNewsToTelegram(item, analyticText) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    console.warn(
+      "Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID",
+    );
+    return;
+  }
+
+  const text = buildTelegramText(item, analyticText);
+
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text,
+        disable_web_page_preview: false,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Telegram API error (news):", res.status, body);
+    }
+  } catch (err) {
+    console.error("Telegram send error (news):", err);
+  }
 }
 
 exports.handler = async (event) => {
@@ -340,6 +404,7 @@ exports.handler = async (event) => {
       try {
         const analyticText = await analyzeNewsItem(item);
         await saveNewsToForum(item, analyticText);
+        await sendNewsToTelegram(item, analyticText); // <-- Автоматический пост в Telegram
         await markProcessed(key, item);
         processedCount++;
       } catch (e) {

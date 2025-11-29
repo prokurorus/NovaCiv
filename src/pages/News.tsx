@@ -12,6 +12,9 @@ type ForumTopic = {
   section: string;
   createdAt: number;
   lang?: Language;
+  sourceId?: string;
+  postKind?: string;
+  authorNickname?: string;
 };
 
 const sourceLabel = {
@@ -32,17 +35,17 @@ const titleByLang: Record<Language, string> = {
 
 const introByLang: Record<Language, string> = {
   ru:
-    "Здесь мы собираем посты, мысли и фрагменты дискуссий вокруг NovaCiv.\n" +
-    "То, что публикуется в Telegram, Reddit и других местах, закрепляется здесь — как живая хроника рождения цифровой цивилизации.",
+    "Здесь мы собираем посты, мысли, новости и фрагменты дискуссий вокруг NovaCiv.\n" +
+    "В этой ленте живут три потока: мировые новости, голос Домового и записи сообщества. Всё, что рождает движение, оседает здесь.",
   en:
-    "Here we collect posts, thoughts and fragments of discussions around NovaCiv.\n" +
-    "What appears on Telegram, Reddit and other platforms is mirrored here as a living log of a digital civilization being born.",
+    "Here we collect posts, thoughts, news and discussion fragments around NovaCiv.\n" +
+    "Three streams live in this feed: world news, Domovoy's voice and community posts. Everything that the movement creates lands here.",
   de:
-    "Hier sammeln wir Beiträge, Gedanken und Diskussionsfragmente rund um NovaCiv.\n" +
-    "Was auf Telegram, Reddit und anderen Plattformen erscheint, wird hier als lebendiges Protokoll einer entstehenden digitalen Zivilisation gespiegelt.",
+    "Hier sammeln wir Beiträge, Gedanken, Nachrichten und Diskussionsfragmente rund um NovaCiv.\n" +
+    "Drei Ströme leben in diesem Feed: Weltnachrichten, die Stimme des Domovoy und Beiträge der Gemeinschaft. Alles, was die Bewegung hervorbringt, landet hier.",
   es:
-    "Aquí reunimos publicaciones, ideas y fragmentos de discusiones en torno a NovaCiv.\n" +
-    "Lo que aparece en Telegram, Reddit y otras plataformas se refleja aquí como un registro vivo de una civilización digital en nacimiento.",
+    "Aquí reunimos publicaciones, ideas, noticias y fragmentos de discusiones en torno a NovaCiv.\n" +
+    "En este feed conviven tres corrientes: noticias del mundo, la voz del Domovoy y las publicaciones de la comunidad. Todo lo que genera el movimiento se queda aquí.",
 };
 
 const emptyTextByLang: Record<Language, string> = {
@@ -58,6 +61,36 @@ const emptyTextByLang: Record<Language, string> = {
   es:
     "Todavía no hay entradas para el idioma seleccionado.\n" +
     "Crea un tema en la sección «Noticias del movimiento» del foro y aparecerá aquí.",
+};
+
+// Тип фильтра
+type FilterType = "all" | "domovoy" | "world" | "community";
+
+const filterLabels: Record<FilterType, Record<Language, string>> = {
+  all: {
+    ru: "Все",
+    en: "All",
+    de: "Alle",
+    es: "Todo",
+  },
+  domovoy: {
+    ru: "Домовой",
+    en: "Domovoy",
+    de: "Domovoy",
+    es: "Domovoy",
+  },
+  world: {
+    ru: "Мировые новости",
+    en: "World news",
+    de: "Weltnachrichten",
+    es: "Noticias del mundo",
+  },
+  community: {
+    ru: "Сообщество",
+    en: "Community",
+    de: "Gemeinschaft",
+    es: "Comunidad",
+  },
 };
 
 // Форматирование даты и времени по языку
@@ -88,6 +121,7 @@ const NewsPage: React.FC = () => {
   const { language } = useLanguage();
   const [items, setItems] = useState<ForumTopic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<FilterType>("all");
 
   useEffect(() => {
     const topicsRef = query(ref(db, "forum/topics"), orderByChild("createdAt"));
@@ -105,6 +139,9 @@ const NewsPage: React.FC = () => {
             section: t.section ?? "general",
             createdAt: t.createdAt ?? 0,
             lang: (t.lang as Language) ?? undefined,
+            sourceId: t.sourceId ?? undefined,
+            postKind: t.postKind ?? undefined,
+            authorNickname: t.authorNickname ?? undefined,
           };
         })
         .filter((topic) => topic.section === "news");
@@ -120,9 +157,38 @@ const NewsPage: React.FC = () => {
     };
   }, []);
 
+  // Фильтрация по языку интерфейса
   const itemsForLang = items.filter((item) => {
-    if (!item.lang) return true;
+    if (!item.lang) return true; // старые записи без lang видны во всех
     return item.lang === language;
+  });
+
+  // Фильтрация по типу
+  const filteredItems = itemsForLang.filter((item) => {
+    if (filter === "all") return true;
+
+    const isDomovoy =
+      item.sourceId === "domovoy" ||
+      (typeof item.postKind === "string" &&
+        item.postKind.startsWith("domovoy:"));
+
+    const hasSource = typeof item.sourceId === "string" && item.sourceId;
+
+    if (filter === "domovoy") {
+      return isDomovoy;
+    }
+
+    if (filter === "world") {
+      // мировые новости: есть sourceId и это не Домовой
+      return hasSource && !isDomovoy;
+    }
+
+    if (filter === "community") {
+      // сообщество: нет sourceId вообще (ручные/форумные записи)
+      return !hasSource;
+    }
+
+    return true;
   });
 
   return (
@@ -142,19 +208,56 @@ const NewsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Фильтры */}
+        <div className="mb-5 flex flex-wrap gap-2">
+          {(["all", "domovoy", "world", "community"] as FilterType[]).map(
+            (f) => {
+              const isActive = filter === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFilter(f)}
+                  className={
+                    "inline-flex items-center rounded-full border px-3 py-1 text-xs transition " +
+                    (isActive
+                      ? "border-zinc-900 bg-zinc-900 text-white shadow-sm"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50")
+                  }
+                >
+                  {filterLabels[f][language]}
+                </button>
+              );
+            },
+          )}
+        </div>
+
         {loading ? (
           <p className="text-sm text-zinc-500">
             {language === "ru" ? "Загрузка ленты..." : "Loading feed..."}
           </p>
         ) : (
           <div className="space-y-4">
-            {itemsForLang.map((item) => (
+            {filteredItems.map((item) => (
               <article key={item.id} className="card space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
                   <span>{formatDateTime(item.createdAt, language)}</span>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    <span>{sourceLabel.news[language]}</span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      <span>{sourceLabel.news[language]}</span>
+                    </span>
+                    {item.sourceId === "domovoy" && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                        Domovoy
+                      </span>
+                    )}
+                    {item.sourceId &&
+                      item.sourceId !== "domovoy" && (
+                        <span className="rounded-full bg-zinc-50 px-2 py-0.5 text-[10px] text-zinc-500">
+                          {item.sourceId}
+                        </span>
+                      )}
                   </span>
                 </div>
                 <h2 className="text-base font-semibold text-zinc-900">
@@ -166,7 +269,7 @@ const NewsPage: React.FC = () => {
               </article>
             ))}
 
-            {!itemsForLang.length && !loading && (
+            {!filteredItems.length && !loading && (
               <p className="text-sm text-zinc-500 whitespace-pre-wrap">
                 {emptyTextByLang[language]}
               </p>

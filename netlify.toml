@@ -3,14 +3,14 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[build.environment]
+  NODE_VERSION = "18"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
-  [[functions]]
-  name = "news-cron"
-  # Раз в час по UTC. Можно будет поменять позже.
+[functions."news-cron"]
+  # Раз в час по UTC
   schedule = "0 * * * *"
-
-

@@ -1,21 +1,33 @@
 // netlify/functions/fetch-news.js
+//
+// Что делает:
+// 1) Берёт новости из RSS (сейчас BBC World).
+// 2) Парсит <item> (title, link, description, pubDate, guid).
+// 3) Проверяет, что уже обрабатывали (по ключу и по заголовку) в /newsMeta/en.json.
+// 4) Для новых новостей вызывает OpenAI, получает текст в стиле NovaCiv.
+// 5) Сохраняет как тему форума (section: "news") в /forum/topics.
+// 6) Отправляет пост в Telegram-канал NovaCiv.
+// 7) Обновляет /newsMeta/en.json, чтобы при следующем запуске
+//    не было повторов ни в Ленте, ни в Telegram.
+
+// ---------- ENV ----------
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Telegram: бот и канал для автопостинга новостей (пока EN)
+// Telegram: бот + канал для новостей (EN)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_NEWS_CHAT_ID =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
-// Максимум новостей за один запуск
+// Максимум новых новостей за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Firebase-путь для метаданных новостей (EN-лента)
+// Где храним метаданные о уже обработанных новостях (EN)
 const NEWS_META_PATH = "/newsMeta/en.json";
 
-// Источники новостей (пока один — BBC World)
+// Источники новостей (пока один)
 const SOURCES = [
   {
     id: "bbc_world",
@@ -23,55 +35,46 @@ const SOURCES = [
   },
 ];
 
-// --------- PROMPTS ---------
+// ---------- PROMPT ДЛЯ OPENAI ----------
 
-const ANALYSIS_SYSTEM_PROMPT = `
-You are an analytical assistant for NovaCiv — a digital civilization project
-built on values of non-violence, science, decentralization and respect for all sentient beings.
+const SYSTEM_PROMPT = `
+You are an analyst for the digital community "NovaCiv" (New Civilization).
 
-Your job is to:
-– explain what happened in clear, neutral language;
-– show why it matters for ordinary people, freedoms, knowledge and future;
-– look at it through NovaCiv values: non-violence, transparency, decentralization, science,
-  respect for intelligent life and rejection of manipulation.
-
-Avoid propaganda language. Avoid taking sides. Stick to verifiable facts.
-`.trim();
-
-const ANALYSIS_USER_PROMPT_INTRO = `
-You analyze world news for the NovaCiv movement.
-
-NovaCiv values:
-– non-violence and respect for any form of intelligent life;
-– transparency of decisions and honest communication;
-– decentralization of power and distrust of monopolies;
-– personal freedom and responsibility;
-– science, critical thinking and openness to new knowledge;
+Core values of NovaCiv:
+– non-violence and rejection of coercion;
+– freedom and autonomy of the individual;
+– honest dialogue and transparent decision-making;
+– respect for intelligent life and its preservation;
+– science, critical thinking and verifiable knowledge;
 – cooperation instead of domination;
-– sustainable attitude to the planet and resources.
+– sustainable attitude to the planet and resources;
+– decentralization of power and distrust of monopolies.
 
 You receive a news item (headline, short description, sometimes a text fragment).
 
 Your task is to briefly and clearly explain the news for NovaCiv readers
 and show how it looks through our values.
 
-Answer in ENGLISH, in a calm, neutral tone.
+Answer in ENGLISH in a calm, neutral tone. Avoid propaganda language and party slogans.
+Do not attack individuals.
 
 Structure of the answer:
 1) Short summary – 3–5 sentences in simple language.
-2) Why it matters – 2–4 sentences.
-3) NovaCiv perspective – 3–6 sentences.
-4) Question to the reader – 1–2 short questions.
+2) Why it matters – 2–4 sentences about how it affects people, freedoms, the future,
+   technologies, or ecosystems.
+3) NovaCiv perspective – 3–6 sentences: where you see risks of violence, monopolies or
+   manipulation, and where you see chances for science, cooperation and fair social systems.
+4) Question to the reader – 1–2 short questions inviting them to reflect on their own view.
 
 Do not invent facts that are not in the news.
-If information is missing, honestly say what data would be needed.
+If information is missing, honestly say what data would be needed for solid conclusions.
 `.trim();
 
-// --------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---------
+// ---------- ВСПОМОГАТЕЛЬНОЕ ----------
 
 function stripCdata(str) {
   if (!str) return "";
-  let s = str.trim();
+  let s = String(str).trim();
   const cdataStart = "<![CDATA[";
   const cdataEnd = "]]>";
   if (s.startsWith(cdataStart) && s.endsWith(cdataEnd)) {
@@ -80,114 +83,87 @@ function stripCdata(str) {
   return s;
 }
 
-// Получить содержимое тега без регулярок
-function extractTag(xml, tag) {
-  if (!xml) return "";
-  const openTag = "<" + tag;
-  let start = xml.indexOf(openTag);
-  if (start === -1) return "";
-  const gtIndex = xml.indexOf(">", start);
-  if (gtIndex === -1) return "";
-  const closeTag = "</" + tag + ">";
-  const end = xml.indexOf(closeTag, gtIndex + 1);
-  if (end === -1) return "";
-  const inner = xml.slice(gtIndex + 1, end);
-  return stripCdata(inner);
-}
-
-// Простой разбор RSS <item>...</item>
+// Простейший парсер RSS <item> ... </item>
 function parseRss(xml, sourceId) {
   const items = [];
-  if (!xml) return items;
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let match;
 
-  let pos = 0;
-  while (true) {
-    const start = xml.indexOf("<item>", pos);
-    if (start === -1) break;
-    const end = xml.indexOf("</item>", start);
-    if (end === -1) break;
+  while ((match = itemRegex.exec(xml))) {
+    const block = match[1];
 
-    const itemXml = xml.slice(start + "<item>".length, end);
+    const getTag = (tag) => {
+      const re = new RegExp(`<${tag}[^>]*>([\\s\\s]*?)<\\/${tag}>`, "i");
+      const m = block.match(re);
+      return m ? stripCdata(m[1]) : "";
+    };
 
-    const title = extractTag(itemXml, "title");
-    const link = extractTag(itemXml, "link");
-    const description = extractTag(itemXml, "description");
-    const pubDate = extractTag(itemXml, "pubDate");
-    const guid = extractTag(itemXml, "guid") || link || title;
+    const title = getTag("title");
+    const link = getTag("link");
+    const guid = getTag("guid");
+    const pubDate = getTag("pubDate");
+    let description = getTag("description");
+    if (!description) {
+      description = getTag("summary") || getTag("content:encoded") || "";
+    }
 
     items.push({
       sourceId,
-      guid,
-      title,
-      link,
-      description,
-      pubDate,
+      title: title || "",
+      link: link || "",
+      guid: guid || "",
+      pubDate: pubDate || "",
+      description: description || "",
     });
-
-    pos = end + "</item>".length;
   }
 
   return items;
 }
 
-// Загрузка RSS
+// Забираем RSS одного источника
 async function fetchRssSource(source) {
   const res = await fetch(source.url);
   if (!res.ok) {
-    throw new Error(`Failed to fetch RSS: HTTP ${res.status}`);
+    const text = await res.text();
+    throw new Error(
+      `RSS fetch failed for ${source.id}: HTTP ${res.status} – ${text}`,
+    );
   }
   const xml = await res.text();
-  return parseRss(xml, source.id);
+  const items = parseRss(xml, source.id);
+  return items;
 }
 
-// Нормализованный заголовок для сравнения (без регулярок)
+// Нормализация заголовка для анти-дублей
 function normalizeTitle(title) {
   if (!title) return "";
-  let s = title.trim().toLowerCase();
-  let result = "";
-  let inSpace = false;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    const isSpace =
-      ch === " " || ch === "\n" || ch === "\t" || ch === "\r" || ch === "\f";
-    if (isSpace) {
-      if (!inSpace) {
-        result += " ";
-        inSpace = true;
-      }
-    } else {
-      result += ch;
-      inSpace = false;
-    }
-  }
-
-  return result;
+  return title
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[«»"“”]/g, '"')
+    .trim();
 }
 
-// Ключ уникальности новости
-function makeNewsKeyFromItem(item) {
-  const source = item.sourceId || "unknown";
-  const id = item.link || item.guid || item.title || "";
-  return `${source}__${id}`;
+// Ключ новости — по источнику + guid/link/title
+function makeNewsKey(item) {
+  const base = (item.guid || item.link || item.title || "").trim();
+  return `${item.sourceId}::${base.slice(0, 200)}`;
 }
 
-// --------- РАБОТА С FIREBASE-МЕТАДАННЫМИ ---------
+// ---------- ЧТЕНИЕ/ЗАПИСЬ META В FIREBASE ----------
+
+const emptyMeta = { processedKeys: {}, titleKeys: {} };
 
 async function loadNewsMeta() {
-  const emptyMeta = {
-    processedKeys: {}, // key -> true
-    titleKeys: {}, // normalizedTitle -> true
-  };
-
   if (!FIREBASE_DB_URL) return emptyMeta;
 
   try {
     const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`);
     if (!res.ok) {
-      // если нет узла — вернём пустой
+      // если ветка отсутствует — вернём пустую структуру
       return emptyMeta;
     }
+
     const data = await res.json();
     if (!data || typeof data !== "object") return emptyMeta;
 
@@ -224,7 +200,7 @@ async function saveNewsMeta(meta) {
   }
 }
 
-// --------- ЗАПИСЬ В ФОРУМ И ТЕЛЕГУ ---------
+// ---------- ЗАПИСЬ В ФОРУМ ----------
 
 async function saveNewsToForum(item, analyticText) {
   if (!FIREBASE_DB_URL) {
@@ -254,52 +230,73 @@ async function saveNewsToForum(item, analyticText) {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `Firebase write error: HTTP ${res.status} – ${text}`,
-    );
+    throw new Error(`Firebase write error: HTTP ${res.status} – ${text}`);
   }
+}
+
+// ---------- TELEGRAM ----------
+
+function buildTelegramText(item, analyticText) {
+  const lines = [];
+
+  lines.push("🌐 NovaCiv — Movement news");
+  if (item.pubDate) {
+    const d = new Date(item.pubDate);
+    if (!isNaN(d.getTime())) {
+      lines.push(d.toLocaleDateString("en-GB"));
+    }
+  }
+  lines.push("");
+
+  if (item.title) {
+    lines.push(item.title);
+    lines.push("");
+  }
+
+  if (item.link) {
+    lines.push(`Source: ${item.link}`);
+    lines.push("");
+  }
+
+  lines.push(analyticText.trim());
+  lines.push("");
+  lines.push("Read more on the site: https://novaciv.space/news");
+
+  return lines.join("\n");
 }
 
 async function sendNewsToTelegram(item, analyticText) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) return;
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) {
+    console.warn(
+      "Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_NEWS_CHAT_ID/TELEGRAM_CHAT_ID",
+    );
+    return;
+  }
 
-  const title = item.title || "(no title)";
-  const link = item.link || "";
-  const date = item.pubDate
-    ? new Date(item.pubDate).toISOString().slice(0, 10)
-    : "";
-
-  const text =
-    `📰 ${title}\n` +
-    (date ? `${date}\n\n` : "\n") +
-    `${analyticText.trim()}\n\n` +
-    (link ? `More: ${link}` : "") +
-    `\n\n— NovaCiv News Engine\nhttps://novaciv.space`;
+  const text = buildTelegramText(item, analyticText);
 
   try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: TELEGRAM_NEWS_CHAT_ID,
-          text,
-          disable_web_page_preview: false,
-        }),
-      },
-    );
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_NEWS_CHAT_ID,
+        text,
+        disable_web_page_preview: false,
+      }),
+    });
 
     if (!res.ok) {
       const body = await res.text();
-      console.error("Telegram send error:", res.status, body);
+      console.error("Telegram API error (news):", res.status, body);
     }
-  } catch (e) {
-    console.error("Telegram send exception:", e);
+  } catch (err) {
+    console.error("Telegram send error (news):", err);
   }
 }
 
-// --------- GPT АНАЛИЗ ---------
+// ---------- OPENAI АНАЛИЗ ----------
 
 async function analyzeNewsItem(item) {
   if (!OPENAI_API_KEY) {
@@ -316,163 +313,201 @@ Title: ${item.title || "(no title)"}
 Link: ${item.link || "(no link)"}
 
 Short description / fragment:
-${item.description || "(no description)"}
+${item.description || "(no description provided)"}
 
----
-
-${ANALYSIS_USER_PROMPT_INTRO}
+Please analyse this news item in the format described in the instructions.
+Do not repeat the title. We only need the analytical text.
 `.trim();
 
-  const body = {
-    model,
-    messages: [
-      { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.3,
-  };
-
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
       Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 700,
+      temperature: 0.4,
+    }),
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `OpenAI API error: HTTP ${res.status} – ${text}`,
-    );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI API error: HTTP ${response.status} – ${text}`);
   }
 
-  const data = await res.json();
+  const data = await response.json();
   const answer =
-    data.choices?.[0]?.message?.content?.trim() ||
-    "No answer generated.";
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content
+      ? data.choices[0].message.content.trim()
+      : "";
+
+  if (!answer) {
+    throw new Error("Empty answer from OpenAI for news item");
+  }
 
   return answer;
 }
 
-// --------- HANDLER ---------
+// ---------- HANDLER ----------
 
 exports.handler = async (event) => {
-  try {
-    const token = event.queryStringParameters?.token || "";
-    if (NEWS_CRON_SECRET && token !== NEWS_CRON_SECRET) {
+  // Только GET/POST (под крон или ручной вызов)
+  if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: "Method Not Allowed",
+    };
+  }
+
+  // Простой секретный токен
+  if (NEWS_CRON_SECRET) {
+    const qs = event.queryStringParameters || {};
+    if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
       return {
-        statusCode: 401,
-        body: JSON.stringify({
-          ok: false,
-          error: "Unauthorized: bad token",
-        }),
+        statusCode: 403,
+        body: "Forbidden",
       };
     }
+  }
 
-    // 1) Загружаем уже обработанные ключи
+  if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        ok: false,
+        error: "OPENAI_API_KEY или FIREBASE_DB_URL не заданы на сервере.",
+      }),
+    };
+  }
+
+  try {
+    // 1) Загружаем метаданные (что уже обработано)
     const meta = await loadNewsMeta();
-    const processedKeys = meta.processedKeys || {};
-    const titleKeys = meta.titleKeys || {};
+    const processedKeys = { ...(meta.processedKeys || {}) };
+    const titleKeys = { ...(meta.titleKeys || {}) };
 
-    // 2) Забираем RSS со всех источников
-    let allItems = [];
+    // 2) Тянем все источники
+    const allItems = [];
     for (const src of SOURCES) {
       try {
         const items = await fetchRssSource(src);
-        allItems = allItems.concat(items);
-      } catch (e) {
-        console.error(`Failed to fetch source ${src.id}:`, e);
+        allItems.push(...items);
+      } catch (err) {
+        console.error("RSS fetch error:", src.id, err);
       }
     }
 
-    if (!allItems.length) {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          ok: true,
-          processed: 0,
-          message: "No items in RSS.",
-        }),
-      };
-    }
-
-    // сортировка по дате (новые сверху)
+    // 3) Сортируем по дате (сначала новые)
     allItems.sort((a, b) => {
-      const da = a.pubDate ? Date.parse(a.pubDate) : 0;
-      const db = b.pubDate ? Date.parse(b.pubDate) : 0;
+      const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+      const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
       return db - da;
     });
 
-    // 3) Отбираем ещё не обработанные
-    const fresh = [];
+    // 4) Выбираем новые (не обработанные ранее)
+    const toProcess = [];
     for (const item of allItems) {
-      const key = makeNewsKeyFromItem(item);
-      const tKey = normalizeTitle(item.title || "");
+      if (toProcess.length >= MAX_NEW_ITEMS_PER_RUN) break;
 
+      const key = makeNewsKey(item);
+      const titleKey = normalizeTitle(item.title);
+
+      // Уже обработано по ключу
       if (processedKeys[key]) continue;
-      if (tKey && titleKeys[tKey]) continue;
+      // Уже есть новость с таким заголовком (анти-дубликат по title)
+      if (titleKey && titleKeys[titleKey]) continue;
 
-      fresh.push({ item, key, tKey });
+      // На всякий случай не обрабатываем пустые
+      if (!item.title && !item.description) continue;
 
-      // защищаемся от повторов в этом же запуске
-      processedKeys[key] = true;
-      if (tKey) titleKeys[tKey] = true;
+      toProcess.push({ item, key, titleKey });
 
-      if (fresh.length >= MAX_NEW_ITEMS_PER_RUN) break;
+      // Резервируем сразу в памяти, чтобы в рамках одного запуска
+      // не взяли двойной дубликат
+      processedKeys[key] = {
+        reservedAt: Date.now(),
+      };
+      if (titleKey) {
+        titleKeys[titleKey] = {
+          reservedAt: Date.now(),
+        };
+      }
     }
 
-    if (!fresh.length) {
-      // просто обновим мету (на случай, если её не было)
+    if (toProcess.length === 0) {
+      // Просто ничего нового — тихо выходим
       await saveNewsMeta({ processedKeys, titleKeys });
-
       return {
         statusCode: 200,
         body: JSON.stringify({
           ok: true,
           processed: 0,
-          message: "All recent items are already processed.",
+          message: "No new items",
         }),
       };
     }
 
-    // 4) Обрабатываем свежие новости
-    let processedCount = 0;
+    let successCount = 0;
+    const titles = [];
 
-    for (const { item, key, tKey } of fresh) {
+    // 5) Обрабатываем каждую новость
+    for (const entry of toProcess) {
+      const { item, key, titleKey } = entry;
+
       try {
         const analyticText = await analyzeNewsItem(item);
         await saveNewsToForum(item, analyticText);
         await sendNewsToTelegram(item, analyticText);
 
-        // ещё раз фиксируем как обработанное (на случай ошибок выше)
-        processedKeys[key] = true;
-        if (tKey) titleKeys[tKey] = true;
+        // Помечаем как окончательно обработанную
+        processedKeys[key] = {
+          processedAt: Date.now(),
+          sourceId: item.sourceId || null,
+          link: item.link || null,
+          title: item.title || null,
+        };
+        if (titleKey) {
+          titleKeys[titleKey] = {
+            processedAt: Date.now(),
+            sourceId: item.sourceId || null,
+            link: item.link || null,
+          };
+        }
 
-        processedCount++;
-      } catch (e) {
-        console.error("Failed to process one news item:", e);
+        successCount += 1;
+        titles.push(item.title || "(no title)");
+      } catch (err) {
+        console.error("Failed to process news item:", item.title, err);
       }
     }
 
-    // 5) Сохраняем обновлённую мету
+    // 6) Обновляем мета-ветку (анти-дубликаты на будущее)
     await saveNewsMeta({ processedKeys, titleKeys });
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        processed: processedCount,
+        processed: successCount,
+        titles,
       }),
     };
-  } catch (e) {
-    console.error("fetch-news runtime error:", e);
+  } catch (err) {
+    console.error("fetch-news fatal error:", err);
     return {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
-        error: String(e),
+        error: String(err && err.message ? err.message : err),
       }),
     };
   }

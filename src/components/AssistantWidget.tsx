@@ -331,44 +331,39 @@ const AssistantWidget: React.FC = () => {
   };
 
   // ---------- Запрос на озвучку (используем и для ответов, и для подсказок) ----------
+  // ---------- Запрос на озвучку (используем и для ответов, и для подсказок) ----------
   async function requestVoice(text: string): Promise<void> {
     try {
       const res = await fetch("/.netlify/functions/ai-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language: lang,
-          text,
-          voice: "domovoy",
-        }),
+        body: JSON.stringify({ text }),
       });
 
-      if (!res.ok) {
-        console.error("ai-voice error:", await res.text());
+      const data = await res.json();
+      if (data.error) {
+        console.error("ai-voice error:", data.error);
         return;
       }
+      if (!data.audio) return;
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-
-      if (!audioRef.current) {
-        audioRef.current = new Audio();
-      } else {
+      // Останавливаем предыдущий звук, если был
+      if (audioRef.current) {
         try {
           audioRef.current.pause();
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
 
-      audioRef.current.src = url;
-      audioRef.current.play().catch(() => {
+      const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
+      audioRef.current = audio;
+      audio.play().catch(() => {
         // Игнорируем ошибки автоплея
       });
     } catch (err) {
       console.error("Voice request failed:", err);
     }
   }
+
 
   // ---------- Отправка сообщения ----------
   const handleSend = async (text?: string, fromVoice?: boolean) => {

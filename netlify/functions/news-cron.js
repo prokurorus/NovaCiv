@@ -7,27 +7,32 @@
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
-// Основной английский канал (по умолчанию)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_NEWS_CHAT_ID_EN =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-
-// Русский и немецкий каналы
 const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
 const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
-// Вспомогательный лог с префиксом
 function log(...args) {
   console.log("[news-cron]", ...args);
 }
 
-// Безопасный fetch к Telegram
+// Подпись по языку темы
+function getTagline(lang) {
+  if (lang === "ru") {
+    return "Цифровое сообщество без правителей — только граждане.";
+  }
+  if (lang === "de") {
+    return "Digitale Gemeinschaft ohne Herrscher – nur Bürger.";
+  }
+  return "Digital community without rulers — only citizens.";
+}
+
 async function sendToTelegram(chatId, text) {
   if (!TELEGRAM_BOT_TOKEN) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   }
   if (!chatId) {
-    // Если для какого-то языка не указан канал — просто пропускаем.
     return { ok: false, skipped: true, reason: "chatId not configured" };
   }
 
@@ -51,7 +56,6 @@ async function sendToTelegram(chatId, text) {
   return data;
 }
 
-// Формирование текста поста
 function buildPostText(topic) {
   const lines = [];
 
@@ -63,12 +67,13 @@ function buildPostText(topic) {
     lines.push("NovaCiv update");
   }
 
-  // Ссылка на ленту (пока без якоря на конкретную новость)
   lines.push("");
   lines.push("— NovaCiv movement");
+
+  const tagline = getTagline(topic.lang);
+  lines.push(tagline);
   lines.push("https://novaciv.space/news");
 
-  // Метка времени отправки поста (UTC)
   const now = new Date();
   const stamp = now.toISOString().slice(0, 16).replace("T", " ");
   lines.push("");
@@ -77,13 +82,11 @@ function buildPostText(topic) {
   return lines.join("\n");
 }
 
-// Чтение новостей из Realtime Database
 async function fetchNewsTopics() {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not configured");
   }
 
-  // Берём только раздел `news`
   const url = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=%22section%22&equalTo=%22news%22`;
 
   const resp = await fetch(url);
@@ -106,7 +109,6 @@ async function fetchNewsTopics() {
   return items;
 }
 
-// Помечаем тему как отправленную
 async function markTopicAsPosted(topicId) {
   if (!FIREBASE_DB_URL) return;
 
@@ -129,10 +131,8 @@ async function markTopicAsPosted(topicId) {
   }
 }
 
-// Основной хендлер Netlify Function
 exports.handler = async (event) => {
   try {
-    // 1. Проверяем токен
     const url = new URL(event.rawUrl);
     const token = url.searchParams.get("token");
     const limitParam = url.searchParams.get("limit");
@@ -158,10 +158,8 @@ exports.handler = async (event) => {
       ? Math.max(1, parseInt(limitParam, 10) || 1)
       : 10;
 
-    // 2. Берём все новости из раздела `news`
     const topics = await fetchNewsTopics();
 
-    // 3. Фильтруем только те, что ещё не отправлены
     const freshTopics = topics
       .filter((t) => !t.telegramPostedAt)
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
@@ -216,9 +214,7 @@ exports.handler = async (event) => {
         );
       }
 
-      // Параллельно, но дожидаемся перед пометкой как отправленной
       await Promise.all(tasks);
-
       await markTopicAsPosted(topic.id);
     }
 

@@ -4,10 +4,11 @@
 // 1) Берёт новости из RSS (сейчас BBC World).
 // 2) Парсит <item> (title, link, description, pubDate, guid).
 // 3) Проверяет, что уже обрабатывали (по ключу и по заголовку) в /newsMeta/en.json.
-// 4) Для новых новостей вызывает OpenAI, получает текст в стиле NovaCiv.
-// 5) Сохраняет как тему форума (section: "news") в /forum/topics.
-// 6) Отправляет пост в Telegram-канал NovaCiv.
-// 7) Обновляет /newsMeta/en.json, чтобы при следующем запуске
+// 4) Для новых новостей вызывает OpenAI, получает текст в стиле NovaCiv на английском.
+// 5) Переводит этот текст на русский и немецкий.
+// 6) Сохраняет три варианта как темы форума (section: "news") с lang: "en" | "ru" | "de".
+// 7) Отправляет пост в соответствующие Telegram-каналы (EN, RU, DE).
+// 8) Обновляет /newsMeta/en.json, чтобы при следующем запуске
 //    не было повторов ни в Ленте, ни в Telegram.
 
 // ---------- ENV ----------
@@ -16,15 +17,26 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Telegram: бот + канал для новостей (EN)
+// Базовый Telegram бот
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_NEWS_CHAT_ID =
-  process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 
-// Максимум новых новостей за один запуск
+// Каналы для новостей
+const TELEGRAM_NEWS_CHAT_ID = process.env.TELEGRAM_NEWS_CHAT_ID; // старый EN-канал
+const TELEGRAM_CHAT_ID_FALLBACK = process.env.TELEGRAM_CHAT_ID;
+
+// Отдельные каналы по языкам
+const TELEGRAM_NEWS_CHAT_ID_EN =
+  process.env.TELEGRAM_NEWS_CHAT_ID_EN ||
+  TELEGRAM_NEWS_CHAT_ID ||
+  TELEGRAM_CHAT_ID_FALLBACK;
+
+const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU || "";
+const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE || "";
+
+// Максимум новых RSS-элементов за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Где храним метаданные о уже обработанных новостях (EN)
+// Где храним метаданные о уже обработанных новостях (общие для всех языков)
 const NEWS_META_PATH = "/newsMeta/en.json";
 
 // Источники новостей (пока один)
@@ -35,9 +47,31 @@ const SOURCES = [
   },
 ];
 
-// ---------- PROMPT ДЛЯ OPENAI ----------
+// Вывод по языкам
+const LANG_OUTPUTS = [
+  {
+    code: "en",
+    label: "English",
+    telegramChatId: TELEGRAM_NEWS_CHAT_ID_EN,
+    saveToForum: true,
+  },
+  {
+    code: "ru",
+    label: "Russian",
+    telegramChatId: TELEGRAM_NEWS_CHAT_ID_RU,
+    saveToForum: true,
+  },
+  {
+    code: "de",
+    label: "German",
+    telegramChatId: TELEGRAM_NEWS_CHAT_ID_DE,
+    saveToForum: true,
+  },
+];
 
-const SYSTEM_PROMPT = `
+// ---------- PROMPT ДЛЯ OPENAI (АНАЛИЗ НА АНГЛ.) ----------
+
+const SYSTEM_PROMPT_ANALYSIS = `
 You are an analyst for the digital community "NovaCiv" (New Civilization).
 
 Core values of NovaCiv:
@@ -70,6 +104,18 @@ Do not invent facts that are not in the news.
 If information is missing, honestly say what data would be needed for solid conclusions.
 `.trim();
 
+// ---------- PROMPT ДЛЯ ПЕРЕВОДА ----------
+
+const SYSTEM_PROMPT_TRANSLATE = `
+You are a precise translator for the digital community "NovaCiv".
+
+Your task:
+– Translate the given analytical text from ENGLISH into the target language.
+– Preserve meaning, nuance and calm, neutral tone.
+– Keep the structure, headings, numbering and paragraphs as in the original.
+– Do NOT add your own commentary or extra sentences.
+`.trim();
+
 // ---------- ВСПОМОГАТЕЛЬНОЕ ----------
 
 function stripCdata(str) {
@@ -93,7 +139,7 @@ function parseRss(xml, sourceId) {
     const block = match[1];
 
     const getTag = (tag) => {
-      const re = new RegExp(`<${tag}[^>]*>([\\s\\s]*?)<\\/${tag}>`, "i");
+      const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
       const m = block.match(re);
       return m ? stripCdata(m[1]) : "";
     };
@@ -160,7 +206,6 @@ async function loadNewsMeta() {
   try {
     const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`);
     if (!res.ok) {
-      // если ветка отсутствует — вернём пустую структуру
       return emptyMeta;
     }
 
@@ -202,7 +247,7 @@ async function saveNewsMeta(meta) {
 
 // ---------- ЗАПИСЬ В ФОРУМ ----------
 
-async function saveNewsToForum(item, analyticText) {
+async function saveNewsToForumLang(item, analyticText, langCode) {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not set");
   }
@@ -215,7 +260,7 @@ async function saveNewsToForum(item, analyticText) {
     createdAt: now,
     createdAtServer: now,
     authorNickname: "NovaCiv News",
-    lang: "en",
+    lang: langCode,
     sourceId: item.sourceId || "",
     originalGuid: item.guid || "",
     originalLink: item.link || "",
@@ -236,9 +281,10 @@ async function saveNewsToForum(item, analyticText) {
 
 // ---------- TELEGRAM ----------
 
-function buildTelegramText(item, analyticText) {
+function buildTelegramText(item, analyticText, langCode) {
   const lines = [];
 
+  // Заголовок можно оставить универсальным
   lines.push("🌐 NovaCiv — Movement news");
   if (item.pubDate) {
     const d = new Date(item.pubDate);
@@ -260,20 +306,19 @@ function buildTelegramText(item, analyticText) {
 
   lines.push(analyticText.trim());
   lines.push("");
+
+  // Хвост пока универсальный
   lines.push("Read more on the site: https://novaciv.space/news");
 
   return lines.join("\n");
 }
 
-async function sendNewsToTelegram(item, analyticText) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_NEWS_CHAT_ID) {
-    console.warn(
-      "Telegram is not configured: missing TELEGRAM_BOT_TOKEN or TELEGRAM_NEWS_CHAT_ID/TELEGRAM_CHAT_ID",
-    );
+async function sendNewsToTelegram(item, analyticText, chatId, langCode) {
+  if (!TELEGRAM_BOT_TOKEN || !chatId) {
     return;
   }
 
-  const text = buildTelegramText(item, analyticText);
+  const text = buildTelegramText(item, analyticText, langCode);
 
   try {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -281,7 +326,7 @@ async function sendNewsToTelegram(item, analyticText) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: TELEGRAM_NEWS_CHAT_ID,
+        chat_id: chatId,
         text,
         disable_web_page_preview: false,
       }),
@@ -296,9 +341,9 @@ async function sendNewsToTelegram(item, analyticText) {
   }
 }
 
-// ---------- OPENAI АНАЛИЗ ----------
+// ---------- OPENAI АНАЛИЗ (EN) ----------
 
-async function analyzeNewsItem(item) {
+async function analyzeNewsItemEn(item) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");
   }
@@ -328,7 +373,7 @@ Do not repeat the title. We only need the analytical text.
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: SYSTEM_PROMPT_ANALYSIS },
         { role: "user", content: userPrompt },
       ],
       max_tokens: 700,
@@ -352,6 +397,75 @@ Do not repeat the title. We only need the analytical text.
 
   if (!answer) {
     throw new Error("Empty answer from OpenAI for news item");
+  }
+
+  return answer;
+}
+
+// ---------- OPENAI ПЕРЕВОД (EN → RU/DE) ----------
+
+async function translateText(englishText, targetLangCode) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not set");
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  let targetDescription;
+  if (targetLangCode === "ru") {
+    targetDescription = "Russian";
+  } else if (targetLangCode === "de") {
+    targetDescription = "German";
+  } else {
+    targetDescription = "the target language";
+  }
+
+  const userPrompt = `
+Target language: ${targetDescription} (code: ${targetLangCode})
+
+Translate the following analytical text from ENGLISH into the target language.
+Preserve structure, headings, numbering and paragraphs.
+
+---
+${englishText}
+---
+`.trim();
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT_TRANSLATE },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 900,
+      temperature: 0.2,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `OpenAI translation error (${targetLangCode}): HTTP ${response.status} – ${text}`,
+    );
+  }
+
+  const data = await response.json();
+  const answer =
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content
+      ? data.choices[0].message.content.trim()
+      : "";
+
+  if (!answer) {
+    throw new Error(`Empty translation for language ${targetLangCode}`);
   }
 
   return answer;
@@ -464,11 +578,44 @@ exports.handler = async (event) => {
       const { item, key, titleKey } = entry;
 
       try {
-        const analyticText = await analyzeNewsItem(item);
-        await saveNewsToForum(item, analyticText);
-        await sendNewsToTelegram(item, analyticText);
+        // 5.1. Анализ на английском
+        const analyticEn = await analyzeNewsItemEn(item);
 
-        // Помечаем как окончательно обработанную
+        // 5.2. Переводы (по мере необходимости)
+        // Храним в объекте, чтобы не переводить одно и то же несколько раз
+        const textsByLang = {
+          en: analyticEn,
+        };
+
+        for (const cfg of LANG_OUTPUTS) {
+          const code = cfg.code;
+
+          // Получаем текст для языка
+          if (!textsByLang[code]) {
+            // Переводим с английского
+            const translated = await translateText(analyticEn, code);
+            textsByLang[code] = translated;
+          }
+
+          const textForLang = textsByLang[code];
+
+          // Сохраняем в форум (если задано)
+          if (cfg.saveToForum) {
+            await saveNewsToForumLang(item, textForLang, code);
+          }
+
+          // Отправляем в Telegram (если есть chat_id)
+          if (cfg.telegramChatId) {
+            await sendNewsToTelegram(
+              item,
+              textForLang,
+              cfg.telegramChatId,
+              code,
+            );
+          }
+        }
+
+        // Помечаем как окончательно обработанную (для всех языков сразу)
         processedKeys[key] = {
           processedAt: Date.now(),
           sourceId: item.sourceId || null,

@@ -15,24 +15,47 @@ interface ChatMessage {
   id: string;
   role: Role;
   text: string;
+  fromFeed?: boolean;
 }
 
-declare global {
-  interface Window {
-    webkitSpeechRecognition?: any;
-    SpeechRecognition?: any;
-  }
-}
+const STORAGE_KEY_OPEN = "novaciv_domovoy_open";
+const STORAGE_KEY_MUTED = "novaciv_domovoy_muted";
+const STORAGE_KEY_USER_ID = "novaciv_domovoy_user_id";
 
-// ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ПАМЯТИ ----------
-const MESSAGES_LIMIT = 30; // сколько последних сообщений храним
+const usePersistentState = <T,>(
+  key: string,
+  defaultValue: T,
+): [T, (v: T) => void] => {
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === "undefined") return defaultValue;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return defaultValue;
+      return JSON.parse(raw) as T;
+    } catch {
+      return defaultValue;
+    }
+  });
 
-const getOrCreateClientId = (): string | null => {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // ignore
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+};
+
+const generateUserId = (): string | null => {
   if (typeof window === "undefined") return null;
   try {
-    const key = "novaciv_client_id";
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
+    const key = STORAGE_KEY_USER_ID;
+    const stored = window.localStorage.getItem(key);
+    if (stored) return stored;
+
     const id = `u-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2, 10)}`;
@@ -47,27 +70,27 @@ const detectLanguage = (): string => {
   if (typeof document !== "undefined") {
     const htmlLang = document.documentElement.lang;
     if (htmlLang) return htmlLang.toLowerCase().slice(0, 2);
-    const stored = window.localStorage.getItem("novaciv-lang");
-    if (stored) return stored.toLowerCase().slice(0, 2);
-  }
-  if (typeof navigator !== "undefined") {
-    return navigator.language.toLowerCase().slice(0, 2);
+    const stored = window.localStorage.getItem(
+      "novaciv_language_preference",
+    );
+    if (stored) return stored;
   }
   return "ru";
 };
 
 const AssistantWidget: React.FC = () => {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = usePersistentState<boolean>(
+    STORAGE_KEY_OPEN,
+    false,
+  );
+  const [isMuted, setIsMuted] = usePersistentState<boolean>(
+    STORAGE_KEY_MUTED,
+    false,
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isListening, setIsListening] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [pendingText, setPendingText] = useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
-  const [loadedFromFirebase, setLoadedFromFirebase] = useState(false);
-
-  const [showGestureHint, setShowGestureHint] = useState(false);
-  const [gestureVoiceHintDone, setGestureVoiceHintDone] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -83,255 +106,186 @@ const AssistantWidget: React.FC = () => {
   // Делает аккуратный заголовок из текста ответа
   const deriveTitleFromText = (text: string): string => {
     const firstLine = text.split(/\r?\n/)[0].trim();
-    if (firstLine.length >= 10 && firstLine.length <= 120) {
+    if (firstLine.length > 0 && firstLine.length <= 80) {
       return firstLine;
     }
-    if (firstLine.length > 120) {
-      return firstLine.slice(0, 117) + "...";
-    }
-
-    const sentenceMatch = text.match(/^(.{20,120}?)[.!?](\s|$)/s);
-    if (sentenceMatch) {
-      return sentenceMatch[1].trim();
-    }
-
-    const trimmed = text.trim();
-    if (trimmed.length <= 80) return trimmed;
-    return trimmed.slice(0, 77) + "…";
+    const noBreaks = text.replace(/\s+/g, " ").trim();
+    if (noBreaks.length <= 80) return noBreaks;
+    return noBreaks.slice(0, 77) + "…";
   };
 
-  // Публикация новости в раздел "Новости движения" форума
-  const postNewsToForum = async (title: string, content: string) => {
-    try {
-      const topicsRef = ref(db, "forum/topics");
-      const ts = Date.now();
+  // Берём первые несколько предложений
+  const derivePreviewFromText = (text: string): string => {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    const sentences = normalized.split(/([.!?])/);
+    let acc = "";
+    for (let i = 0; i < sentences.length; i += 2) {
+      const part = sentences[i];
+      const delim = sentences[i + 1] || "";
+      const next = (acc + part + delim).trim();
+      if (next.length > 240) break;
+      acc = next;
+    }
+    if (!acc) {
+      return normalized.length > 240
+        ? normalized.slice(0, 237) + "…"
+        : normalized;
+    }
+    return acc;
+  };
 
-      await push(topicsRef, {
-        title: title.trim(),
-        content: content.trim(),
-        section: "news",
-        createdAt: ts,
-        createdAtServer: ts,
-        authorNickname: clientId || null,
-        lang: lang.toLowerCase().slice(0, 2),
+  // ID пользователя для привязки к сообщениям/постам
+  const userId = generateUserId();
+
+  // ---------- Загрузка последних сообщений из Firebase (лента Домового) ----------
+  useEffect(() => {
+    const load = async () => {
+      if (!userId) return;
+      try {
+        const messagesRef = query(
+          ref(db, "assistantMessages"),
+          orderByChild("userId"),
+          // Для простоты берём не по userId, а по времени, позже можно усложнить
+        );
+        // Но чтобы не тащить всё подряд — берём последние N по createdAt
+        const recentRef = query(
+          ref(db, "assistantMessages"),
+          orderByChild("createdAt"),
+          limitToLast(50),
+        );
+        const snap = await get(recentRef);
+        if (!snap.exists()) return;
+        const raw = snap.val() || {};
+        const list: ChatMessage[] = Object.entries(raw).map(
+          ([id, value]) => {
+            const v = value as any;
+            return {
+              id,
+              role: v.role === "assistant" ? "assistant" : "user",
+              text: v.text ?? "",
+              fromFeed: true,
+            };
+          },
+        );
+        list.sort((a, b) => {
+          const ca = (raw[a.id as any]?.createdAt as number) || 0;
+          const cb = (raw[b.id as any]?.createdAt as number) || 0;
+          return ca - cb;
+        });
+        setMessages(list.slice(-12));
+      } catch (e) {
+        console.error("Failed to load assistant messages:", e);
+      }
+    };
+
+    load();
+  }, [userId]);
+
+  // ---------- Запись пары сообщений в Firebase ----------
+  const savePairToFirebase = async (
+    userMessage: ChatMessage,
+    assistantMessage: ChatMessage,
+  ) => {
+    try {
+      const messagesRef = ref(db, "assistantMessages");
+      const now = Date.now();
+      await push(messagesRef, {
+        userId: userId ?? null,
+        createdAt: now,
+        page:
+          typeof window !== "undefined"
+            ? window.location.pathname
+            : "/",
+        language: lang,
+        userText: userMessage.text,
+        assistantText: assistantMessage.text,
+        role: "assistant",
       });
     } catch (err) {
-      console.error("News publish error:", err);
-      setError(
-        lang.startsWith("ru")
-          ? "Не получилось отправить в Ленту. Попробуй ещё раз позже."
-          : "Failed to publish to the feed. Please try again later.",
-      );
-      throw err;
+      console.error("Failed to save assistant messages:", err);
     }
   };
 
-  // ---------- Скролл вниз при новых сообщениях ----------
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isOpen]);
-
-  // ---------- clientId из localStorage ----------
-  useEffect(() => {
-    const id = getOrCreateClientId();
-    setClientId(id);
-  }, []);
-
-  // ---------- Флаги подсказок из localStorage ----------
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const gestureSeen = window.localStorage.getItem(
-        "novaciv_gesture_hint_shown",
+  // ---------- Голосовой ввод (Web Speech API) ----------
+  const handleVoiceInput = () => {
+    if (typeof window === "undefined" || !("webkitSpeechRecognition" in window)) {
+      setError(
+        lang.startsWith("ru")
+          ? "Голосовой ввод не поддерживается в этом браузере."
+          : "Voice input is not supported in this browser.",
       );
-      if (!gestureSeen) {
-        setShowGestureHint(true);
-      }
-      const voiceSeen = window.localStorage.getItem(
-        "novaciv_gesture_voice_hint_done",
-      );
-      if (voiceSeen) {
-        setGestureVoiceHintDone(true);
-      }
-    } catch {
-      // игнорируем
+      return;
     }
-  }, []);
 
-  // ---------- Загрузка последних сообщений из Firebase ----------
-  useEffect(() => {
-    if (!clientId || loadedFromFirebase) return;
-    const load = async () => {
+    if (recognitionRef.current) {
       try {
-        const messagesRef = ref(
-          db,
-          `assistantSessions/${clientId}/messages`,
-        );
-        const q = query(
-          messagesRef,
-          orderByChild("ts"),
-          limitToLast(MESSAGES_LIMIT),
-        );
-        const snap = await get(q);
-        if (!snap.exists()) {
-          setLoadedFromFirebase(true);
-          return;
-        }
-
-        const data: { role: Role; text: string; ts?: number }[] = [];
-        snap.forEach((child) => {
-          const v = child.val();
-          if (
-            v &&
-            v.text &&
-            (v.role === "user" || v.role === "assistant")
-          ) {
-            data.push({
-              role: v.role,
-              text: v.text,
-              ts: typeof v.ts === "number" ? v.ts : undefined,
-            });
-          }
-        });
-
-        data.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-
-        const restored: ChatMessage[] = data.map((m, index) => ({
-          id: `${m.role}-${m.ts ?? index}`,
-          role: m.role,
-          text: m.text,
-        }));
-
-        setMessages(restored);
-      } catch (err) {
-        console.error("Firebase load error:", err);
-      } finally {
-        setLoadedFromFirebase(true);
-      }
-    };
-    load();
-  }, [clientId, loadedFromFirebase]);
-
-  // ---------- Инициализация SpeechRecognition ----------
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const SR = (window.SpeechRecognition ||
-      window.webkitSpeechRecognition ||
-      null) as any;
-
-    if (!SR) return;
-
-    const recognition = new SR();
-    recognition.lang = lang === "ru" ? "ru-RU" : "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setError(null);
-    };
-
-    recognition.onerror = (event: any) => {
-      setIsListening(false);
-      if (event.error !== "no-speech") {
-        setError("Проблема с микрофоном. Попробуй ещё раз.");
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((r: any) => r[0].transcript)
-        .join(" ")
-        .trim();
-
-      if (transcript) {
-        handleSend(transcript, true);
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      try {
-        recognition.stop();
+        recognitionRef.current.stop();
       } catch {
         // ignore
       }
       recognitionRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang]);
-
-  // ---------- Функция скрытия текстовой подсказки о жестах ----------
-  const hideGestureHint = () => {
-    setShowGestureHint(false);
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem("novaciv_gesture_hint_shown", "1");
-      } catch {
-        // ignore
-      }
-    }
-  };
-
-  // ---------- Голосовая подсказка о жестах при первом открытии на телефоне ----------
-  useEffect(() => {
-    if (!isOpen) return;
-    if (gestureVoiceHintDone) return;
-    if (typeof window === "undefined") return;
-
-    const isMobile = window.innerWidth <= 768;
-    if (!isMobile) return;
-
-    const hintText =
-      "Небольшая подсказка: на телефоне мной можно управлять жестами. " +
-      "Свайп вверх — новый диалог. Свайп вниз — свернуть окно.";
-
-    requestVoice(hintText).catch(() => {});
-
-    setGestureVoiceHintDone(true);
-    try {
-      window.localStorage.setItem(
-        "novaciv_gesture_voice_hint_done",
-        "1",
-      );
-    } catch {
-      // ignore
-    }
-  }, [isOpen, gestureVoiceHintDone]);
-
-  const toggleOpen = () => {
-    setIsOpen((prev) => !prev);
-  };
-
-  const handleNewDialog = () => {
-    setMessages([]);
-    setError(null);
-    hideGestureHint();
-  };
-
-  const handleMicClick = () => {
-    if (!recognitionRef.current) {
-      setError("Браузер не поддерживает голосовой ввод.");
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        setError(null);
-        recognitionRef.current.start();
-      } catch {
-        setError("Не удалось запустить микрофон.");
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.lang =
+      lang === "ru"
+        ? "ru-RU"
+        : lang === "de"
+        ? "de-DE"
+        : lang === "es"
+        ? "es-ES"
+        : "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event: any) => {
+      const result = event.results?.[0]?.[0]?.transcript;
+      if (result) {
+        handleSend(result, true);
       }
+    };
+
+    recognition.onerror = () => {
+      setError(
+        lang.startsWith("ru")
+          ? "Не удалось записать голос. Попробуй ещё раз."
+          : "Failed to capture voice. Please try again.",
+      );
+    };
+
+    recognition.onend = () => {
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch {
+      setError(
+        lang.startsWith("ru")
+          ? "Не удалось запустить микрофон."
+          : "Could not start the microphone.",
+      );
+    }
+  };
+
+  // ---------- Извлечение текстового контекста текущей страницы ----------
+  const getPageContext = (maxChars: number = 8000): string => {
+    if (typeof document === "undefined") return "";
+    try {
+      // Берём содержимое основного блока страницы.
+      const mainEl = document.querySelector("main");
+      const rawText =
+        (mainEl as HTMLElement | null)?.innerText ??
+        document.body.innerText ??
+        "";
+
+      const text = rawText.replace(/\s+/g, " ").trim();
+      return text.length > maxChars ? text.slice(0, maxChars) : text;
+    } catch {
+      return "";
     }
   };
 
@@ -355,6 +309,7 @@ const AssistantWidget: React.FC = () => {
         body: JSON.stringify({
           language: lang,
           page,
+          pageContext: getPageContext(),
           messages: recentMessages.concat([
             {
               role: "user",
@@ -367,7 +322,11 @@ const AssistantWidget: React.FC = () => {
       const data = await res.json();
       return { answer: data.answer, error: data.error };
     } catch {
-      return { error: "Сеть недоступна. Попробуй ещё раз." };
+      return {
+        error: lang.startsWith("ru")
+          ? "Сеть недоступна. Попробуй ещё раз."
+          : "Network error. Please try again.",
+      };
     }
   };
 
@@ -377,327 +336,285 @@ const AssistantWidget: React.FC = () => {
       const res = await fetch("/.netlify/functions/ai-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          language: lang,
+          text,
+          voice: "domovoy",
+        }),
       });
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
+
+      if (!res.ok) {
+        console.error("ai-voice error:", await res.text());
         return;
       }
-      if (!data.audio) return;
 
-      const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
-      audioRef.current = audio;
-      setIsSpeaking(true);
-      audio.onended = () => setIsSpeaking(false);
-      audio.onerror = () => setIsSpeaking(false);
-      audio.play().catch(() => setIsSpeaking(false));
-    } catch {
-      setIsSpeaking(false);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      } else {
+        try {
+          audioRef.current.pause();
+        } catch {
+          // ignore
+        }
+      }
+
+      audioRef.current.src = url;
+      audioRef.current.play().catch(() => {
+        // Игнорируем ошибки автоплея
+      });
+    } catch (err) {
+      console.error("Voice request failed:", err);
     }
   }
 
-  // ---------- Сохранение пары сообщений в Firebase ----------
-  const savePairToFirebase = async (
-    userMsg: ChatMessage,
-    assistantMsg: ChatMessage,
-  ) => {
-    if (!clientId) return;
-    try {
-      const messagesRef = ref(
-        db,
-        `assistantSessions/${clientId}/messages`,
-      );
-      const ts = Date.now();
-
-      await push(messagesRef, {
-        role: "user",
-        text: userMsg.text,
-        ts,
-      });
-
-      await push(messagesRef, {
-        role: "assistant",
-        text: assistantMsg.text,
-        ts: ts + 1,
-      });
-    } catch (err) {
-      console.error("Firebase save error:", err);
-    }
-  };
-
   // ---------- Отправка сообщения ----------
-  const handleSend = async (text: string, fromVoice = false) => {
-    const clean = text.trim();
-    if (!clean) return;
+  const handleSend = async (text?: string, fromVoice?: boolean) => {
+    const userText = typeof text === "string" ? text : inputValue;
+    if (!userText.trim() || isProcessing) return;
 
-    setPendingText("");
     setError(null);
+    setIsProcessing(true);
 
     const userMessage: ChatMessage = {
       id: `u-${Date.now()}`,
       role: "user",
-      text: clean,
+      text: userText.trim(),
     };
 
-    // Проверяем, не команда ли это "добавь в ленту"
-    const lower = clean.toLowerCase();
-
-    const isPublishCommand =
-      lower === "добавь в ленту" ||
-      lower === "в ленту" ||
-      lower === "добавь это в ленту" ||
-      lower === "опубликуй в ленту" ||
-      lower === "опубликуй это в ленту" ||
-      lower === "/feed" ||
-      lower === "/news" ||
-      lower === "/tofeed";
-
-    if (isPublishCommand) {
-      const lastAssistant = [...messages]
-        .slice()
-        .reverse()
-        .find((m) => m.role === "assistant");
-
-      if (!lastAssistant) {
-        setError(
-          lang.startsWith("ru")
-            ? "Пока нечего отправлять в Ленту — нет последнего ответа."
-            : "There is nothing to publish yet — no last answer found.",
-        );
-        return;
-      }
-
-      try {
-        const title = deriveTitleFromText(lastAssistant.text);
-        await postNewsToForum(title, lastAssistant.text);
-
-        const confirmationText = lang.startsWith("ru")
-          ? "Я добавил последний ответ в Ленту движения NovaCiv."
-          : "I have added the last answer to the NovaCiv movement feed.";
-
-        const assistantMessage: ChatMessage = {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          text: confirmationText,
-        };
-
-        setMessages((prev) => [...prev, userMessage, assistantMessage]);
-        savePairToFirebase(userMessage, assistantMessage);
-        requestVoice(assistantMessage.text);
-      } catch {
-        // Ошибка уже установлена внутри postNewsToForum
-      }
-      return;
-    }
-
-    // Обычный диалог с Домовым
     setMessages((prev) => [...prev, userMessage]);
+    if (!fromVoice) {
+      setInputValue("");
+    }
 
-    const { answer, error: backendError } = await sendToBackend(clean);
+    const { answer, error } = await sendToBackend(userText.trim());
 
-    if (backendError || !answer) {
-      if (backendError) setError(backendError);
+    if (error) {
+      setError(error);
+      setIsProcessing(false);
       return;
     }
+
+    const safeAnswer = answer || "";
 
     const assistantMessage: ChatMessage = {
       id: `a-${Date.now()}`,
       role: "assistant",
-      text: answer,
+      text: safeAnswer,
     };
 
     setMessages((prev) => [...prev, assistantMessage]);
 
     savePairToFirebase(userMessage, assistantMessage);
 
-    // озвучиваем ответ
-    requestVoice(answer);
+    if (!isMuted && safeAnswer) {
+      requestVoice(safeAnswer);
+    }
+
+    setIsProcessing(false);
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pendingText.trim()) return;
-    handleSend(pendingText, false);
+    handleSend();
   };
 
-  // ---------- ЖЕСТЫ: свайп вверх / вниз ----------
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    const t = e.touches[0];
-    touchStartYRef.current = t.clientY;
-    touchStartXRef.current = t.clientX;
-  };
+  // ---------- Публикация ответа Домового в Ленту ----------
+  const publishToFeed = async (assistantMessage: ChatMessage) => {
+    if (!assistantMessage.text.trim()) return;
 
-  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (
-      touchStartYRef.current === null ||
-      touchStartXRef.current === null
-    ) {
-      return;
+    const title = deriveTitleFromText(assistantMessage.text);
+    const preview = derivePreviewFromText(assistantMessage.text);
+
+    // Определяем язык поста по языку интерфейса
+    const postLang =
+      lang === "ru" || lang === "en" || lang === "de" || lang === "es"
+        ? lang
+        : "ru";
+
+    const now = Date.now();
+
+    try {
+      const topicRef = ref(db, "forum");
+      await push(topicRef, {
+        title,
+        content: assistantMessage.text,
+        section: "news",
+        createdAt: now,
+        createdAtServer: new Date().toISOString(),
+        lang: postLang,
+        authorNickname: "Domovoy",
+        source: "assistant_auto",
+        preview,
+      });
+    } catch (err) {
+      console.error("Failed to publish to feed:", err);
+      setError(
+        lang.startsWith("ru")
+          ? "Не получилось отправить в Ленту. Попробуй ещё раз позже."
+          : "Failed to publish to the feed. Please try again later.",
+      );
+      throw err;
     }
+  };
 
-    const t = e.changedTouches[0];
-    const deltaY = t.clientY - touchStartYRef.current;
-    const deltaX = t.clientX - touchStartXRef.current;
+  // ---------- Скролл вниз при новых сообщениях ----------
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isOpen]);
 
+  // ---------- Жесты для мобильных: свайп вниз/вверх ----------
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartYRef.current = touch.clientY;
+    touchStartXRef.current = touch.clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const touchStartY = touchStartYRef.current;
+    const touchStartX = touchStartXRef.current;
     touchStartYRef.current = null;
     touchStartXRef.current = null;
 
-    const absY = Math.abs(deltaY);
-    const absX = Math.abs(deltaX);
+    if (touchStartY === null || touchStartX === null) return;
 
-    // игнорируем мелкие движения
-    if (Math.max(absX, absY) < 40) return;
+    const touch = e.changedTouches[0];
+    const deltaY = touch.clientY - touchStartY;
+    const deltaX = touch.clientX - touchStartX;
 
-    // вертикальный свайп важнее
-    if (absY > absX) {
-      if (deltaY < 0) {
-        // свайп вверх — новый диалог
-        handleNewDialog();
-      } else {
-        // свайп вниз — свернуть окно
-        hideGestureHint();
-        setIsOpen(false);
-      }
+    // Игнорируем горизонтальные или слишком маленькие движения
+    if (Math.abs(deltaX) > Math.abs(deltaY) || Math.abs(deltaY) < 40) return;
+
+    if (deltaY > 0 && isOpen) {
+      // свайп вниз — закрыть
+      setIsOpen(false);
+    } else if (deltaY < 0 && !isOpen) {
+      // свайп вверх — открыть
+      setIsOpen(true);
     }
   };
 
-  // ---------- РЕНДЕР ----------
+  if (typeof window === "undefined") return null;
+
   return (
     <>
-      {/* Плавающая кнопка */}
+      {/* Кнопка открытия/закрытия */}
       <button
         type="button"
-        onClick={toggleOpen}
-        className="fixed bottom-4 right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full border border-zinc-300 bg-white/90 shadow-lg backdrop-blur hover:bg-zinc-50 transition"
-        aria-label="Открыть помощника"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="fixed bottom-4 right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-zinc-900 text-white shadow-lg shadow-zinc-900/30 focus:outline-none focus:ring-2 focus:ring-zinc-400 md:bottom-6 md:right-6"
       >
-        <span className="text-xl">💬</span>
+        <span className="sr-only">Открыть Домового</span>
+        <span className="text-xl">◎</span>
       </button>
 
+      {/* Панель Домового */}
       {isOpen && (
         <div
-          className="fixed bottom-20 right-4 z-40 w-80 max-h-[70vh] rounded-2xl border border-zinc-200 bg-white/95 shadow-xl backdrop-blur flex flex-col overflow-hidden"
+          className="fixed inset-x-0 bottom-0 z-40 rounded-t-3xl border-t border-zinc-200 bg-white/95 shadow-2xl shadow-zinc-900/40 backdrop-blur md:inset-auto md:bottom-6 md:right-6 md:h-[480px] md:w-[360px] md:rounded-3xl md:border md:bg-white"
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Заголовок */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 bg-zinc-50/80">
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-zinc-900">
-                Домовой NovaCiv
-              </span>
-              <span className="text-[11px] text-zinc-500">
-                Голосовой помощник • {lang.toUpperCase()}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleNewDialog}
-                className="text-[11px] px-2 py-1 rounded-full border border-zinc-300 text-zinc-600 hover:bg-zinc-100"
-              >
-                Новый диалог
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  hideGestureHint();
-                  setIsOpen(false);
-                }}
-                className="text-zinc-500 hover:text-zinc-900 text-lg leading-none"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-
-          {/* История */}
-          <div
-            ref={scrollRef}
-            className="flex-1 px-3 py-2 space-y-2 overflow-y-auto text-sm text-zinc-800"
-          >
-            {messages.length === 0 && (
-              <div className="text-xs text-zinc-500">
-                Задай вопрос голосом или текстом. Голосовой вопрос после
-                паузы отправится автоматически.
-              </div>
-            )}
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex ${
-                  m.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div
-                  className={`rounded-2xl px-3 py-2 max-w-[80%] whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-900"
-                  }`}
-                >
-                  {m.text}
+          <div className="flex h-full flex-col">
+            {/* Заголовок */}
+            <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-200">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-zinc-400">
+                  Домовой NovaCiv
+                </div>
+                <div className="text-sm font-semibold text-zinc-900">
+                  Голосовой помощник · {lang.toUpperCase()}
                 </div>
               </div>
-            ))}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsMuted((prev) => !prev)}
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-full border text-xs ${
+                    isMuted
+                      ? "border-zinc-300 text-zinc-400 bg-zinc-50"
+                      : "border-zinc-800 text-zinc-900 bg-zinc-100"
+                  }`}
+                >
+                  {isMuted ? "🔇" : "🔊"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100"
+                >
+                  ✕
+                </button>
+              </div>
+            </header>
+
+            {/* Лента сообщений */}
+            <div
+              ref={scrollRef}
+              className="flex-1 space-y-2 overflow-y-auto px-4 py-3 text-sm text-zinc-800"
+            >
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  className={`max-w-[80%] rounded-2xl px-3 py-2 ${
+                    m.role === "assistant"
+                      ? "ml-auto bg-zinc-900 text-white"
+                      : "mr-auto bg-zinc-100 text-zinc-900"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                </div>
+              ))}
+              {isProcessing && (
+                <div className="ml-auto max-w-[60%] rounded-2xl bg-zinc-900 px-3 py-2 text-xs text-zinc-100 opacity-70">
+                  …
+                </div>
+              )}
+            </div>
+
+            {/* Ошибка, если есть */}
             {error && (
-              <div className="text-[11px] text-red-500 whitespace-pre-wrap">
+              <div className="px-4 pb-1 text-xs text-red-500">
                 {error}
               </div>
             )}
-          </div>
 
-          {/* Статус + текстовая подсказка жестов */}
-          <div className="px-3 pb-1 text-[11px] text-zinc-500 flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <span>
-                {isListening
-                  ? "Слушаю тебя…"
-                  : isSpeaking
-                  ? "Произношу ответ…"
-                  : ""}
-              </span>
-            </div>
-            {showGestureHint && (
-              <div className="text-[10px] text-zinc-400">
-                На телефоне можно управлять жестами: свайп вверх — новый
-                диалог, свайп вниз — свернуть окно.
-              </div>
-            )}
+            {/* Поле ввода и кнопки */}
+            <form
+              onSubmit={handleManualSubmit}
+              className="flex items-center gap-2 border-t border-zinc-200 bg-zinc-50 px-3 py-2"
+            >
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-xs text-white shadow-sm"
+              >
+                🎤
+              </button>
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                placeholder={
+                  lang.startsWith("ru")
+                    ? "Задай вопрос текстом…"
+                    : "Ask your question…"
+                }
+                className="flex-1 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-zinc-300"
+              />
+              <button
+                type="submit"
+                disabled={isProcessing || !inputValue.trim()}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-xs text-white shadow-sm disabled:opacity-40"
+              >
+                ➤
+              </button>
+            </form>
           </div>
-
-          {/* Ввод */}
-          <form
-            onSubmit={handleManualSubmit}
-            className="px-3 pt-1 pb-3 flex items-center gap-2 border-t border-zinc-200 bg-white/90"
-          >
-            <button
-              type="button"
-              onClick={handleMicClick}
-              className={`inline-flex h-9 w-9 items-center justify-center rounded-full border text-lg ${
-                isListening
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-              }`}
-              aria-label="Голосовой ввод"
-            >
-              🎤
-            </button>
-            <input
-              type="text"
-              className="flex-1 h-9 rounded-full border border-zinc-300 px-3 text-sm outline-none focus:ring-1 focus:ring-zinc-400"
-              placeholder="Задай вопрос текстом…"
-              value={pendingText}
-              onChange={(e) => setPendingText(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="inline-flex h-9 px-3 items-center justify-center rounded-full border border-zinc-900 bg-zinc-900 text-white text-xs hover:bg-zinc-800"
-            >
-              ▶
-            </button>
-          </form>
         </div>
       )}
     </>

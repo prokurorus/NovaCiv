@@ -51,8 +51,7 @@ function parseCharterSections(text) {
     if (m) {
       // Сохраняем предыдущий пункт
       if (currentId) {
-        const fullText =
-          `${currentId}. ` + buffer.join("\n").trim();
+        const fullText = `${currentId}. ` + buffer.join("\n").trim();
         charterSections.push({
           id: currentId,
           text: fullText.trim(),
@@ -69,17 +68,14 @@ function parseCharterSections(text) {
   }
 
   if (currentId) {
-    const fullText =
-      `${currentId}. ` + buffer.join("\n").trim();
+    const fullText = `${currentId}. ` + buffer.join("\n").trim();
     charterSections.push({
       id: currentId,
       text: fullText.trim(),
     });
   }
 
-  console.log(
-    `Разобрано пунктов устава: ${charterSections.length}`
-  );
+  console.log(`Разобрано пунктов устава: ${charterSections.length}`);
 }
 
 function sliceText(text, maxChars) {
@@ -191,7 +187,7 @@ function tryHandleCitation(userText, historyMessages) {
     return nextSection.text;
   }
 
-  // 4) "предыдущий пункт"
+  // 4) "предыдущий" пункт
   if (asksForCitation && mentionsPunkt && t.includes("предыдущ")) {
     const lastId = extractLastCitedIdFromHistory(historyMessages);
     if (!lastId) {
@@ -344,6 +340,12 @@ exports.handler = async (event) => {
       ? body.messages
       : [];
 
+    // Новый параметр: текст текущей страницы / темы / новости
+    const rawPageContext =
+      typeof body.pageContext === "string" ? body.pageContext : "";
+    // Ограничим размер, чтобы не забивать промпт (8k символов хватит)
+    const pageContext = sliceText(rawPageContext, 8000);
+
     // Последнее сообщение пользователя
     const lastUser =
       [...incomingMessages]
@@ -379,6 +381,14 @@ exports.handler = async (event) => {
     const manifestoSlice = sliceText(manifestoRU, 20000);
     const charterSlice = sliceText(charterRU, 20000);
 
+    const pageContextBlock = pageContext
+      ? `
+--------- Контекст текущей страницы / темы (фрагмент с сайта) ----------
+${pageContext}
+-----------------------------------------------------------------------
+`
+      : "";
+
     const systemPrompt = `
 Ты — Домовой проекта NovaCiv.
 Ты — не хозяин и не учитель. Ты — хранитель смысла, спокойный и честный собеседник.
@@ -389,7 +399,8 @@ exports.handler = async (event) => {
 
 Ты опираешься на:
 — Манифест NovaCiv (философия, смысл, мировоззрение);
-— Устав NovaCiv (структура, правила, принципы).
+— Устав NovaCiv (структура, правила, принципы);
+— при наличии — текст текущей страницы или темы, переданный как контекст.
 
 ПРАВИЛА ОТВЕТОВ:
 
@@ -409,7 +420,7 @@ ${manifestoSlice}
 -------------------------------------
 ${charterSlice}
 -------------------------------------
-
+${pageContextBlock}
 Страница, с которой задают вопрос: ${page}
 Язык интерфейса: ${language}
 Отвечай так, как будто ты — живая часть NovaCiv.

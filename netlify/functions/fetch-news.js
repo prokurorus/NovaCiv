@@ -1,27 +1,27 @@
 // netlify/functions/fetch-news.js
 //
 // Что делает:
-// 1) Берёт новости из RSS (BBC Russian, DW Russian, Meduza, BBC World).
+// 1) Берёт новости из RSS по языковым группам:
+//    - RU: BBC Russian, DW Russian, Meduza
+//    - EN: BBC World, DW World (EN), The Guardian World
+//    - DE: Tagesschau, DW German
 // 2) Парсит <item> (title, link, description, pubDate, guid).
-// 3) Проверяет, что уже обрабатывали (по ключу и по заголовку) в /newsMeta/en.json.
-// 4) Для новых новостей вызывает OpenAI, получает текст в стиле NovaCiv на английском.
-// 5) Переводит этот текст на русский и немецкий.
-// 6) Сохраняет три варианта как темы форума (section: "news") с lang: "en" | "ru" | "de".
-// 7) Отправляет пост в соответствующие Telegram-каналы (EN, RU, DE).
-// 8) Обновляет /newsMeta/en.json, чтобы при следующем запуске
-//    не было повторов ни в Ленте, ни в Telegram.
-
-// ---------- ENV ----------
+// 3) Проверяет, что уже обрабатывали, в /newsMeta/en.json.
+// 4) Для каждой НОВОЙ новости делает аналитический текст на английском
+//    в духе NovaCiv, затем переводит на нужные языки.
+// 5) Сохраняет как темы форума (section: "news") с lang: "en" | "ru" | "de".
+// 6) Отправляет пост в соответственные Telegram-каналы по языку источника.
+// 7) Обновляет /newsMeta/en.json, чтобы не было дублей.
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Базовый Telegram бот
+// Telegram
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Каналы для новостей
-const TELEGRAM_NEWS_CHAT_ID = process.env.TELEGRAM_NEWS_CHAT_ID; // старый EN-канал
+// Старые env как fallback
+const TELEGRAM_NEWS_CHAT_ID = process.env.TELEGRAM_NEWS_CHAT_ID;
 const TELEGRAM_CHAT_ID_FALLBACK = process.env.TELEGRAM_CHAT_ID;
 
 // Отдельные каналы по языкам
@@ -36,30 +36,59 @@ const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE || "";
 // Максимум новых RSS-элементов за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
 
-// Где храним метаданные о уже обработанных новостях (общие для всех языков)
+// Где храним метаданные о уже обработанных новостях
 const NEWS_META_PATH = "/newsMeta/en.json";
 
-// Источники новостей (русскоязычные зарубежные + общий англоязычный)
+// Источники с привязкой к языкам каналов
 const SOURCES = [
+  // Русскоязычные зарубежные / независимые
   {
     id: "bbc_russian",
     url: "https://feeds.bbci.co.uk/russian/rss.xml",
+    languages: ["ru"],
   },
   {
     id: "dw_russian_all",
     url: "https://rss.dw.com/rdf/rss-ru-all",
+    languages: ["ru"],
   },
   {
     id: "meduza_news",
     url: "https://meduza.io/rss/news",
+    languages: ["ru"],
   },
+
+  // Англоязычные мировые
   {
     id: "bbc_world",
     url: "https://feeds.bbci.co.uk/news/world/rss.xml",
+    languages: ["en"],
+  },
+  {
+    id: "dw_english_world",
+    url: "https://rss.dw.com/rdf/rss-en-world",
+    languages: ["en"],
+  },
+  {
+    id: "guardian_world",
+    url: "https://www.theguardian.com/world/rss",
+    languages: ["en"],
+  },
+
+  // Немецкие общенациональные
+  {
+    id: "tagesschau",
+    url: "https://www.tagesschau.de/xml/rss2",
+    languages: ["de"],
+  },
+  {
+    id: "dw_german_all",
+    url: "https://rss.dw.com/rdf/rss-de-all",
+    languages: ["de"],
   },
 ];
 
-// Вывод по языкам
+// Вывод по языкам (форум + Telegram)
 const LANG_OUTPUTS = [
   {
     code: "en",
@@ -81,7 +110,7 @@ const LANG_OUTPUTS = [
   },
 ];
 
-// ---------- PROMPT ДЛЯ OPENAI (АНАЛИЗ НА АНГЛ.) ----------
+// ---------- PROMPTS ----------
 
 const SYSTEM_PROMPT_ANALYSIS = `
 You are an analyst for the digital community "NovaCiv" (New Civilization).
@@ -116,8 +145,6 @@ Do not invent facts that are not in the news.
 If information is missing, honestly say what data would be needed for solid conclusions.
 `.trim();
 
-// ---------- PROMPT ДЛЯ ПЕРЕВОДА ----------
-
 const SYSTEM_PROMPT_TRANSLATE = `
 You are a precise translator for the digital community "NovaCiv".
 
@@ -128,7 +155,7 @@ Your task:
 – Do NOT add your own commentary or extra sentences.
 `.trim();
 
-// ---------- ВСПОМОГАТЕЛЬНОЕ ----------
+// ---------- HELPERS ----------
 
 function stripCdata(str) {
   if (!str) return "";
@@ -141,8 +168,8 @@ function stripCdata(str) {
   return s;
 }
 
-// Простейший парсер RSS <item> ... </item>
-function parseRss(xml, sourceId) {
+// Простой парсер RSS <item>...</item>, с портированием targetLangs
+function parseRss(xml, sourceId, languages) {
   const items = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
   let match;
@@ -172,13 +199,13 @@ function parseRss(xml, sourceId) {
       guid: guid || "",
       pubDate: pubDate || "",
       description: description || "",
+      targetLangs: Array.isArray(languages) ? [...languages] : [],
     });
   }
 
   return items;
 }
 
-// Забираем RSS одного источника
 async function fetchRssSource(source) {
   const res = await fetch(source.url);
   if (!res.ok) {
@@ -188,11 +215,10 @@ async function fetchRssSource(source) {
     );
   }
   const xml = await res.text();
-  const items = parseRss(xml, source.id);
+  const items = parseRss(xml, source.id, source.languages || []);
   return items;
 }
 
-// Нормализация заголовка для анти-дублей
 function normalizeTitle(title) {
   if (!title) return "";
   return title
@@ -202,13 +228,12 @@ function normalizeTitle(title) {
     .trim();
 }
 
-// Ключ новости — по источнику + guid/link/title
 function makeNewsKey(item) {
   const base = (item.guid || item.link || item.title || "").trim();
   return `${item.sourceId}::${base.slice(0, 200)}`;
 }
 
-// ---------- ЧТЕНИЕ/ЗАПИСЬ META В FIREBASE ----------
+// ---------- META IN FIREBASE ----------
 
 const emptyMeta = { processedKeys: {}, titleKeys: {} };
 
@@ -257,7 +282,7 @@ async function saveNewsMeta(meta) {
   }
 }
 
-// ---------- ЗАПИСЬ В ФОРУМ ----------
+// ---------- SAVE TO FORUM ----------
 
 async function saveNewsToForumLang(item, analyticText, langCode) {
   if (!FIREBASE_DB_URL) {
@@ -293,10 +318,15 @@ async function saveNewsToForumLang(item, analyticText, langCode) {
 
 // ---------- TELEGRAM ----------
 
+const taglineByLang = {
+  en: "Digital community without rulers — only citizens.",
+  ru: "Цифровое сообщество без правителей — только граждане.",
+  de: "Digitale Gemeinschaft ohne Herrscher – nur Bürger.",
+};
+
 function buildTelegramText(item, analyticText, langCode) {
   const lines = [];
 
-  // Заголовок можно оставить универсальным
   lines.push("🌐 NovaCiv — Movement news");
   if (item.pubDate) {
     const d = new Date(item.pubDate);
@@ -322,7 +352,10 @@ function buildTelegramText(item, analyticText, langCode) {
   const now = new Date();
   const stamp = now.toISOString().slice(0, 16).replace("T", " ");
 
-  // Хвост: ссылка на сайт + отметка времени поста
+  const tagline =
+    taglineByLang[langCode] || taglineByLang.en || taglineByLang.ru;
+
+  lines.push(tagline);
   lines.push("Read more on NovaCiv: https://novaciv.space/news");
   lines.push(`Posted via NovaCiv • ${stamp} UTC`);
 
@@ -357,7 +390,7 @@ async function sendNewsToTelegram(item, analyticText, chatId, langCode) {
   }
 }
 
-// ---------- OPENAI АНАЛИЗ (EN) ----------
+// ---------- OPENAI ANALYSIS & TRANSLATION ----------
 
 async function analyzeNewsItemEn(item) {
   if (!OPENAI_API_KEY) {
@@ -417,8 +450,6 @@ Do not repeat the title. We only need the analytical text.
 
   return answer;
 }
-
-// ---------- OPENAI ПЕРЕВОД (EN → RU/DE) ----------
 
 async function translateText(englishText, targetLangCode) {
   if (!OPENAI_API_KEY) {
@@ -490,7 +521,6 @@ ${englishText}
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
-  // Только GET/POST (под крон или ручной вызов)
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     return {
       statusCode: 405,
@@ -498,7 +528,6 @@ exports.handler = async (event) => {
     };
   }
 
-  // Простой секретный токен
   if (NEWS_CRON_SECRET) {
     const qs = event.queryStringParameters || {};
     if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
@@ -520,12 +549,11 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1) Загружаем метаданные (что уже обработано)
     const meta = await loadNewsMeta();
     const processedKeys = { ...(meta.processedKeys || {}) };
     const titleKeys = { ...(meta.titleKeys || {}) };
 
-    // 2) Тянем все источники
+    // 1) Тянем все источники
     const allItems = [];
     for (const src of SOURCES) {
       try {
@@ -536,14 +564,14 @@ exports.handler = async (event) => {
       }
     }
 
-    // 3) Сортируем по дате (сначала новые)
+    // 2) Сортируем по дате (сначала новые)
     allItems.sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
       const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
       return db - da;
     });
 
-    // 4) Выбираем новые (не обработанные ранее)
+    // 3) Отбираем новые
     const toProcess = [];
     for (const item of allItems) {
       if (toProcess.length >= MAX_NEW_ITEMS_PER_RUN) break;
@@ -551,30 +579,19 @@ exports.handler = async (event) => {
       const key = makeNewsKey(item);
       const titleKey = normalizeTitle(item.title);
 
-      // Уже обработано по ключу
       if (processedKeys[key]) continue;
-      // Уже есть новость с таким заголовком (анти-дубликат по title)
       if (titleKey && titleKeys[titleKey]) continue;
-
-      // На всякий случай не обрабатываем пустые
       if (!item.title && !item.description) continue;
 
       toProcess.push({ item, key, titleKey });
 
-      // Резервируем сразу в памяти, чтобы в рамках одного запуска
-      // не взяли двойной дубликат
-      processedKeys[key] = {
-        reservedAt: Date.now(),
-      };
+      processedKeys[key] = { reservedAt: Date.now() };
       if (titleKey) {
-        titleKeys[titleKey] = {
-          reservedAt: Date.now(),
-        };
+        titleKeys[titleKey] = { reservedAt: Date.now() };
       }
     }
 
     if (toProcess.length === 0) {
-      // Просто ничего нового — тихо выходим
       await saveNewsMeta({ processedKeys, titleKeys });
       return {
         statusCode: 200,
@@ -589,16 +606,12 @@ exports.handler = async (event) => {
     let successCount = 0;
     const titles = [];
 
-    // 5) Обрабатываем каждую новость
     for (const entry of toProcess) {
       const { item, key, titleKey } = entry;
 
       try {
-        // 5.1. Анализ на английском
         const analyticEn = await analyzeNewsItemEn(item);
 
-        // 5.2. Переводы (по мере необходимости)
-        // Храним в объекте, чтобы не переводить одно и то же несколько раз
         const textsByLang = {
           en: analyticEn,
         };
@@ -606,21 +619,26 @@ exports.handler = async (event) => {
         for (const cfg of LANG_OUTPUTS) {
           const code = cfg.code;
 
-          // Получаем текст для языка
+          // Если у источника нет этого языка — пропускаем
+          if (
+            Array.isArray(item.targetLangs) &&
+            item.targetLangs.length > 0 &&
+            !item.targetLangs.includes(code)
+          ) {
+            continue;
+          }
+
           if (!textsByLang[code]) {
-            // Переводим с английского
             const translated = await translateText(analyticEn, code);
             textsByLang[code] = translated;
           }
 
           const textForLang = textsByLang[code];
 
-          // Сохраняем в форум (если задано)
           if (cfg.saveToForum) {
             await saveNewsToForumLang(item, textForLang, code);
           }
 
-          // Отправляем в Telegram (если есть chat_id)
           if (cfg.telegramChatId) {
             await sendNewsToTelegram(
               item,
@@ -631,7 +649,6 @@ exports.handler = async (event) => {
           }
         }
 
-        // Помечаем как окончательно обработанную (для всех языков сразу)
         processedKeys[key] = {
           processedAt: Date.now(),
           sourceId: item.sourceId || null,
@@ -653,7 +670,6 @@ exports.handler = async (event) => {
       }
     }
 
-    // 6) Обновляем мета-ветку (анти-дубликаты на будущее)
     await saveNewsMeta({ processedKeys, titleKeys });
 
     return {

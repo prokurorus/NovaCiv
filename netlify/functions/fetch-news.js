@@ -1,7 +1,7 @@
 // netlify/functions/fetch-news.js
 //
 // Что делает:
-// 1) Берёт новости из RSS (сейчас BBC World).
+// 1) Берёт новости из RSS (BBC Russian, DW Russian, Meduza, BBC World).
 // 2) Парсит <item> (title, link, description, pubDate, guid).
 // 3) Проверяет, что уже обрабатывали (по ключу и по заголовку) в /newsMeta/en.json.
 // 4) Для новых новостей вызывает OpenAI, получает текст в стиле NovaCiv на английском.
@@ -39,8 +39,20 @@ const MAX_NEW_ITEMS_PER_RUN = 2;
 // Где храним метаданные о уже обработанных новостях (общие для всех языков)
 const NEWS_META_PATH = "/newsMeta/en.json";
 
-// Источники новостей (пока один)
+// Источники новостей (русскоязычные зарубежные + общий англоязычный)
 const SOURCES = [
+  {
+    id: "bbc_russian",
+    url: "https://feeds.bbci.co.uk/russian/rss.xml",
+  },
+  {
+    id: "dw_russian_all",
+    url: "https://rss.dw.com/rdf/rss-ru-all",
+  },
+  {
+    id: "meduza_news",
+    url: "https://meduza.io/rss/news",
+  },
   {
     id: "bbc_world",
     url: "https://feeds.bbci.co.uk/news/world/rss.xml",
@@ -307,8 +319,12 @@ function buildTelegramText(item, analyticText, langCode) {
   lines.push(analyticText.trim());
   lines.push("");
 
-  // Хвост пока универсальный
-  lines.push("Read more on the site: https://novaciv.space/news");
+  const now = new Date();
+  const stamp = now.toISOString().slice(0, 16).replace("T", " ");
+
+  // Хвост: ссылка на сайт + отметка времени поста
+  lines.push("Read more on NovaCiv: https://novaciv.space/news");
+  lines.push(`Posted via NovaCiv • ${stamp} UTC`);
 
   return lines.join("\n");
 }

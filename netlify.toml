@@ -8,3 +8,9 @@
   to = "/index.html"
   status = 200
 
+  [[functions]]
+  name = "news-cron"
+  # Раз в час по UTC. Можно будет поменять позже.
+  schedule = "0 * * * *"
+
+

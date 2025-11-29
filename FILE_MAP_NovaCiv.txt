@@ -1,0 +1,169 @@
+NovaCiv Project File Map
+===========================
+
+Root directory
+--------------
+
+Main configuration and project-level files:
+
+  - .gitignore
+  - README.md
+  - components.json
+  - eslint.config.js
+  - index.html
+  - netlify.toml
+  - package-lock.json
+  - package.json
+  - postcss.config.cjs
+  - run_novaciv.bat
+  - start_server.bat
+  - tailwind.config.ts
+  - tsconfig.app.json
+  - tsconfig.json
+  - tsconfig.node.json
+  - vite.config.ts
+
+Directories overview
+--------------------
+
+- netlify/      – serverless functions (AI, email, news, Telegram)
+- public/       – static assets (favicon, images, robots.txt, sitemap)
+- src/          – React/Vite application source code
+
+Detailed tree
+-------------
+
+netlify/
+  + functions/
+    - ai-domovoy.js
+    - ai-voice.js
+    - fetch-news.js
+    - post-to-telegram.js
+    - send-email.js
+
+public/
+  - _redirects
+  - favicon.ico
+  - manifest.json
+  - og-image.png
+  - placeholder.svg
+  - robots.txt
+  - sitemap.xml
+  + lovable-uploads/
+    - 1
+    - android.png
+
+src/
+  - App.css
+  - App.tsx
+  - index.css
+  - main.tsx
+  - vite-env.d.ts
+  + components/
+    - AssistantWidget.tsx
+    - Header.tsx
+    - LanguageSwitcher.tsx
+    - SupporterCounter.tsx
+    - TopNav.tsx
+    + ui/
+      - accordion.tsx
+      - alert-dialog.tsx
+      - alert.tsx
+      - aspect-ratio.tsx
+      - avatar.tsx
+      - badge.tsx
+      - breadcrumb.tsx
+      - button.tsx
+      - calendar.tsx
+      - card.tsx
+      - carousel.tsx
+      - chart.tsx
+      - checkbox.tsx
+      - collapsible.tsx
+      - command.tsx
+      - context-menu.tsx
+      - dialog.tsx
+      - drawer.tsx
+      - dropdown-menu.tsx
+      - form.tsx
+      - hover-card.tsx
+      - input-otp.tsx
+      - input.tsx
+      - label.tsx
+      - menubar.tsx
+      - navigation-menu.tsx
+      - pagination.tsx
+      - popover.tsx
+      - progress.tsx
+      - radio-group.tsx
+      - resizable.tsx
+      - scroll-area.tsx
+      - select.tsx
+      - separator.tsx
+      - sheet.tsx
+      - sidebar.tsx
+      - skeleton.tsx
+      - slider.tsx
+      - sonner.tsx
+      - switch.tsx
+      - table.tsx
+      - tabs.tsx
+      - textarea.tsx
+      - toast.tsx
+      - toaster.tsx
+      - toggle-group.tsx
+      - toggle.tsx
+      - tooltip.tsx
+      - use-toast.ts
+  + context/
+    - LanguageContext.tsx
+  + data/
+    - manifesto_de.txt
+    - manifesto_en.txt
+    - manifesto_es.txt
+    - manifesto_ru.txt
+    - translations.ts
+  + hooks/
+    - use-mobile.tsx
+    - use-toast.ts
+    - useChat.ts
+    - useMember.ts
+    - useStats.ts
+  + lib/
+    - counters.ts
+    - firebase.ts
+    - utils.ts
+  + pages/
+    - Charter-de.tsx
+    - Charter-en.tsx
+    - Charter-es.tsx
+    - Charter-ru.tsx
+    - Charter.tsx
+    - ForumPage.tsx
+    - Home.tsx
+    - Index.tsx
+    - Join.tsx
+    - Manifesto-de.tsx
+    - Manifesto-en.tsx
+    - Manifesto-es.tsx
+    - Manifesto-ru.tsx
+    - Manifesto.tsx
+    - News.tsx
+    - NotFound.tsx
+    - TopicPage.tsx
+    - Vision.tsx
+  + types/
+    - language.ts
+  + utils/
+    - postToTelegram.ts:
+
+Notes
+-----
+
+- The file `public/lovable-uploads/1` looks like an empty stub and can be safely removed.
+- The file `src/utils/postToTelegram.ts:` has an invalid name (trailing colon) and contains an unfinished helper.
+  It is not imported anywhere and can be removed. The working Telegram logic lives in:
+  - netlify/functions/post-to-telegram.js
+  - src/lib/utils.ts (client-side helper if needed)
+
+If new files or directories are added, please update this map manually so that the structure stays in sync.

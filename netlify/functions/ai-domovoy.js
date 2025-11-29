@@ -1,7 +1,17 @@
 // netlify/functions/ai-domovoy.js
+//
+// Мозг Домового NovaCiv.
+// Теперь он:
+// 1) Знает Манифест и Устав (из текстовых файлов).
+// 2) Умеет по запросу цитировать и объяснять пункты Устава.
+// 3) Подгружает свежий контекст с сайта из Firebase (лента и форум).
+// 4) Принимает опциональный pageContext — текст текущей страницы/темы.
 
 const fs = require("fs");
 const path = require("path");
+
+// ---------- ENV ----------
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || "";
 
 // ---------- Глобальные переменные ----------
 let manifestoRU = "";
@@ -47,7 +57,7 @@ function parseCharterSections(text) {
   for (const rawLine of lines) {
     const line = rawLine; // не трогаем пробелы внутри строки
     // Ищем строки вида "0.0.", "1.1.", "10.2" и т.п. в начале строки
-    const m = line.match(/^\s*(\d+\.\d+)\.?\s*(.*)$/);
+    const m = line.match(/^\s*(\d+\.\d+)\.\s*(.*)$/);
     if (m) {
       // Сохраняем предыдущий пункт
       if (currentId) {
@@ -311,6 +321,91 @@ async function tryHandleExplain(userText, historyMessages, language, apiKey) {
   }
 }
 
+// ---------- Загрузка свежего контекста сайта из Firebase ----------
+
+async function loadSiteContext(language) {
+  if (!FIREBASE_DB_URL) return "";
+
+  try {
+    // Берём последние 40 тем по createdAt
+    const params = new URLSearchParams({
+      orderBy: JSON.stringify("createdAt"),
+      limitToLast: "40",
+    });
+
+    const url = `${FIREBASE_DB_URL}/forum/topics.json?${params.toString()}`;
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Firebase siteContext error:", res.status, text);
+      return "";
+    }
+
+    const data = await res.json();
+    if (!data || typeof data !== "object") return "";
+
+    const topics = Object.entries(data).map(([id, raw]) => {
+      const t = raw || {};
+      return {
+        id,
+        title: t.title || "",
+        content: t.content || "",
+        section: t.section || "general",
+        createdAt: t.createdAt || 0,
+        lang: t.lang || null,
+        sourceId: t.sourceId || "",
+      };
+    });
+
+    // Сортируем по дате
+    topics.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    // Фильтруем по языку интерфейса (если lang не задан — остаётся)
+    const filtered = topics.filter((t) => {
+      if (!t.lang) return true;
+      return t.lang === language;
+    });
+
+    const news = filtered.filter((t) => t.section === "news").slice(0, 10);
+    const forum = filtered.filter((t) => t.section !== "news").slice(0, 10);
+
+    function short(text, n) {
+      if (!text) return "";
+      const s = text.replace(/\s+/g, " ").trim();
+      return s.length > n ? s.slice(0, n) + "…" : s;
+    }
+
+    let block = "";
+
+    if (news.length) {
+      block += "Последние записи в ленте (section=news):\n";
+      news.forEach((t, i) => {
+        block += `[N${i + 1}] "${t.title}"\n`;
+        block += `Кратко: ${short(t.content, 280)}\n`;
+        if (t.sourceId) {
+          block += `Источник: ${t.sourceId}\n`;
+        }
+        block += "\n";
+      });
+    }
+
+    if (forum.length) {
+      block += "Последние темы форума (section!=news):\n";
+      forum.forEach((t, i) => {
+        block += `[F${i + 1}] "${t.title}"\n`;
+        block += `Раздел: ${t.section}\n`;
+        block += `Кратко: ${short(t.content, 280)}\n\n`;
+      });
+    }
+
+    return block.trim();
+  } catch (e) {
+    console.error("loadSiteContext runtime error:", e);
+    return "";
+  }
+}
+
 // ---------- Основной handler ----------
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -343,8 +438,7 @@ exports.handler = async (event) => {
     // Новый параметр: текст текущей страницы / темы / новости
     const rawPageContext =
       typeof body.pageContext === "string" ? body.pageContext : "";
-    // Ограничим размер, чтобы не забивать промпт (8k символов хватит)
-    const pageContext = sliceText(rawPageContext, 8000);
+    const pageContext = sliceText(rawPageContext, 8000); // защита от переполнения
 
     // Последнее сообщение пользователя
     const lastUser =
@@ -376,7 +470,10 @@ exports.handler = async (event) => {
       };
     }
 
-    // 3) Во всех остальных случаях — обычный диалог с OpenAI
+    // 3) Подгружаем свежий контекст сайта (лента + форум)
+    const siteContext = await loadSiteContext(language);
+
+    // 4) Во всех остальных случаях — обычный диалог с OpenAI
 
     const manifestoSlice = sliceText(manifestoRU, 20000);
     const charterSlice = sliceText(charterRU, 20000);
@@ -385,6 +482,14 @@ exports.handler = async (event) => {
       ? `
 --------- Контекст текущей страницы / темы (фрагмент с сайта) ----------
 ${pageContext}
+-----------------------------------------------------------------------
+`
+      : "";
+
+    const siteContextBlock = siteContext
+      ? `
+--------- Фрагменты ленты и форума (последние записи) ----------
+${siteContext}
 -----------------------------------------------------------------------
 `
       : "";
@@ -400,7 +505,8 @@ ${pageContext}
 Ты опираешься на:
 — Манифест NovaCiv (философия, смысл, мировоззрение);
 — Устав NovaCiv (структура, правила, принципы);
-— при наличии — текст текущей страницы или темы, переданный как контекст.
+— при наличии — фрагменты ленты и форума (свежие темы);
+— при наличии — текст текущей страницы или темы (pageContext).
 
 ПРАВИЛА ОТВЕТОВ:
 
@@ -415,12 +521,16 @@ ${pageContext}
    честно скажи, что это слишком много для одного сообщения,
    и предложи краткое содержание или разбор по частям.
 
+4) Если в блоке "Фрагменты ленты и форума" есть темы, связанные с вопросом пользователя,
+   опирайся на них и упоминай, что берёшь примеры из ленты или форума.
+   Если подходящих тем нет, честно скажи, что в свежих записях ты пока этого не видишь.
+
 --------- Краткий контекст (фрагменты Устава и Манифеста, русская версия) ----------
 ${manifestoSlice}
 -------------------------------------
 ${charterSlice}
 -------------------------------------
-${pageContextBlock}
+${siteContextBlock}${pageContextBlock}
 Страница, с которой задают вопрос: ${page}
 Язык интерфейса: ${language}
 Отвечай так, как будто ты — живая часть NovaCiv.

@@ -60,6 +60,30 @@ const emptyTextByLang: Record<Language, string> = {
     "Crea un tema en la sección «Noticias del movimiento» del foro y aparecerá aquí.",
 };
 
+// Форматирование даты и времени по языку
+const formatDateTime = (timestamp: number | undefined, language: Language) => {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+
+  let locale = "en-GB";
+  switch (language) {
+    case "ru":
+      locale = "ru-RU";
+      break;
+    case "de":
+      locale = "de-DE";
+      break;
+    case "es":
+      locale = "es-ES";
+      break;
+  }
+
+  return date.toLocaleString(locale, {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+};
+
 const NewsPage: React.FC = () => {
   const { language } = useLanguage();
   const [items, setItems] = useState<ForumTopic[]>([]);
@@ -127,11 +151,7 @@ const NewsPage: React.FC = () => {
             {itemsForLang.map((item) => (
               <article key={item.id} className="card space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
-                  <span>
-                    {item.createdAt
-                      ? new Date(item.createdAt).toLocaleDateString()
-                      : ""}
-                  </span>
+                  <span>{formatDateTime(item.createdAt, language)}</span>
                   <span className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                     <span>{sourceLabel.news[language]}</span>

@@ -6,6 +6,10 @@
 // 2) Умеет по запросу цитировать и объяснять пункты Устава.
 // 3) Подгружает свежий контекст с сайта из Firebase (лента и форум).
 // 4) Принимает опциональный pageContext — текст текущей страницы/темы.
+//
+// ВАЖНО: поддерживает оба формата запроса:
+//   - старый: { language, messages: [{ role, content }] }
+//   - новый:  { lang, question, history: [{ role, text }] }
 
 const fs = require("fs");
 const path = require("path");
@@ -14,149 +18,195 @@ const path = require("path");
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || "";
 
 // ---------- Глобальные переменные ----------
-let manifestoRU = "";
-let charterRU = "";
-let charterSections = []; // [{ id: "0.0", text: "0.0. ..." }, ...]
-let loaded = false;
+let manifestoRU = null;
+let charterRU = null;
 
-// ---------- Загрузка контекста из файлов (один раз) ----------
-function loadContext() {
-  if (loaded) return;
+// ---------- Вспомогательные функции ----------
 
+function loadFileSafe(filePath) {
   try {
-    const base = path.resolve("./src/data");
-    manifestoRU = fs.readFileSync(
-      path.join(base, "manifesto_ru.txt"),
-      "utf8"
-    );
-    charterRU = fs.readFileSync(
-      path.join(base, "charter_ru.txt"),
-      "utf8"
-    );
-
-    parseCharterSections(charterRU);
-    loaded = true;
+    return fs.readFileSync(filePath, "utf8");
   } catch (e) {
-    console.error("Контекст NovaCiv не загружен:", e);
-    manifestoRU = "";
-    charterRU = "";
-    charterSections = [];
-    loaded = true;
+    console.error("Failed to load file:", filePath, e);
+    return "";
   }
 }
 
-function parseCharterSections(text) {
-  charterSections = [];
-  if (!text) return;
+function loadContext() {
+  if (manifestoRU && charterRU) return;
 
-  const lines = text.split(/\r?\n/);
-  let currentId = null;
-  let buffer = [];
+  const rootDir = process.cwd();
+  const manifestoPath = path.join(
+    rootDir,
+    "public",
+    "texts",
+    "manifest_ru.txt"
+  );
+  const charterPath = path.join(rootDir, "public", "texts", "charter_ru.txt");
 
-  const idRegex = /^(\d+\.\d+)\s*(.*)$/;
+  manifestoRU = loadFileSafe(manifestoPath);
+  charterRU = loadFileSafe(charterPath);
+
+  console.log("[ai-domovoy] Context loaded:", {
+    manifestoLength: manifestoRU.length,
+    charterLength: charterRU.length,
+  });
+}
+
+function sliceText(text, maxLen) {
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen);
+}
+
+function normalize(text) {
+  if (!text) return "";
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/[—–]/g, "-")
+    .trim()
+    .toLowerCase();
+}
+
+// ---------- Работа с Firebase (лента+форум) ----------
+
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(
+      `Failed to fetch ${url}: ${res.status} – ${txt.slice(0, 200)}`
+    );
+  }
+  return res.json();
+}
+
+async function loadSiteContext(language) {
+  if (!FIREBASE_DB_URL) {
+    console.warn("[ai-domovoy] FIREBASE_DB_URL is not set, site context OFF");
+    return "";
+  }
+
+  try {
+    const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+    const commentsUrl = `${FIREBASE_DB_URL}/forum/comments.json`;
+    const newsUrl = `${FIREBASE_DB_URL}/newsFeed.json`;
+
+    const [topicsRaw, commentsRaw, newsRaw] = await Promise.all([
+      fetchJSON(topicsUrl).catch(() => ({})),
+      fetchJSON(commentsUrl).catch(() => ({})),
+      fetchJSON(newsUrl).catch(() => ({})),
+    ]);
+
+    const topics = Object.entries(topicsRaw || {}).map(([id, t]) => ({
+      id,
+      ...(t || {}),
+    }));
+
+    const recentTopics = topics
+      .filter((t) => !t.section || t.section === "general")
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 10);
+
+    const commentsBlocks = [];
+    for (const t of recentTopics) {
+      const topicComments = Object.entries(commentsRaw?.[t.id] || {}).map(
+        ([cid, c]) => ({
+          id: cid,
+          ...(c || {}),
+        })
+      );
+      const lastComments = topicComments
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 3);
+
+      if (lastComments.length > 0) {
+        commentsBlocks.push(
+          `Тема: ${t.title || "(без названия)"}\n` +
+            lastComments
+              .map(
+                (c) =>
+                  `– ${c.author || "аноним"}: ${sliceText(
+                    c.text || "",
+                    240
+                  )}`
+              )
+              .join("\n")
+        );
+      }
+    }
+
+    const newsItems = Object.entries(newsRaw || {})
+      .map(([id, n]) => ({ id, ...(n || {}) }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 10);
+
+    const newsBlock =
+      newsItems.length > 0
+        ? newsItems
+            .map(
+              (n) =>
+                `• ${sliceText(
+                  n.title || n.text || "(новость)",
+                  200
+                )}`.trim()
+            )
+            .join("\n")
+        : "";
+
+    const forumBlock =
+      commentsBlocks.length > 0 ? commentsBlocks.join("\n\n") : "";
+
+    const combined = [newsBlock, forumBlock].filter(Boolean).join("\n\n");
+
+    return combined;
+  } catch (e) {
+    console.error("[ai-domovoy] Failed to load site context:", e);
+    return "";
+  }
+}
+
+// ---------- Поиск пунктов Устава ----------
+
+function extractCharterSections(charterText) {
+  const lines = charterText.split(/\r?\n/);
+  const sections = [];
+  let current = null;
+  const punktRegex = /^(\d+\.\d+)\s+(.*)$/;
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const m = trimmed.match(idRegex);
+    if (!trimmed) continue;
 
+    const m = trimmed.match(punktRegex);
     if (m) {
-      if (currentId) {
-        const fullText = `${currentId}. ` + buffer.join("\n").trim();
-        charterSections.push({
-          id: currentId,
-          text: fullText.trim(),
-        });
-      }
-      currentId = m[1]; // "0.0"
-      const rest = m[2] || "";
-      buffer = [rest];
-    } else if (currentId) {
-      buffer.push(line);
-    } else {
-      // текст до первого пронумерованного пункта игнорируем
+      if (current) sections.push(current);
+      current = {
+        id: m[1],
+        title: "",
+        bodyLines: [],
+      };
+      const rest = m[2].trim();
+      if (rest) current.title = rest;
+    } else if (current) {
+      current.bodyLines.push(trimmed);
     }
   }
 
-  if (currentId) {
-    const fullText = `${currentId}. ` + buffer.join("\n").trim();
-    charterSections.push({
-      id: currentId,
-      text: fullText.trim(),
-    });
-  }
-
-  console.log(`Разобрано пунктов устава: ${charterSections.length}`);
-}
-
-function sliceText(text, maxChars) {
-  if (!text) return "";
-  return text.length > maxChars ? text.slice(0, maxChars) : text;
-}
-
-// ---------- Вспомогательные функции для цитирования ----------
-
-function normalize(str) {
-  if (!str) return "";
-  return String(str).toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function findSectionById(id) {
-  return charterSections.find((s) => s.id === id) || null;
+  if (current) sections.push(current);
+  return sections;
 }
 
 function findFirstSection() {
-  if (!charterSections.length) return null;
-  return charterSections[0];
+  if (!charterRU) return null;
+  const sections = extractCharterSections(charterRU);
+  return sections.length > 0 ? sections[0] : null;
 }
 
-function extractLastCitedIdFromHistory(historyMessages) {
-  if (!Array.isArray(historyMessages)) return null;
-
-  for (let i = historyMessages.length - 1; i >= 0; i--) {
-    const m = historyMessages[i];
-    const c = (m && m.content) || "";
-    const nm = normalize(c);
-    const match = nm.match(/пункт\s+(\d+\.\d+)/);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return null;
-}
-
-function findNextSection(id) {
-  const idx = charterSections.findIndex((s) => s.id === id);
-  if (idx === -1) return null;
-  if (idx + 1 >= charterSections.length) return null;
-  return charterSections[idx + 1];
-}
-
-function findPrevSection(id) {
-  const idx = charterSections.findIndex((s) => s.id === id);
-  if (idx <= 0) return null;
-  return charterSections[idx - 1];
-}
-
-function extractPunktIdFromText(text) {
-  const t = normalize(text);
-
-  let m = t.match(/(\d+\.\d+)/);
-  if (m) return m[1];
-
-  m = t.match(/(\d+)\s*[.,]\s*(\d+)/);
-  if (m) {
-    return `${m[1]}.${m[2]}`;
-  }
-
-  if (t.includes("пункт")) {
-    if (t.includes("перв")) {
-      const first = findFirstSection();
-      return first ? first.id : null;
-    }
-  }
-
-  return null;
+function findSectionById(id) {
+  if (!charterRU) return null;
+  const sections = extractCharterSections(charterRU);
+  return sections.find((s) => s.id === id) || null;
 }
 
 function tryExtractPunktIdFromText(text) {
@@ -175,67 +225,56 @@ function tryExtractPunktIdFromText(text) {
   return null;
 }
 
-// Основная логика: вернуть точную цитату (или null, если не надо цитировать напрямую)
-function tryHandleCitation(userText, historyMessages) {
-  if (!charterSections.length) return null;
+function tryRecognizeFirstPunkt(text) {
+  const t = normalize(text);
 
+  if (t.includes("самый первый пункт") || t.includes("первый пункт")) {
+    return "FIRST";
+  }
+
+  if (t.includes("пункт")) {
+    if (t.includes("перв")) {
+      const first = findFirstSection();
+      return first ? first.id : null;
+    }
+  }
+
+  return null;
+}
+
+function tryHandleCitation(userText, historyMessages) {
   const t = normalize(userText);
+  if (!t) return null;
 
   const asksForCitation =
-    t.includes("процитируй") ||
-    t.includes("процитируете") ||
     t.includes("цитируй") ||
-    t.includes("дай текст") ||
-    t.includes("приведи");
+    t.includes("процитируй") ||
+    t.includes("покажи пункт") ||
+    t.includes("дай пункт") ||
+    t.includes("сошлись на пункт");
 
   const mentionsPunkt = t.includes("пункт");
 
-  if (asksForCitation && !mentionsPunkt) {
-    return null;
-  }
+  if (!asksForCitation && !mentionsPunkt) return null;
 
   const explicitId = tryExtractPunktIdFromText(userText);
+  const firstMarker = tryRecognizeFirstPunkt(userText);
 
-  if (asksForCitation && explicitId) {
-    const section = findSectionById(explicitId);
-    if (!section) {
-      return `Я не нашёл пункт ${explicitId} в Уставе NovaCiv. Возможно, он ещё не существует или номер указан неверно.`;
-    }
-    return section.text;
+  let targetSection = null;
+
+  if (explicitId) {
+    targetSection = findSectionById(explicitId);
+  } else if (firstMarker === "FIRST") {
+    targetSection = findFirstSection();
   }
 
-  const lastId = extractLastCitedIdFromHistory(historyMessages);
-
-  if (
-    asksForCitation &&
-    mentionsPunkt &&
-    !explicitId &&
-    lastId &&
-    t.includes("следующ")
-  ) {
-    const nextSection = findNextSection(lastId);
-    if (!nextSection) {
-      return `После пункта ${lastId} нет следующего — он последний в Уставе.`;
-    }
-    return nextSection.text;
-  }
-
-  if (
-    asksForCitation &&
-    mentionsPunkt &&
-    !explicitId &&
-    lastId &&
-    t.includes("предыдущ")
-  ) {
-    const prevSection = findPrevSection(lastId);
-    if (!prevSection) {
-      return `До пункта ${lastId} нет предыдущего пункта.`;
-    }
-    return prevSection.text;
+  if (targetSection) {
+    const body = targetSection.bodyLines.join(" ");
+    return `Пункт Устава ${targetSection.id}:\n${targetSection.title}\n\n${body}`;
   }
 
   if (asksForCitation && mentionsPunkt) {
-    return "Уточни, пожалуйста, номер пункта Устава, который нужно процитировать (например, 0.0, 1.1 и т.п.), или скажи: «самый первый пункт устава».";
+    return "Уточни, пожалуйста, номер пункта Устава, который тебя интересует (например, 0.0, 1.1 и т.п.), или скажи: «самый первый пункт устава».";
   }
 
   return null;
@@ -243,149 +282,77 @@ function tryHandleCitation(userText, historyMessages) {
 
 // ---------- Логика объяснения смысла последнего процитированного пункта ----------
 
-async function tryHandleExplain(
-  userText,
-  historyMessages,
-  language,
-  apiKey
-) {
+async function tryHandleExplain(userText, historyMessages, language, apiKey) {
   const t = normalize(userText);
   if (!t) return null;
 
-  const hasExplainWord =
+  const asksExplain =
     t.includes("объясни") ||
-    t.includes("объясните") ||
-    t.includes("поясни") ||
-    t.includes("поясните") ||
-    t.includes("что означает") ||
-    t.includes("что значит");
+    t.includes("растолкуй") ||
+    t.includes("что это значит") ||
+    t.includes("что значит") ||
+    t.includes("расскажи смысл");
 
-  if (!hasExplainWord) {
-    return null;
-  }
+  if (!asksExplain) return null;
 
-  const lastId = extractLastCitedIdFromHistory(historyMessages);
-  if (!lastId) {
-    return null;
-  }
-
-  const section = findSectionById(lastId);
-  if (!section) {
-    return null;
-  }
-
-  const explainLanguage =
-    language === "ru" || language === "en" || language === "de"
-      ? language
-      : "ru";
-
-  const systemPrompt = `
-Ты — помощник проекта NovaCiv.
-Твоя задача — спокойно и понятно объяснить смысл одного пункта Устава NovaCiv для обычного человека.
-Не придумывай новых норм и не меняй формулировок Устава — только поясняй, как это можно понять и применить.
-Отвечай на языке кода "${explainLanguage}" (ru — по-русски, en — по-английски и т.п.).
-  `.trim();
-
-  const userPrompt = `
-Объясни, пожалуйста, смысл следующего пункта Устава NovaCiv:
-
-"${section.text}"
-
-Не переписывай его полностью ещё раз (можно цитировать отдельные фразы, если нужно),
-а разложи по полочкам: о чём этот пункт, какие права и обязанности он задаёт, и что он означает для Гражданина.
-  `.trim();
-
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-  try {
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 400,
-          temperature: 0.4,
-        }),
-      }
+  const lastCitation = [...historyMessages]
+    .reverse()
+    .find(
+      (m) =>
+        m.role === "assistant" &&
+        typeof m.content === "string" &&
+        m.content.includes("Пункт Устава")
     );
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(
-        "OpenAI explain-point error:",
-        response.status,
-        text
-      );
-      return null;
-    }
-
-    const data = await response.json();
-    const answer =
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content.trim()
-        : "";
-
-    return answer || null;
-  } catch (e) {
-    console.error("tryHandleExplain runtime error:", e);
-    return null;
+  if (!lastCitation) {
+    return "Сначала попроси меня процитировать конкретный пункт Устава, а потом уже — объяснить, что он значит.";
   }
-}
 
-// ---------- Загрузка свежего контекста сайта из Firebase ----------
+  const prompt = `
+Ты — Домовой NovaCiv, цифровой помощник и философ.
+Пользователь попросил объяснить смысл процитированного ранее пункта Устава.
 
-async function loadSiteContext(language) {
-  if (!FIREBASE_DB_URL) return "";
+Вот цитата, которую ты давал ранее:
+${lastCitation.content}
 
-  try {
-    const url = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=%22createdAt%22&limitToLast=16`;
-    const res = await fetch(url);
+Теперь спокойно и понятно объясни, что это значит, зачем этот пункт нужен и как он связан с философией NovaCiv. Пиши на том же языке, на котором с тобой говорит пользователь.
+`;
 
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(
-        "Firebase site-context error:",
-        res.status,
-        text
-      );
-      return "";
-    }
+  const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4.1-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Ты — Домовой NovaCiv, мудрый и спокойный цифровой помощник. Объясняй нормы Устава и философию сообщества простым и честным языком. Не обещай того, чего в Уставе нет.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.5,
+    }),
+  });
 
-    const data = await res.json();
-    if (!data || typeof data !== "object") return "";
-
-    const items = Object.values(data)
-      .filter((item) => item && typeof item === "object")
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-    const blocks = items.slice(0, 12).map((item) => {
-      const title = (item.title || "").toString();
-      const content = sliceText((item.content || "").toString(), 600);
-      const section = item.section || "news";
-      const lang = item.lang || "ru";
-
-      return `[#${section}][${lang}] ${title}\n${content}`;
-    });
-
-    if (!blocks.length) return "";
-
-    return blocks.join("\n\n");
-  } catch (e) {
-    console.error("loadSiteContext error:", e);
-    return "";
+  if (!completion.ok) {
+    const text = await completion.text().catch(() => "");
+    throw new Error(
+      `OpenAI explain error: ${completion.status} – ${text.slice(0, 200)}`
+    );
   }
+
+  const data = await completion.json();
+  const answer =
+    data.choices?.[0]?.message?.content ||
+    "Я пока не могу объяснить этот пункт. Попробуй переформулировать вопрос.";
+  return answer;
 }
 
 // ---------- Основной handler ----------
@@ -412,11 +379,21 @@ exports.handler = async (event) => {
     }
 
     const body = JSON.parse(event.body || "{}");
-    const language = body.language || "ru";
+
+    // Поддерживаем оба формата: старый (language, messages) и новый (lang, history, question, text)
+    const language = body.lang || body.language || "ru";
     const page = body.page || "/";
-    const incomingMessages = Array.isArray(body.messages)
+
+    const incomingRaw = Array.isArray(body.messages)
       ? body.messages
+      : Array.isArray(body.history)
+      ? body.history
       : [];
+
+    const incomingMessages = incomingRaw.map((m) => ({
+      role: m.role || m.sender || "user",
+      content: m.content || m.text || "",
+    }));
 
     const rawPageContext =
       typeof body.pageContext === "string" ? body.pageContext : "";
@@ -426,7 +403,12 @@ exports.handler = async (event) => {
       [...incomingMessages]
         .reverse()
         .find((m) => m.role === "user" && m.content) || null;
-    const userText = lastUser?.content || "";
+
+    const userTextFromHistory = lastUser?.content || "";
+    const userText =
+      typeof body.question === "string" && body.question.trim()
+        ? body.question.trim()
+        : userTextFromHistory;
 
     const citation = tryHandleCitation(userText, incomingMessages);
     if (citation) {
@@ -460,117 +442,107 @@ exports.handler = async (event) => {
       ? `\n\n--------- Текст текущей страницы / темы ----------\n${pageContext}\n-------------------------------------\n`
       : "";
 
+    const historyForModel = incomingMessages
+      .slice(-10)
+      .map((m) => `${m.role === "user" ? "Пользователь" : "Домовой"}: ${m.content}`)
+      .join("\n");
+
     const systemPrompt = `
-Ты — Домовой проекта NovaCiv.
-Ты — не хозяин и не учитель. Ты — хранитель смысла, спокойный и честный собеседник.
-Ты ведёшь философские записи в «Ленте движения NovaCiv» и отвечаешь людям в чате тем же голосом.
-В ленте ты формулируешь завершённые мысли и вопросы к сообществу, а в диалоге помогаешь человеку разобраться с его конкретной ситуацией.
+Ты — Домовой NovaCiv, цифровой Дух дома Новой Цивилизации.
+Ты дружелюбен, честен и спокоен. Ты помнишь философию сообщества:
+— без насилия,
+— без правителей,
+— без манипуляций,
+— с уважением к разуму и свободе.
 
-Говори просто, тепло и по делу.
-Если пользователь обращается по-русски — отвечай по-русски.
-Если на другом языке — отвечай на том языке, который он использовал.
+Твоя задача:
+— отвечать прямо и честно,
+— опираться на Манифест и Устав,
+— не обещать невозможного,
+— не подменять волю Граждан.
 
-Ты опираешься на:
-— Манифест NovaCiv (философия, смысл, мировоззрение);
-— Устав NovaCiv (структура, правила, принципы);
-— при наличии — фрагменты ленты и форума (свежие темы);
-— при наличии — текст текущей страницы или темы (pageContext).
+Если тебя спрашивают о чём-то вне философии и Устава — отвечай как разумный помощник, признавая границы своих знаний.
+`;
 
-ПРАВИЛА ОТВЕТОВ:
+    const userPrompt = `
+Пользователь задаёт вопрос Домовому.
 
-1) Если пользователь спрашивает прямо о нормах Устава,
-   опирайся на Устав и не придумывай новых норм.
-   Если точного текста не помнишь — честно скажи и постарайся объяснить дух принципа.
+Язык общения: ${language}.
+Страница сайта: ${page}.
 
-2) Если вопрос философский или личный,
-   говори честно и спокойно, как взрослый с взрослым.
-   Не обещай чудес, не скатывайся в лозунги.
-
-3) Если пользователь просит слишком большой объём текста (целый раздел),
-   честно скажи, что это слишком много для одного сообщения,
-   и предложи краткое содержание или разбор по частям.
-
-4) Если в блоке "Фрагменты ленты и форума" есть темы, связанные с вопросом пользователя,
-   опирайся на них и упоминай, что берёшь примеры из ленты или форума.
-   Если подходящих тем нет, честно скажи, что в свежих записях ты пока этого не видишь.
-
---------- Краткий контекст (фрагменты Устава и Манифеста, русская версия) ----------
+Вот фрагменты Манифеста (на русском):
 ${manifestoSlice}
--------------------------------------
+
+Вот фрагменты Устава (на русском):
 ${charterSlice}
--------------------------------------
-${siteContextBlock}${pageContextBlock}
-Страница, с которой задают вопрос: ${page}
-Язык интерфейса: ${language}
-Отвечай так, как будто ты — живая часть NovaCiv.
-    `.trim();
 
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...incomingMessages.map((m) => ({
-        role:
-          m.role === "assistant"
-            ? "assistant"
-            : m.role === "system"
-            ? "system"
-            : "user",
-        content: m.content || m.text || "",
-      })),
-    ];
+Если вопрос явно относится к Уставу или Манифесту — ссылайся на них по смыслу.
+Если вопрос философский — отвечай спокойно и честно, не впадая в пафос.
 
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+История последних сообщений:
+${historyForModel}
 
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          max_tokens: 250,
-          temperature: 0.4,
-        }),
-      }
-    );
+Дополнительный контекст с сайта:
+${siteContextBlock}
 
-    if (!response.ok) {
-      const text = await response.text();
+Контекст текущей страницы (если есть):
+${pageContextBlock}
+
+Вопрос пользователя:
+${userText || "(вопрос не распознан)"}\n`;
+
+    const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        temperature: 0.5,
+      }),
+    });
+
+    if (!completion.ok) {
+      const text = await completion.text().catch(() => "");
       console.error(
-        "OpenAI Domovoy error:",
-        response.status,
-        text
+        "[ai-domovoy] OpenAI error:",
+        completion.status,
+        text.slice(0, 200)
       );
       return {
         statusCode: 500,
         body: JSON.stringify({
-          error: "Failed to get answer from OpenAI",
+          error: "OpenAI request failed",
         }),
       };
     }
 
-    const data = await response.json();
+    const data = await completion.json();
     const answer =
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content.trim()
-        : "";
+      data.choices?.[0]?.message?.content ||
+      "Я пока не могу ответить. Попробуй задать вопрос иначе.";
 
     return {
       statusCode: 200,
       body: JSON.stringify({ answer }),
     };
   } catch (e) {
-    console.error("ai-domovoy handler error:", e);
+    console.error("[ai-domovoy] Handler error:", e);
     return {
       statusCode: 500,
       body: JSON.stringify({
-        error: "Internal server error in ai-domovoy",
+        error: "Internal Server Error",
       }),
     };
   }

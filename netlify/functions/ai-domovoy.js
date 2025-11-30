@@ -83,14 +83,14 @@ async function loadSiteContext(language) {
   }
 
   try {
-    // Лента движений (новости NovaCiv)
     const newsUrl = `${FIREBASE_DB_URL}/newsFeed.json`;
-    // История голосовых/текстовых сообщений Домового с людьми
     const messagesUrl = `${FIREBASE_DB_URL}/assistantMessages.json?orderBy=%22createdAt%22&limitToLast=30`;
+    const forumUrl = `${FIREBASE_DB_URL}/forumTopics.json`;
 
-    const [newsRaw, messagesRaw] = await Promise.all([
+    const [newsRaw, messagesRaw, forumRaw] = await Promise.all([
       fetchJSON(newsUrl).catch(() => ({})),
       fetchJSON(messagesUrl).catch(() => ({})),
+      fetchJSON(forumUrl).catch(() => ({})),
     ]);
 
     // --- ЛЕНТА ---
@@ -115,7 +115,29 @@ async function loadSiteContext(language) {
             .join("\n\n")
         : "";
 
-    // --- СООБЩЕНИЯ ДОМОВОГО ---
+    // --- ФОРУМ ---
+    const forumItems = Object.entries(forumRaw || {})
+      .map(([id, t]) => ({ id, ...(t || {}) }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 20);
+
+    const forumBlock =
+      forumItems.length > 0
+        ? forumItems
+            .map((t) => {
+              const section = t.section || "general";
+              const lang = t.lang || "ru";
+              const title = (t.title || "(без названия)").toString();
+              const preview = sliceText(
+                (t.preview || t.firstMessage || "").toString(),
+                400,
+              );
+              return `[ФОРУМ][${section}][${lang}] ${title}\n${preview}`;
+            })
+            .join("\n\n")
+        : "";
+
+    // --- ДИАЛОГИ ДОМОВОГО ---
     const msgItems = Object.entries(messagesRaw || {})
       .map(([id, m]) => ({ id, ...(m || {}) }))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -136,7 +158,9 @@ async function loadSiteContext(language) {
             .join("\n\n")
         : "";
 
-    const combined = [newsBlock, messagesBlock].filter(Boolean).join("\n\n");
+    const combined = [newsBlock, forumBlock, messagesBlock]
+      .filter(Boolean)
+      .join("\n\n");
 
     return combined;
   } catch (e) {

@@ -567,26 +567,27 @@ export default function App() {
     );
   }
 
-  // 7) Форум и темы
-  if (pathname === "/forum") {
-    return (
-      <>
-        <Header />
-        <ForumPage />
-        <AssistantWidget />
-      </>
-    );
-  }
+// 7) Форум и темы
+if (pathname === "/forum") {
+  return (
+    <>
+      <Header />
+      <ForumPage />
+      <AssistantWidget />
+    </>
+  );
+}
 
-  if (pathname.startsWith("/forum/topic")) {
-    return (
-      <>
-        <Header />
-        <TopicPage />
-        <AssistantWidget />
-      </>
-    );
-  }
+// Открытие конкретной темы: /forum/<topicId>
+if (pathname.startsWith("/forum/")) {
+  return (
+    <>
+      <Header />
+      <TopicPage />
+      <AssistantWidget />
+    </>
+  );
+}
 
   // 7) На всякий случай — всё остальное ведём на "Наше видение"
   return (

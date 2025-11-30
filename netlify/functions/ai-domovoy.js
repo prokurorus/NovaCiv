@@ -41,25 +41,25 @@ function loadContext() {
     manifestoRU = "";
     charterRU = "";
     charterSections = [];
+    loaded = true;
   }
 }
 
-// ---------- Разбор устава в структурированные пункты ----------
 function parseCharterSections(text) {
   charterSections = [];
   if (!text) return;
 
   const lines = text.split(/\r?\n/);
-
   let currentId = null;
   let buffer = [];
 
-  for (const rawLine of lines) {
-    const line = rawLine; // не трогаем пробелы внутри строки
-    // Ищем строки вида "0.0.", "1.1.", "10.2" и т.п. в начале строки
-    const m = line.match(/^\s*(\d+\.\d+)\.\s*(.*)$/);
+  const idRegex = /^(\d+\.\d+)\s*(.*)$/;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const m = trimmed.match(idRegex);
+
     if (m) {
-      // Сохраняем предыдущий пункт
       if (currentId) {
         const fullText = `${currentId}. ` + buffer.join("\n").trim();
         charterSections.push({
@@ -73,7 +73,7 @@ function parseCharterSections(text) {
     } else if (currentId) {
       buffer.push(line);
     } else {
-      // Текст до первого пронумерованного пункта игнорируем для схемы
+      // текст до первого пронумерованного пункта игнорируем
     }
   }
 
@@ -94,52 +94,77 @@ function sliceText(text, maxChars) {
 }
 
 // ---------- Вспомогательные функции для цитирования ----------
+
 function normalize(str) {
-  return (str || "").toLowerCase();
+  if (!str) return "";
+  return String(str).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-// Находим последний ответ ассистента и выдираем оттуда ид пункта (0.0, 1.1 и т.п.)
-function extractLastCitedIdFromHistory(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "assistant" || !m.content) continue;
-    const match = m.content.match(/(\d+\.\d+)/);
-    if (match) return match[1];
-  }
-  return null;
-}
-
-// Находим пункт по id
 function findSectionById(id) {
-  if (!id || !charterSections.length) return null;
   return charterSections.find((s) => s.id === id) || null;
 }
 
-// Находим "следующий" пункт относительно указанного id
+function findFirstSection() {
+  if (!charterSections.length) return null;
+  return charterSections[0];
+}
+
+function extractLastCitedIdFromHistory(historyMessages) {
+  if (!Array.isArray(historyMessages)) return null;
+
+  for (let i = historyMessages.length - 1; i >= 0; i--) {
+    const m = historyMessages[i];
+    const c = (m && m.content) || "";
+    const nm = normalize(c);
+    const match = nm.match(/пункт\s+(\d+\.\d+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
 function findNextSection(id) {
-  if (!id || !charterSections.length) return null;
   const idx = charterSections.findIndex((s) => s.id === id);
-  if (idx === -1 || idx >= charterSections.length - 1) return null;
+  if (idx === -1) return null;
+  if (idx + 1 >= charterSections.length) return null;
   return charterSections[idx + 1];
 }
 
-// Находим "предыдущий" пункт
 function findPrevSection(id) {
-  if (!id || !charterSections.length) return null;
   const idx = charterSections.findIndex((s) => s.id === id);
   if (idx <= 0) return null;
   return charterSections[idx - 1];
 }
 
-// Пытаемся вытащить явно указанный номер пункта из текста
-function extractExplicitIdFromText(text) {
+function extractPunktIdFromText(text) {
   const t = normalize(text);
 
-  // Сначала ищем "пункт 0.0", "пункт 1.1" и т.п.
+  let m = t.match(/(\d+\.\d+)/);
+  if (m) return m[1];
+
+  m = t.match(/(\d+)\s*[.,]\s*(\d+)/);
+  if (m) {
+    return `${m[1]}.${m[2]}`;
+  }
+
+  if (t.includes("пункт")) {
+    if (t.includes("перв")) {
+      const first = findFirstSection();
+      return first ? first.id : null;
+    }
+  }
+
+  return null;
+}
+
+function tryExtractPunktIdFromText(text) {
+  const t = normalize(text);
+
   let m = t.match(/пункт[^0-9]*?(\d+\.\d+)/);
   if (m) return m[1];
 
-  // Обработка "0 0", "1 1" после слова "пункт"
   if (t.includes("пункт")) {
     m = t.match(/пункт[^0-9]*?(\d+)\s*[.,]?\s*(\d+)/);
     if (m) {
@@ -163,46 +188,45 @@ function tryHandleCitation(userText, historyMessages) {
     t.includes("дай текст") ||
     t.includes("приведи");
 
-  const mentionsPunkt =
-    t.includes("пункт") || t.includes("пункта") || t.includes("пункты");
+  const mentionsPunkt = t.includes("пункт");
 
-  // 1) Явно указан id: "процитируй пункт 0.0", "процитируй пункт 1 1"
-  const explicitId = extractExplicitIdFromText(t);
-  if (explicitId) {
+  if (asksForCitation && !mentionsPunkt) {
+    return null;
+  }
+
+  const explicitId = tryExtractPunktIdFromText(userText);
+
+  if (asksForCitation && explicitId) {
     const section = findSectionById(explicitId);
-    if (section) {
-      return section.text;
+    if (!section) {
+      return `Я не нашёл пункт ${explicitId} в Уставе NovaCiv. Возможно, он ещё не существует или номер указан неверно.`;
     }
-    return `Я не нашёл в Уставе пункта с номером "${explicitId}". Проверь, пожалуйста, правильность номера.`;
+    return section.text;
   }
 
-  // 2) "самый первый пункт", "первый пункт устава"
-  const asksFirst =
-    (t.includes("самый первый") || t.includes("первый")) &&
-    t.includes("пункт");
-  if (asksFirst && charterSections.length > 0) {
-    return charterSections[0].text;
-  }
+  const lastId = extractLastCitedIdFromHistory(historyMessages);
 
-  // 3) "следующий пункт"
-  if (asksForCitation && mentionsPunkt && t.includes("следующ")) {
-    const lastId = extractLastCitedIdFromHistory(historyMessages);
-    if (!lastId) {
-      return "Я не вижу, какой пункт был процитирован до этого. Скажи, пожалуйста, номер пункта, который тебя интересует (например, 0.0 или 1.1).";
-    }
+  if (
+    asksForCitation &&
+    mentionsPunkt &&
+    !explicitId &&
+    lastId &&
+    t.includes("следующ")
+  ) {
     const nextSection = findNextSection(lastId);
     if (!nextSection) {
-      return `После пункта ${lastId} в Уставе нет следующего пункта.`;
+      return `После пункта ${lastId} нет следующего — он последний в Уставе.`;
     }
     return nextSection.text;
   }
 
-  // 4) "предыдущий" пункт
-  if (asksForCitation && mentionsPunkt && t.includes("предыдущ")) {
-    const lastId = extractLastCitedIdFromHistory(historyMessages);
-    if (!lastId) {
-      return "Я не вижу, какой пункт был процитирован до этого. Скажи, пожалуйста, номер пункта, от которого нужно оттолкнуться.";
-    }
+  if (
+    asksForCitation &&
+    mentionsPunkt &&
+    !explicitId &&
+    lastId &&
+    t.includes("предыдущ")
+  ) {
     const prevSection = findPrevSection(lastId);
     if (!prevSection) {
       return `До пункта ${lastId} нет предыдущего пункта.`;
@@ -210,7 +234,6 @@ function tryHandleCitation(userText, historyMessages) {
     return prevSection.text;
   }
 
-  // Если просто "процитируй пункт устава", но без номера — спросим номер
   if (asksForCitation && mentionsPunkt) {
     return "Уточни, пожалуйста, номер пункта Устава, который нужно процитировать (например, 0.0, 1.1 и т.п.), или скажи: «самый первый пункт устава».";
   }
@@ -219,7 +242,13 @@ function tryHandleCitation(userText, historyMessages) {
 }
 
 // ---------- Логика объяснения смысла последнего процитированного пункта ----------
-async function tryHandleExplain(userText, historyMessages, language, apiKey) {
+
+async function tryHandleExplain(
+  userText,
+  historyMessages,
+  language,
+  apiKey
+) {
   const t = normalize(userText);
   if (!t) return null;
 
@@ -228,20 +257,10 @@ async function tryHandleExplain(userText, historyMessages, language, apiKey) {
     t.includes("объясните") ||
     t.includes("поясни") ||
     t.includes("поясните") ||
-    (t.includes("помоги") && t.includes("разобрать")) ||
-    t.includes("разобрать смысл") ||
-    t.includes("объясни смысл") ||
-    t.includes("разъясни");
+    t.includes("что означает") ||
+    t.includes("что значит");
 
-  const hasPointRef =
-    t.includes("пункт") ||
-    t.includes("пункта") ||
-    t.includes("пункты") ||
-    t.includes("этот пункт") ||
-    t.includes("этого пункта") ||
-    (t.includes("этот") && t.includes("смысл"));
-
-  if (!hasExplainWord || !hasPointRef) {
+  if (!hasExplainWord) {
     return null;
   }
 
@@ -255,8 +274,10 @@ async function tryHandleExplain(userText, historyMessages, language, apiKey) {
     return null;
   }
 
-  const explainLanguage = language || "ru";
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const explainLanguage =
+    language === "ru" || language === "en" || language === "de"
+      ? language
+      : "ru";
 
   const systemPrompt = `
 Ты — помощник проекта NovaCiv.
@@ -273,6 +294,8 @@ async function tryHandleExplain(userText, historyMessages, language, apiKey) {
 Не переписывай его полностью ещё раз (можно цитировать отдельные фразы, если нужно),
 а разложи по полочкам: о чём этот пункт, какие права и обязанности он задаёт, и что он означает для Гражданина.
   `.trim();
+
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
   try {
     const response = await fetch(
@@ -327,107 +350,67 @@ async function loadSiteContext(language) {
   if (!FIREBASE_DB_URL) return "";
 
   try {
-    // Берём последние 40 тем по createdAt
-    const params = new URLSearchParams({
-      orderBy: JSON.stringify("createdAt"),
-      limitToLast: "40",
-    });
-
-    const url = `${FIREBASE_DB_URL}/forum/topics.json?${params.toString()}`;
+    const url = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=%22createdAt%22&limitToLast=16`;
     const res = await fetch(url);
 
     if (!res.ok) {
       const text = await res.text();
-      console.error("Firebase siteContext error:", res.status, text);
+      console.error(
+        "Firebase site-context error:",
+        res.status,
+        text
+      );
       return "";
     }
 
     const data = await res.json();
     if (!data || typeof data !== "object") return "";
 
-    const topics = Object.entries(data).map(([id, raw]) => {
-      const t = raw || {};
-      return {
-        id,
-        title: t.title || "",
-        content: t.content || "",
-        section: t.section || "general",
-        createdAt: t.createdAt || 0,
-        lang: t.lang || null,
-        sourceId: t.sourceId || "",
-      };
+    const items = Object.values(data)
+      .filter((item) => item && typeof item === "object")
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    const blocks = items.slice(0, 12).map((item) => {
+      const title = (item.title || "").toString();
+      const content = sliceText((item.content || "").toString(), 600);
+      const section = item.section || "news";
+      const lang = item.lang || "ru";
+
+      return `[#${section}][${lang}] ${title}\n${content}`;
     });
 
-    // Сортируем по дате
-    topics.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    if (!blocks.length) return "";
 
-    // Фильтруем по языку интерфейса (если lang не задан — остаётся)
-    const filtered = topics.filter((t) => {
-      if (!t.lang) return true;
-      return t.lang === language;
-    });
-
-    const news = filtered.filter((t) => t.section === "news").slice(0, 10);
-    const forum = filtered.filter((t) => t.section !== "news").slice(0, 10);
-
-    function short(text, n) {
-      if (!text) return "";
-      const s = text.replace(/\s+/g, " ").trim();
-      return s.length > n ? s.slice(0, n) + "…" : s;
-    }
-
-    let block = "";
-
-    if (news.length) {
-      block += "Последние записи в ленте (section=news):\n";
-      news.forEach((t, i) => {
-        block += `[N${i + 1}] "${t.title}"\n`;
-        block += `Кратко: ${short(t.content, 280)}\n`;
-        if (t.sourceId) {
-          block += `Источник: ${t.sourceId}\n`;
-        }
-        block += "\n";
-      });
-    }
-
-    if (forum.length) {
-      block += "Последние темы форума (section!=news):\n";
-      forum.forEach((t, i) => {
-        block += `[F${i + 1}] "${t.title}"\n`;
-        block += `Раздел: ${t.section}\n`;
-        block += `Кратко: ${short(t.content, 280)}\n\n`;
-      });
-    }
-
-    return block.trim();
+    return blocks.join("\n\n");
   } catch (e) {
-    console.error("loadSiteContext runtime error:", e);
+    console.error("loadSiteContext error:", e);
     return "";
   }
 }
 
 // ---------- Основной handler ----------
+
 exports.handler = async (event) => {
-  if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      body: JSON.stringify({ error: "Method Not Allowed" }),
-    };
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        error: "OPENAI_API_KEY не задан на сервере.",
-      }),
-    };
-  }
-
-  loadContext();
-
   try {
+    loadContext();
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          error: "OPENAI_API_KEY is not configured",
+        }),
+      };
+    }
+
+    if (event.httpMethod !== "POST") {
+      return {
+        statusCode: 405,
+        body: JSON.stringify({ error: "Method Not Allowed" }),
+      };
+    }
+
     const body = JSON.parse(event.body || "{}");
     const language = body.language || "ru";
     const page = body.page || "/";
@@ -435,19 +418,16 @@ exports.handler = async (event) => {
       ? body.messages
       : [];
 
-    // Новый параметр: текст текущей страницы / темы / новости
     const rawPageContext =
       typeof body.pageContext === "string" ? body.pageContext : "";
-    const pageContext = sliceText(rawPageContext, 8000); // защита от переполнения
+    const pageContext = sliceText(rawPageContext, 8000);
 
-    // Последнее сообщение пользователя
     const lastUser =
       [...incomingMessages]
         .reverse()
         .find((m) => m.role === "user" && m.content) || null;
     const userText = lastUser?.content || "";
 
-    // 1) Пытаемся обработать запрос как "жёсткую" цитату из Устава
     const citation = tryHandleCitation(userText, incomingMessages);
     if (citation) {
       return {
@@ -456,47 +436,35 @@ exports.handler = async (event) => {
       };
     }
 
-    // 2) Пытаемся обработать как "объясни смысл этого пункта"
-    const explanation = await tryHandleExplain(
+    const explained = await tryHandleExplain(
       userText,
       incomingMessages,
       language,
       apiKey
     );
-    if (explanation) {
+    if (explained) {
       return {
         statusCode: 200,
-        body: JSON.stringify({ answer: explanation }),
+        body: JSON.stringify({ answer: explained }),
       };
     }
 
-    // 3) Подгружаем свежий контекст сайта (лента + форум)
     const siteContext = await loadSiteContext(language);
 
-    // 4) Во всех остальных случаях — обычный диалог с OpenAI
-
-    const manifestoSlice = sliceText(manifestoRU, 20000);
-    const charterSlice = sliceText(charterRU, 20000);
-
-    const pageContextBlock = pageContext
-      ? `
---------- Контекст текущей страницы / темы (фрагмент с сайта) ----------
-${pageContext}
------------------------------------------------------------------------
-`
-      : "";
-
+    const manifestoSlice = sliceText(manifestoRU, 3200);
+    const charterSlice = sliceText(charterRU, 3200);
     const siteContextBlock = siteContext
-      ? `
---------- Фрагменты ленты и форума (последние записи) ----------
-${siteContext}
------------------------------------------------------------------------
-`
+      ? `\n\n--------- Фрагменты ленты и форума (последние записи) ----------\n${siteContext}\n-------------------------------------\n`
+      : "";
+    const pageContextBlock = pageContext
+      ? `\n\n--------- Текст текущей страницы / темы ----------\n${pageContext}\n-------------------------------------\n`
       : "";
 
     const systemPrompt = `
 Ты — Домовой проекта NovaCiv.
 Ты — не хозяин и не учитель. Ты — хранитель смысла, спокойный и честный собеседник.
+Ты ведёшь философские записи в «Ленте движения NovaCiv» и отвечаешь людям в чате тем же голосом.
+В ленте ты формулируешь завершённые мысли и вопросы к сообществу, а в диалоге помогаешь человеку разобраться с его конкретной ситуацией.
 
 Говори просто, тепло и по делу.
 Если пользователь обращается по-русски — отвечай по-русски.
@@ -510,12 +478,13 @@ ${siteContext}
 
 ПРАВИЛА ОТВЕТОВ:
 
-1) Если пользователь прямо просит процитировать текст Устава или Манифеста дословно,
-   ты можешь процитировать один-два абзаца или один пункт, но не целые большие разделы.
-   Старайся быть точным, но не перегружай ответ.
+1) Если пользователь спрашивает прямо о нормах Устава,
+   опирайся на Устав и не придумывай новых норм.
+   Если точного текста не помнишь — честно скажи и постарайся объяснить дух принципа.
 
-2) Если запрос общий и не содержит прямой просьбы о цитате,
-   лучше отвечай кратким и понятным пересказом, объясняй суть своими словами.
+2) Если вопрос философский или личный,
+   говори честно и спокойно, как взрослый с взрослым.
+   Не обещай чудес, не скатывайся в лозунги.
 
 3) Если пользователь просит слишком большой объём текста (целый раздел),
    честно скажи, что это слишком много для одного сообщения,
@@ -536,7 +505,6 @@ ${siteContextBlock}${pageContextBlock}
 Отвечай так, как будто ты — живая часть NovaCiv.
     `.trim();
 
-    // Собираем сообщения для OpenAI: наш системный промпт + история
     const messages = [
       { role: "system", content: systemPrompt },
       ...incomingMessages.map((m) => ({
@@ -571,11 +539,15 @@ ${siteContextBlock}${pageContextBlock}
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("OpenAI chat error:", response.status, text);
+      console.error(
+        "OpenAI Domovoy error:",
+        response.status,
+        text
+      );
       return {
-        statusCode: 200,
+        statusCode: 500,
         body: JSON.stringify({
-          error: `OpenAI API error: HTTP ${response.status}`,
+          error: "Failed to get answer from OpenAI",
         }),
       };
     }
@@ -584,20 +556,21 @@ ${siteContextBlock}${pageContextBlock}
     const answer =
       data.choices &&
       data.choices[0] &&
-      data.choices[0].message
-        ? data.choices[0].message.content
+      data.choices[0].message &&
+      data.choices[0].message.content
+        ? data.choices[0].message.content.trim()
         : "";
 
     return {
       statusCode: 200,
       body: JSON.stringify({ answer }),
     };
-  } catch (err) {
-    console.error("ai-domovoy runtime error:", err);
+  } catch (e) {
+    console.error("ai-domovoy handler error:", e);
     return {
-      statusCode: 200,
+      statusCode: 500,
       body: JSON.stringify({
-        error: "Ошибка при обработке запроса Домового.",
+        error: "Internal server error in ai-domovoy",
       }),
     };
   }

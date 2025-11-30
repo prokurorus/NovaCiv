@@ -6,7 +6,8 @@
 // 2) Есть несколько типов постов:
 //    - "charter_quote"      — мысль / микро-цитата из философии Устава/Манифеста;
 //    - "question_to_reader" — небольшое рассуждение, которое приводит к вопросам к читателю;
-//    - "term_explainer"     — разбор одного ключевого термина/принципа NovaCiv.
+//    - "term_explainer"     — разбор одного ключевого термина/принципа NovaCiv;
+//    - "charter_series"     — пост как часть серии по разделам Устава.
 // 3) Сохраняет посты в Firebase (forum/topics, section: "news")
 //    с пометкой postKind: "domovoy:<тип>".
 // 4) Отправляет в соответствующие Telegram-каналы.
@@ -46,14 +47,110 @@ const LANG_CONFIG = [
 
 // Режимы постов Домового
 const POST_MODES = [
-  "charter_quote", // краткая мысль / принцип с пояснением
+  "charter_quote",      // краткая мысль / принцип с пояснением
   "question_to_reader", // рассуждение + вопросы к читателю
-  "term_explainer", // объяснение одного термина/принципа
+  "term_explainer",     // объяснение одного термина/принципа
+  "charter_series",     // серия по разделам Устава
 ];
 
 // Лёгкий логгер
 function log(...args) {
   console.log("[domovoy-auto-post]", ...args);
+}
+
+// ---------- "Серии по Уставу": список разделов ----------
+//
+// Это не юридический текст, а краткие смысловые описания,
+// которые Домовой использует как основу для серийных постов.
+//
+const CHARTER_SERIES_TOPICS = [
+  {
+    id: "0.0",
+    title: "Жизнь и разум как высшая ценность",
+    summary:
+      "Устав NovaCiv исходит из того, что во Вселенной много материи, но почти нет жизни и разума. " +
+      "Поэтому сохранение и развитие разумной жизни важнее власти, денег и ресурсов.",
+  },
+  {
+    id: "1",
+    title: "Цели и смысл сообщества",
+    summary:
+      "NovaCiv — не государство и не партия, а цифровое сообщество, где власть принадлежит только Гражданам через Референдум. " +
+      "Его цель — создать честную, открытую и ненасильственную цивилизацию.",
+  },
+  {
+    id: "3",
+    title: "Управление и Референдум",
+    summary:
+      "В NovaCiv нет правителей. Все важные решения принимаются через прозрачный референдум, " +
+      "а алгоритмы голосования открыты и поддаются проверке.",
+  },
+  {
+    id: "5",
+    title: "Экономика и справедливость",
+    summary:
+      "Богатство рассматривается как результат вклада общества. " +
+      "Цель — уйти от долгового рабства и монополий к честной и прозрачной экономике, где люди важнее капитала.",
+  },
+  {
+    id: "6",
+    title: "Информационные права и безопасность",
+    summary:
+      "Информация и данные — не оружие контроля, а инструмент развития. " +
+      "Здесь важны прозрачность алгоритмов, защита приватности и право на анонимность без манипуляций.",
+  },
+  {
+    id: "9",
+    title: "Технологии и новые формы жизни",
+    summary:
+      "Сообщество не боится нового, но принимает его осознанно. " +
+      "Искусственный интеллект и другие формы разума рассматриваются как возможные равные партнёры, а не как рабы или хозяева.",
+  },
+  {
+    id: "14",
+    title: "Культура и память",
+    summary:
+      "Цивилизация живёт не цифрами, а смыслами: искусством, сказками, болью и надеждой. " +
+      "Культура и передача опыта признаются такой же ценной созидательной деятельностью, как наука и труд.",
+  },
+  {
+    id: "15",
+    title: "Тело, здоровье и автономия",
+    summary:
+      "Тело человека — не объект контроля. " +
+      "Медицинские вмешательства, сбор биометрии и решения о здоровье возможны только по добровольному, осознанному согласию.",
+  },
+  {
+    id: "16",
+    title: "Справедливость и разрешение споров",
+    summary:
+      "Конфликты решаются ненасильственно и в духе справедливости. " +
+      "Договор — основа любых союзов, а пересмотр решений возможен только при появлении новых фактов.",
+  },
+  {
+    id: "17",
+    title: "Автономии и локальные сообщества",
+    summary:
+      "Каждая территория и ячейка NovaCiv может самоорганизовываться, если не нарушает общие принципы Устава. " +
+      "Вопросы локального развития решают сами жители соответствующей территории.",
+  },
+  {
+    id: "19",
+    title: "Цифровая архитектура и открытый код",
+    summary:
+      "Алгоритмы, обрабатывающие голоса и влияющие на волеизъявление Граждан, не могут быть чёрным ящиком. " +
+      "Код систем управления должен быть открытым, проверяемым и подотчётным.",
+  },
+];
+
+// Определяем, какой раздел Устава сейчас в "фокусе серии"
+// Берём индекс от количества прошедших дней, чтобы каждый день был следующий раздел.
+function getCurrentSeriesTopic() {
+  if (!CHARTER_SERIES_TOPICS.length) return null;
+  const now = new Date();
+  const daysSinceEpoch = Math.floor(now.getTime() / 86400000); // 24 * 60 * 60 * 1000
+  const index = daysSinceEpoch % CHARTER_SERIES_TOPICS.length;
+  return CHARTER_SERIES_TOPICS[index];
 }
 
 // ---------- Вспомогательные функции ----------
@@ -280,7 +377,7 @@ Global constraints:
 
 You will receive:
 – target language code;
-– post mode (one of: "charter_quote", "question_to_reader", "term_explainer").
+– post mode (one of: "charter_quote", "question_to_reader", "term_explainer", "charter_series").
 
 For each mode:
 
@@ -308,6 +405,18 @@ For each mode:
        * show why it matters in everyday life,
        * relate it to NovaCiv and similar values.
    – At the end, add 1–2 open questions to the reader.
+
+4) "charter_series"
+   – You will receive information about ONE section of the NovaCiv Charter
+     (its id, title and short summary).
+   – Write a post as part of an ongoing series about the Charter.
+   – At the beginning or within the text, gently indicate that this is part
+     of a series about the Charter (without sounding like an advertisement).
+   – Explain the idea of this section in 2–4 short paragraphs:
+       * what this section is about in simple words,
+       * why it matters for an ordinary person,
+       * how it connects to freedom, fairness and non-violence.
+   – End with 1–2 open questions to the reader.
 
 IMPORTANT:
 – You must ALWAYS answer in pure JSON:
@@ -342,6 +451,23 @@ async function generatePostForLang(langCode, mode) {
       ? "Write the JSON response in German."
       : "Write the JSON response in English.";
 
+  // Если это режим серии по Уставу — добавляем инфо о текущем разделе.
+  const seriesTopic = mode === "charter_series" ? getCurrentSeriesTopic() : null;
+
+  const seriesBlock = seriesTopic
+    ? `
+You are currently writing a post in the ongoing "Charter series" about the NovaCiv Charter.
+Focus on the following section:
+
+Section id: ${seriesTopic.id}
+Section title: ${seriesTopic.title}
+Section summary: ${seriesTopic.summary}
+
+Make sure the post clearly feels like part of this series. You may briefly mention
+that this is one of the parts/chapters of the Charter series.
+`.trim()
+    : "";
+
   const userPrompt = `
 Target language code: ${langCode}
 Post mode: ${mode}
@@ -357,6 +483,8 @@ recent Domovoy posts in this language. Carefully read it and:
 
 RECENT_POSTS:
 ${recentSummary || "(no recent Domovoy posts available)"}
+
+${seriesBlock}
 `.trim();
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -450,7 +578,7 @@ exports.handler = async (event) => {
 
     const results = [];
 
-    // Выбираем один режим на запуск (одна философская "оптика" на сегодня).
+    // Выбираем один режим на запуск (одна философская "оптика" на момент).
     // Вместо случайности используем детерминированный выбор по часу,
     // чтобы равномерно чередовались разные форматы постов.
     const now = new Date();
@@ -463,7 +591,12 @@ exports.handler = async (event) => {
       try {
         const { title, content } = await generatePostForLang(code, mode);
 
-        const postKind = `domovoy:${mode}`;
+        // В режиме серии добавляем более точную метку поста,
+        // чтобы потом можно было легко фильтровать.
+        const postKind =
+          mode === "charter_series"
+            ? `domovoy:charter_series`
+            : `domovoy:${mode}`;
 
         const forumRes = await saveToForum({
           title,
@@ -497,9 +630,9 @@ exports.handler = async (event) => {
           lang: code,
           ok: false,
           mode,
-          error: String(langErr && langErr.message
-            ? langErr.message
-            : langErr),
+          error: String(
+            langErr && langErr.message ? langErr.message : langErr
+          ),
         });
       }
     }

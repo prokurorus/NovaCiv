@@ -83,76 +83,60 @@ async function loadSiteContext(language) {
   }
 
   try {
-    const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
-    const commentsUrl = `${FIREBASE_DB_URL}/forum/comments.json`;
+    // Лента движений (новости NovaCiv)
     const newsUrl = `${FIREBASE_DB_URL}/newsFeed.json`;
+    // История голосовых/текстовых сообщений Домового с людьми
+    const messagesUrl = `${FIREBASE_DB_URL}/assistantMessages.json?orderBy=%22createdAt%22&limitToLast=30`;
 
-    const [topicsRaw, commentsRaw, newsRaw] = await Promise.all([
-      fetchJSON(topicsUrl).catch(() => ({})),
-      fetchJSON(commentsUrl).catch(() => ({})),
+    const [newsRaw, messagesRaw] = await Promise.all([
       fetchJSON(newsUrl).catch(() => ({})),
+      fetchJSON(messagesUrl).catch(() => ({})),
     ]);
 
-    const topics = Object.entries(topicsRaw || {}).map(([id, t]) => ({
-      id,
-      ...(t || {}),
-    }));
-
-    const recentTopics = topics
-      .filter((t) => !t.section || t.section === "general")
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 10);
-
-    const commentsBlocks = [];
-    for (const t of recentTopics) {
-      const topicComments = Object.entries(commentsRaw?.[t.id] || {}).map(
-        ([cid, c]) => ({
-          id: cid,
-          ...(c || {}),
-        }),
-      );
-      const lastComments = topicComments
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        .slice(0, 3);
-
-      if (lastComments.length > 0) {
-        commentsBlocks.push(
-          `Тема: ${t.title || "(без названия)"}\n` +
-            lastComments
-              .map(
-                (c) =>
-                  `– ${c.author || "аноним"}: ${sliceText(
-                    c.text || "",
-                    240,
-                  )}`,
-              )
-              .join("\n"),
-        );
-      }
-    }
-
+    // --- ЛЕНТА ---
     const newsItems = Object.entries(newsRaw || {})
       .map(([id, n]) => ({ id, ...(n || {}) }))
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 10);
+      .slice(0, 15);
 
     const newsBlock =
       newsItems.length > 0
         ? newsItems
-            .map(
-              (n) =>
-                `• ${sliceText(
-                  n.title || n.text || "(новость)",
-                  200,
-                )}`.trim(),
-            )
-            .join("\n")
+            .map((n) => {
+              const section = n.section || "news";
+              const lang = n.lang || "ru";
+              const title = (n.title || "(без названия)").toString();
+              const content = sliceText(
+                (n.content || "").toString(),
+                600,
+              );
+              return `[ЛЕНТА][${section}][${lang}] ${title}\n${content}`;
+            })
+            .join("\n\n")
         : "";
 
-    const forumBlock =
-      commentsBlocks.length > 0 ? commentsBlocks.join("\n\n") : "";
+    // --- СООБЩЕНИЯ ДОМОВОГО ---
+    const msgItems = Object.entries(messagesRaw || {})
+      .map(([id, m]) => ({ id, ...(m || {}) }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 20);
 
-    const combined = [newsBlock, forumBlock].filter(Boolean).join("\n\n");
+    const messagesBlock =
+      msgItems.length > 0
+        ? msgItems
+            .map((m) => {
+              const page = m.page || "/";
+              const userText = (m.userText || "").toString();
+              const assistantText = sliceText(
+                (m.assistantText || "").toString(),
+                400,
+              );
+              return `[ДИАЛОГ][${page}] пользователь: ${userText}\nдомовой: ${assistantText}`;
+            })
+            .join("\n\n")
+        : "";
+
+    const combined = [newsBlock, messagesBlock].filter(Boolean).join("\n\n");
 
     return combined;
   } catch (e) {

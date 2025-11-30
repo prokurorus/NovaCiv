@@ -81,6 +81,13 @@ const emptyTextByLang: Record<Language, string> = {
   es: "El feed aún está vacío. Pero Domovoy ya está despertando.",
 };
 
+const discussLabelByLang: Record<Language, string> = {
+  ru: "Обсудить на форуме",
+  en: "Discuss on the forum",
+  de: "Im Forum diskutieren",
+  es: "Debatir en el foro",
+};
+
 function formatDate(value: number, language: Language): string {
   const date = new Date(value || 0);
   const locale =
@@ -351,6 +358,16 @@ const NewsPage: React.FC = () => {
                   <p className="mt-1 text-sm text-zinc-700 whitespace-pre-wrap">
                     {preview(item.content)}
                   </p>
+
+                  {/* Кнопка перехода к обсуждению темы на форуме */}
+                  <div className="mt-3 flex justify-end">
+                    <a
+                      href={`/forum/${item.id}`}
+                      className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 hover:border-zinc-300 transition"
+                    >
+                      {discussLabelByLang[language]}
+                    </a>
+                  </div>
                 </article>
               );
             })}

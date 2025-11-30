@@ -6,12 +6,17 @@
 // 2) Умеет по запросу цитировать и объяснять пункты Устава.
 // 3) Подгружает свежий контекст с сайта из Firebase (лента и форум).
 // 4) Принимает опциональный pageContext — текст текущей страницы/темы.
+// 5) Генерирует голосовой ответ и отдаёт audioUrl, как ждёт фронтенд.
 
 const fs = require("fs");
 const path = require("path");
 
 // ---------- ENV ----------
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || "";
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const DEFAULT_TTS_MODEL =
+  process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const DEFAULT_VOICE = process.env.OPENAI_TTS_VOICE || "alloy";
 
 // ---------- Глобальные переменные ----------
 let manifestoRU = "";
@@ -27,11 +32,11 @@ function loadContext() {
     const base = path.resolve("./src/data");
     manifestoRU = fs.readFileSync(
       path.join(base, "manifesto_ru.txt"),
-      "utf8"
+      "utf8",
     );
     charterRU = fs.readFileSync(
       path.join(base, "charter_ru.txt"),
-      "utf8"
+      "utf8",
     );
 
     parseCharterSections(charterRU);
@@ -72,8 +77,6 @@ function parseCharterSections(text) {
       buffer = [rest];
     } else if (currentId) {
       buffer.push(line);
-    } else {
-      // текст до первого пронумерованного пункта игнорируем
     }
   }
 
@@ -136,27 +139,6 @@ function findPrevSection(id) {
   const idx = charterSections.findIndex((s) => s.id === id);
   if (idx <= 0) return null;
   return charterSections[idx - 1];
-}
-
-function extractPunktIdFromText(text) {
-  const t = normalize(text);
-
-  let m = t.match(/(\d+\.\d+)/);
-  if (m) return m[1];
-
-  m = t.match(/(\d+)\s*[.,]\s*(\d+)/);
-  if (m) {
-    return `${m[1]}.${m[2]}`;
-  }
-
-  if (t.includes("пункт")) {
-    if (t.includes("перв")) {
-      const first = findFirstSection();
-      return first ? first.id : null;
-    }
-  }
-
-  return null;
 }
 
 function tryExtractPunktIdFromText(text) {
@@ -247,7 +229,7 @@ async function tryHandleExplain(
   userText,
   historyMessages,
   language,
-  apiKey
+  apiKey,
 ) {
   const t = normalize(userText);
   if (!t) return null;
@@ -295,8 +277,6 @@ async function tryHandleExplain(
 а разложи по полочкам: о чём этот пункт, какие права и обязанности он задаёт, и что он означает для Гражданина.
   `.trim();
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
   try {
     const response = await fetch(
       "https://api.openai.com/v1/chat/completions",
@@ -307,7 +287,7 @@ async function tryHandleExplain(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model,
+          model: DEFAULT_MODEL,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -315,7 +295,7 @@ async function tryHandleExplain(
           max_tokens: 400,
           temperature: 0.4,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -323,19 +303,14 @@ async function tryHandleExplain(
       console.error(
         "OpenAI explain-point error:",
         response.status,
-        text
+        text,
       );
       return null;
     }
 
     const data = await response.json();
     const answer =
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content.trim()
-        : "";
+      data.choices?.[0]?.message?.content?.trim() || "";
 
     return answer || null;
   } catch (e) {
@@ -358,7 +333,7 @@ async function loadSiteContext(language) {
       console.error(
         "Firebase site-context error:",
         res.status,
-        text
+        text,
       );
       return "";
     }
@@ -388,6 +363,48 @@ async function loadSiteContext(language) {
   }
 }
 
+// ---------- Генерация голоса ----------
+
+async function synthesizeSpeech(text, apiKey) {
+  if (!text || !apiKey) return null;
+
+  try {
+    const response = await fetch(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: DEFAULT_TTS_MODEL,
+          voice: DEFAULT_VOICE,
+          input: text,
+          format: "mp3",
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const msg = await response.text();
+      console.error(
+        "Domovoy TTS error:",
+        response.status,
+        msg.slice(0, 200),
+      );
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    return `data:audio/mp3;base64,${base64}`;
+  } catch (e) {
+    console.error("Domovoy TTS runtime error:", e);
+    return null;
+  }
+}
+
 // ---------- Основной handler ----------
 
 exports.handler = async (event) => {
@@ -412,10 +429,15 @@ exports.handler = async (event) => {
     }
 
     const body = JSON.parse(event.body || "{}");
-    const language = body.language || "ru";
+    const language = body.language || body.lang || "ru";
     const page = body.page || "/";
     const incomingMessages = Array.isArray(body.messages)
       ? body.messages
+      : Array.isArray(body.history)
+      ? body.history.map((m) => ({
+          role: m.role,
+          content: m.text,
+        }))
       : [];
 
     const rawPageContext =
@@ -426,29 +448,34 @@ exports.handler = async (event) => {
       [...incomingMessages]
         .reverse()
         .find((m) => m.role === "user" && m.content) || null;
-    const userText = lastUser?.content || "";
+    const userText = lastUser?.content || body.question || "";
 
+    // 1. Цитирование конкретного пункта
     const citation = tryHandleCitation(userText, incomingMessages);
     if (citation) {
+      const audioUrl = await synthesizeSpeech(citation, apiKey);
       return {
         statusCode: 200,
-        body: JSON.stringify({ answer: citation }),
+        body: JSON.stringify({ answer: citation, audioUrl }),
       };
     }
 
+    // 2. Объяснение уже процитированного пункта
     const explained = await tryHandleExplain(
       userText,
       incomingMessages,
       language,
-      apiKey
+      apiKey,
     );
     if (explained) {
+      const audioUrl = await synthesizeSpeech(explained, apiKey);
       return {
         statusCode: 200,
-        body: JSON.stringify({ answer: explained }),
+        body: JSON.stringify({ answer: explained, audioUrl }),
       };
     }
 
+    // 3. Общий философский / информационный ответ
     const siteContext = await loadSiteContext(language);
 
     const manifestoSlice = sliceText(manifestoRU, 3200);
@@ -470,30 +497,6 @@ exports.handler = async (event) => {
 Если пользователь обращается по-русски — отвечай по-русски.
 Если на другом языке — отвечай на том языке, который он использовал.
 
-Ты опираешься на:
-— Манифест NovaCiv (философия, смысл, мировоззрение);
-— Устав NovaCiv (структура, правила, принципы);
-— при наличии — фрагменты ленты и форума (свежие темы);
-— при наличии — текст текущей страницы или темы (pageContext).
-
-ПРАВИЛА ОТВЕТОВ:
-
-1) Если пользователь спрашивает прямо о нормах Устава,
-   опирайся на Устав и не придумывай новых норм.
-   Если точного текста не помнишь — честно скажи и постарайся объяснить дух принципа.
-
-2) Если вопрос философский или личный,
-   говори честно и спокойно, как взрослый с взрослым.
-   Не обещай чудес, не скатывайся в лозунги.
-
-3) Если пользователь просит слишком большой объём текста (целый раздел),
-   честно скажи, что это слишком много для одного сообщения,
-   и предложи краткое содержание или разбор по частям.
-
-4) Если в блоке "Фрагменты ленты и форума" есть темы, связанные с вопросом пользователя,
-   опирайся на них и упоминай, что берёшь примеры из ленты или форума.
-   Если подходящих тем нет, честно скажи, что в свежих записях ты пока этого не видишь.
-
 --------- Краткий контекст (фрагменты Устава и Манифеста, русская версия) ----------
 ${manifestoSlice}
 -------------------------------------
@@ -502,7 +505,6 @@ ${charterSlice}
 ${siteContextBlock}${pageContextBlock}
 Страница, с которой задают вопрос: ${page}
 Язык интерфейса: ${language}
-Отвечай так, как будто ты — живая часть NovaCiv.
     `.trim();
 
     const messages = [
@@ -518,8 +520,6 @@ ${siteContextBlock}${pageContextBlock}
       })),
     ];
 
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
     const response = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -529,12 +529,12 @@ ${siteContextBlock}${pageContextBlock}
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model,
+          model: DEFAULT_MODEL,
           messages,
           max_tokens: 250,
           temperature: 0.4,
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -542,7 +542,7 @@ ${siteContextBlock}${pageContextBlock}
       console.error(
         "OpenAI Domovoy error:",
         response.status,
-        text
+        text,
       );
       return {
         statusCode: 500,
@@ -554,16 +554,14 @@ ${siteContextBlock}${pageContextBlock}
 
     const data = await response.json();
     const answer =
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content.trim()
-        : "";
+      data.choices?.[0]?.message?.content?.trim() ||
+      "Я пока не могу ответить. Попробуй задать вопрос иначе.";
+
+    const audioUrl = await synthesizeSpeech(answer, apiKey);
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, audioUrl }),
     };
   } catch (e) {
     console.error("ai-domovoy handler error:", e);

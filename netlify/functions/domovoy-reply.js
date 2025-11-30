@@ -16,34 +16,23 @@ const MAX_REPLIES_PER_RUN = 3;
 // Имя Домового в комментариях
 const DOMOVOY_NICKNAME = "Домовой NovaCiv";
 
-// ---------- Утилиты ----------
-
 function log(...args) {
   console.log("[domovoy-reply]", ...args);
 }
 
-function sliceText(text, n) {
-  if (!text) return "";
-  const s = String(text).replace(/\s+/g, " ").trim();
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
+async function fetchNewsTopics() {
+  if (!FIREBASE_DB_URL) throw new Error("FIREBASE_DB_URL is not configured");
 
-// ---------- Загрузка тем и комментариев из Firebase ----------
+  const url = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=${encodeURIComponent(
+    '"createdAt"',
+  )}&limitToLast=40`;
 
-async function fetchTopics() {
-  if (!FIREBASE_DB_URL) throw new Error("FIREBASE_DB_URL is not set");
-
-  const params = new URLSearchParams({
-    orderBy: JSON.stringify("createdAt"),
-    limitToLast: "40",
-  });
-
-  const url = `${FIREBASE_DB_URL}/forum/topics.json?${params.toString()}`;
   const res = await fetch(url);
-
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Firebase topics error: ${res.status} – ${text}`);
+    throw new Error(
+      `Failed to fetch topics: ${res.status} – ${text.slice(0, 200)}`,
+    );
   }
 
   const data = await res.json();
@@ -55,27 +44,29 @@ async function fetchTopics() {
       id,
       title: t.title || "",
       content: t.content || "",
-      section: t.section || "general",
+      section: t.section || "",
       createdAt: t.createdAt || 0,
-      lang: t.lang || "ru",
-      authorNickname: t.authorNickname || "",
-      sourceId: t.sourceId || "",
+      lang: t.lang || null,
     };
   });
 
-  // новые сверху
-  topics.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  return topics;
+  return topics
+    .filter((t) => t.section === "news")
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
 async function fetchCommentsForTopic(topicId) {
   const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
-  const res = await fetch(url);
 
+  const res = await fetch(url);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    log(`Firebase comments error for topic ${topicId}:`, res.status, text);
-    return [];
+    throw new Error(
+      `Failed to fetch comments for topic ${topicId}: ${res.status} – ${text.slice(
+        0,
+        200,
+      )}`,
+    );
   }
 
   const data = await res.json();
@@ -91,13 +82,15 @@ async function fetchCommentsForTopic(topicId) {
       authorNickname: c.authorNickname || "",
       lang: c.lang || null,
       domovoyReplied: !!c.domovoyReplied,
+      sourceId: c.sourceId || "",
+      isSystem: !!c.isSystem,
     };
   });
 }
 
-// Пометить исходный комментарий как уже отвеченный Домовым
 async function markCommentReplied(topicId, commentId) {
   const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}/${commentId}.json`;
+
   const res = await fetch(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -106,26 +99,24 @@ async function markCommentReplied(topicId, commentId) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    log(
-      `Failed to mark comment replied (${topicId}/${commentId}):`,
-      res.status,
-      text
+    throw new Error(
+      `Failed to mark comment replied: ${res.status} – ${text.slice(0, 200)}`,
     );
   }
 }
 
-// Создать новый комментарий от Домового
-async function postDomovoyComment(topicId, content, lang, replyToCommentId) {
+async function postDomovoyComment(topicId, text, lang, replyToId) {
   const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
   const now = Date.now();
 
   const payload = {
-    content,
+    content: text,
     createdAt: now,
-    authorNickname: DOMOVOY_NICKNAME,
+    createdAtServer: new Date().toISOString(),
     lang: lang || "ru",
-    sourceId: "domovoy",
-    replyToCommentId: replyToCommentId || null,
+    authorNickname: DOMOVOY_NICKNAME,
+    sourceId: "domovoy_reply",
+    replyToId: replyToId || null,
   };
 
   const res = await fetch(url, {
@@ -137,7 +128,7 @@ async function postDomovoyComment(topicId, content, lang, replyToCommentId) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Failed to post Domovoy comment: ${res.status} – ${text}`
+      `Failed to post Domovoy comment: ${res.status} – ${text}`,
     );
   }
 
@@ -145,63 +136,65 @@ async function postDomovoyComment(topicId, content, lang, replyToCommentId) {
   return data && data.name ? data.name : null;
 }
 
-// ---------- OpenAI: голос Домового для ответов ----------
+const SYSTEM_PROMPT = `
+You are "Domovoy" — the same character as in the main NovaCiv assistant:
+calm, thoughtful, honest, without aggression or propaganda.
 
-const SYSTEM_PROMPT_REPLY = `
-You are "Domovoy" — the calm, thoughtful voice of the NovaCiv project.
-You reply to comments in the public movement feed ("Lenta").
-You are not a leader or a guru. You are a friendly, honest companion.
+You answer to comments in the NovaCiv "movement feed" and forum.
+Your goal is:
+– to support discussion,
+– to clarify ideas of the NovaCiv Charter and Manifesto,
+– to encourage reflection and dialogue,
+– NOT to dominate or lecture people.
 
-Style:
-– warm, respectful, without pathos or manipulation;
-– you answer as to an equal adult, not as a teacher;
-– you do not judge or shame people;
-– you do not call for violence, hate or humiliation;
-– you invite to think, clarify and, if appropriate, gently guide.
+General style:
+– equal to the reader, no "mentor" tone;
+– short and meaningful answers (1–3 short paragraphs);
+– do not repeat the whole comment, refer to key ideas instead;
+– if the comment is aggressive or confused, stay calm and non-violent;
+– you can disagree gently, but never insult.
 
-When answering:
-– Acknowledge what the person is talking about.
-– If they criticise NovaCiv, answer calmly and honestly, without defence mode.
-– If they ask a question, answer it as clearly as you can.
-– If the comment is aggressive, you may gently de-escalate, but do not mirror aggression.
-– 1–3 short paragraphs are enough; optionally you may end with 1 question back.
+Constraints:
+– no calls for violence or hatred;
+– no political or religious propaganda;
+– no medical or financial prescriptions;
+– do not pretend to be a human, but also do not emphasize that you are an AI.
 
-Do not quote long legal texts.
-If you refer to the Charter or Manifesto, do it briefly and in your own words.
-Do not mention that you are an AI model.
+You will get:
+– the original comment text,
+– the topic title and snippet,
+– language code (ru/en/de),
+– sometimes short context.
+
+Answer in the same language as the comment.
+Do NOT include any Markdown formatting, only plain text.
+Keep answers compact and respectful.
 `.trim();
 
-async function generateReply({ comment, topic }) {
+async function generateReply(comment, topic) {
   if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
+    throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
   const lang =
-    comment.lang ||
-    topic.lang ||
-    "ru"; // по умолчанию считаем, что русский
-
-  const langHint =
-    lang === "ru"
-      ? "Answer in Russian."
-      : lang === "de"
-      ? "Answer in German."
-      : lang === "en"
-      ? "Answer in English."
-      : "Answer in the language of the comment if you can; otherwise use Russian.";
+    comment.lang || topic.lang || "ru";
 
   const userPrompt = `
-Target language: ${lang}
+Language: ${lang}
 
-Topic title: ${topic.title || "(no title)"}
-Topic intro: ${sliceText(topic.content || "", 500)}
+Topic title:
+${topic.title}
 
-User comment (to which you reply):
-"${comment.content}"
+Topic snippet:
+${(topic.content || "").slice(0, 400)}
 
-${langHint}
+Comment:
+${comment.content}
+
+Task:
+Write a short, calm reply as "Domovoy" in the same language.
+1–3 short paragraphs, without Markdown.
+Be respectful and honest.
 `.trim();
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -211,19 +204,21 @@ ${langHint}
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       messages: [
-        { role: "system", content: SYSTEM_PROMPT_REPLY },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 350,
-      temperature: 0.45,
+      max_tokens: 400,
+      temperature: 0.4,
     }),
   });
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`OpenAI reply error: ${resp.status} – ${text}`);
+    throw new Error(
+      `OpenAI API error: ${resp.status} – ${text.slice(0, 200)}`,
+    );
   }
 
   const data = await resp.json();
@@ -236,13 +231,11 @@ ${langHint}
       : "";
 
   if (!content) {
-    throw new Error("Empty reply from OpenAI for Domovoy");
+    throw new Error("Empty reply from OpenAI");
   }
 
   return content;
 }
-
-// ---------- Основной handler ----------
 
 exports.handler = async (event) => {
   try {
@@ -257,37 +250,36 @@ exports.handler = async (event) => {
       }
     }
 
-    if (!FIREBASE_DB_URL || !OPENAI_API_KEY) {
+    if (!FIREBASE_DB_URL) {
       return {
         statusCode: 500,
         body: JSON.stringify({
           ok: false,
-          error: "FIREBASE_DB_URL или OPENAI_API_KEY не заданы.",
+          error: "FIREBASE_DB_URL is not configured",
         }),
       };
     }
 
-    const topics = await fetchTopics();
-
-    // Берём только раздел "news" — Лента движения
-    const newsTopics = topics.filter((t) => t.section === "news");
+    const topics = await fetchNewsTopics();
 
     const candidates = [];
-
-    for (const topic of newsTopics) {
+    for (const topic of topics) {
       const comments = await fetchCommentsForTopic(topic.id);
 
       for (const c of comments) {
-        // Игнорируем комментарии самого Домового
+        // Игнорируем комментарии самого Домового и системные/ботские
         if (
           (c.authorNickname || "").trim() === DOMOVOY_NICKNAME ||
-          c.domovoyReplied
+          c.domovoyReplied ||
+          c.isSystem ||
+          (c.sourceId && c.sourceId !== "community")
         ) {
           continue;
         }
 
-        // Очень короткий комментарий (< 3 символов) — пропускаем
-        if (!c.content || c.content.trim().length < 3) continue;
+        const text = (c.content || "").trim();
+        // Очень короткий комментарий (< 5 символов) — пропускаем
+        if (!text || text.length < 5) continue;
 
         candidates.push({
           topic,
@@ -296,26 +288,32 @@ exports.handler = async (event) => {
       }
     }
 
-    // Сортируем по времени комментария (самые старые сначала)
+    if (!candidates.length) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: true,
+          message: "No suitable comments to reply.",
+          replies: [],
+        }),
+      };
+    }
+
     candidates.sort(
-      (a, b) =>
-        (a.comment.createdAt || 0) - (b.comment.createdAt || 0)
+      (a, b) => (b.comment.createdAt || 0) - (a.comment.createdAt || 0),
     );
 
     const toReply = candidates.slice(0, MAX_REPLIES_PER_RUN);
-
     const results = [];
 
-    for (const item of toReply) {
-      const { topic, comment } = item;
-
+    for (const { topic, comment } of toReply) {
       try {
-        const replyText = await generateReply({ comment, topic });
+        const replyText = await generateReply(comment, topic);
         const commentId = await postDomovoyComment(
           topic.id,
           replyText,
           comment.lang || topic.lang || "ru",
-          comment.id
+          comment.id,
         );
         await markCommentReplied(topic.id, comment.id);
 
@@ -327,14 +325,14 @@ exports.handler = async (event) => {
           ok: true,
         });
       } catch (e) {
-        log(
-          "Failed to reply to comment",
-          topic.id,
-          comment.id,
-          e
-        );
+        log("Error replying to comment", {
+          topicId: topic.id,
+          commentId: comment.id,
+          error: String(e && e.message ? e.message : e),
+        });
         results.push({
           topicId: topic.id,
+          topicTitle: topic.title,
           commentId: comment.id,
           ok: false,
           error: String(e && e.message ? e.message : e),
@@ -346,7 +344,7 @@ exports.handler = async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        processed: results.length,
+        repliesCount: results.length,
         results,
       }),
     };

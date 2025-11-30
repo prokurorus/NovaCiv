@@ -142,7 +142,7 @@ const TopicPage: React.FC = () => {
     if (!topicId) return;
     const postsRef = query(
       ref(db, `forum/posts/${topicId}`),
-      orderByChild("createdAt")
+      orderByChild("createdAt"),
     );
 
     const unsubscribe = onValue(postsRef, (snapshot) => {
@@ -220,9 +220,7 @@ const TopicPage: React.FC = () => {
           </div>
         </header>
 
-        {loadingTopic && (
-          <p className="text-sm text-zinc-500">…</p>
-        )}
+        {loadingTopic && <p className="text-sm text-zinc-500">…</p>}
 
         {!loadingTopic && !topic && (
           <p className="text-sm text-red-500">
@@ -251,9 +249,7 @@ const TopicPage: React.FC = () => {
             </p>
             <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
               <span>
-                {topic.authorNickname
-                  ? `@${topic.authorNickname}`
-                  : "anon"}
+                {topic.authorNickname ? `@${topic.authorNickname}` : "anon"}
               </span>
               {topic.createdAt && (
                 <span>
@@ -270,9 +266,8 @@ const TopicPage: React.FC = () => {
             {t("replies")}
           </h2>
           <div className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-900/5 p-4 space-y-3 max-h-[260px] overflow-y-auto">
-            {loadingPosts && (
-              <p className="text-xs text-zinc-500">…</p>
-            )}
+            {loadingPosts && <p className="text-xs text-zinc-500">…</p>}
+
             {!loadingPosts && posts.length === 0 && (
               <p className="text-sm text-zinc-500">
                 {language === "ru"
@@ -284,28 +279,42 @@ const TopicPage: React.FC = () => {
                   : "No replies yet."}
               </p>
             )}
-            {posts.map((post) => (
-              <div
-                key={post.id}
-                className="rounded-xl border border-zinc-200 px-3 py-2"
-              >
-                <p className="text-sm text-zinc-800 whitespace-pre-wrap">
-                  {post.content}
-                </p>
-                <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
-                  <span>
-                    {post.authorNickname
-                      ? `@${post.authorNickname}`
-                      : "anon"}
-                  </span>
-                  {post.createdAt && (
-                    <span>
-                      {new Date(post.createdAt).toLocaleString(langCode)}
+
+            {posts.map((post) => {
+              const isDomovoy = post.authorNickname === "Domovoy";
+
+              return (
+                <div
+                  key={post.id}
+                  className={
+                    "rounded-xl border px-3 py-2 transition " +
+                    (isDomovoy
+                      ? "border-blue-300 bg-blue-50/70 shadow-sm"
+                      : "border-zinc-200")
+                  }
+                >
+                  <p className="text-sm text-zinc-800 whitespace-pre-wrap">
+                    {post.content}
+                  </p>
+
+                  <div className="mt-1 text-[10px] text-zinc-400 flex items-center justify-between">
+                    <span
+                      className={
+                        isDomovoy ? "text-blue-600 font-semibold" : ""
+                      }
+                    >
+                      {post.authorNickname ? `@${post.authorNickname}` : "anon"}
                     </span>
-                  )}
+
+                    {post.createdAt && (
+                      <span>
+                        {new Date(post.createdAt).toLocaleString(langCode)}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 

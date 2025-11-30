@@ -1,13 +1,14 @@
 // netlify/functions/ai-domovoy.js
 //
 // Мозг Домового NovaCiv.
-// Теперь он:
+// Сейчас он:
 // 1) Знает Манифест и Устав (из текстовых файлов).
 // 2) Умеет по запросу цитировать и объяснять пункты Устава.
 // 3) Подгружает свежий контекст с сайта из Firebase (лента и форум).
 // 4) Принимает опциональный pageContext — текст текущей страницы/темы.
+// 5) Работает мягко: даже при ошибках не роняет фронт, а честно говорит, что что-то не так.
 //
-// ВАЖНО: поддерживает оба формата запроса:
+// Поддерживает оба формата запроса:
 //   - старый: { language, messages: [{ role, content }] }
 //   - новый:  { lang, question, history: [{ role, text }] }
 
@@ -16,6 +17,7 @@ const path = require("path");
 
 // ---------- ENV ----------
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || "";
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 // ---------- Глобальные переменные ----------
 let manifestoRU = null;
@@ -40,7 +42,7 @@ function loadContext() {
     rootDir,
     "public",
     "texts",
-    "manifest_ru.txt"
+    "manifest_ru.txt",
   );
   const charterPath = path.join(rootDir, "public", "texts", "charter_ru.txt");
 
@@ -75,7 +77,7 @@ async function fetchJSON(url) {
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(
-      `Failed to fetch ${url}: ${res.status} – ${txt.slice(0, 200)}`
+      `Failed to fetch ${url}: ${res.status} – ${txt.slice(0, 200)}`,
     );
   }
   return res.json();
@@ -114,7 +116,7 @@ async function loadSiteContext(language) {
         ([cid, c]) => ({
           id: cid,
           ...(c || {}),
-        })
+        }),
       );
       const lastComments = topicComments
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -128,10 +130,10 @@ async function loadSiteContext(language) {
                 (c) =>
                   `– ${c.author || "аноним"}: ${sliceText(
                     c.text || "",
-                    240
-                  )}`
+                    240,
+                  )}`,
               )
-              .join("\n")
+              .join("\n"),
         );
       }
     }
@@ -148,8 +150,8 @@ async function loadSiteContext(language) {
               (n) =>
                 `• ${sliceText(
                   n.title || n.text || "(новость)",
-                  200
-                )}`.trim()
+                  200,
+                )}`.trim(),
             )
             .join("\n")
         : "";
@@ -232,11 +234,9 @@ function tryRecognizeFirstPunkt(text) {
     return "FIRST";
   }
 
-  if (t.includes("пункт")) {
-    if (t.includes("перв")) {
-      const first = findFirstSection();
-      return first ? first.id : null;
-    }
+  if (t.includes("пункт") && t.includes("перв")) {
+    const first = findFirstSection();
+    return first ? first.id : null;
   }
 
   return null;
@@ -280,7 +280,7 @@ function tryHandleCitation(userText, historyMessages) {
   return null;
 }
 
-// ---------- Логика объяснения смысла последнего процитированного пункта ----------
+// ---------- Объяснение процитированного пункта ----------
 
 async function tryHandleExplain(userText, historyMessages, language, apiKey) {
   const t = normalize(userText);
@@ -301,7 +301,7 @@ async function tryHandleExplain(userText, historyMessages, language, apiKey) {
       (m) =>
         m.role === "assistant" &&
         typeof m.content === "string" &&
-        m.content.includes("Пункт Устава")
+        m.content.includes("Пункт Устава"),
     );
 
   if (!lastCitation) {
@@ -325,7 +325,7 @@ ${lastCitation.content}
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4.1-mini",
+      model: DEFAULT_MODEL,
       messages: [
         {
           role: "system",
@@ -343,9 +343,13 @@ ${lastCitation.content}
 
   if (!completion.ok) {
     const text = await completion.text().catch(() => "");
-    throw new Error(
-      `OpenAI explain error: ${completion.status} – ${text.slice(0, 200)}`
+    console.error(
+      "[ai-domovoy] OpenAI explain error:",
+      completion.status,
+      text.slice(0, 200),
     );
+    // В случае ошибки не роняем всё — просто возвращаем null, чтобы пойти обычным путём.
+    return null;
   }
 
   const data = await completion.json();
@@ -358,14 +362,17 @@ ${lastCitation.content}
 // ---------- Основной handler ----------
 
 exports.handler = async (event) => {
+  // Никогда не роняем фронт: все ответы == 200, ошибки внутри JSON.
   try {
     loadContext();
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
-        statusCode: 500,
+        statusCode: 200,
         body: JSON.stringify({
+          answer:
+            "Сейчас на сервере не настроен ключ OpenAI. Я не могу говорить, но это исправим.",
           error: "OPENAI_API_KEY is not configured",
         }),
       };
@@ -373,7 +380,7 @@ exports.handler = async (event) => {
 
     if (event.httpMethod !== "POST") {
       return {
-        statusCode: 405,
+        statusCode: 200,
         body: JSON.stringify({ error: "Method Not Allowed" }),
       };
     }
@@ -410,6 +417,7 @@ exports.handler = async (event) => {
         ? body.question.trim()
         : userTextFromHistory;
 
+    // 1. Попробовать выдать цитату Устава
     const citation = tryHandleCitation(userText, incomingMessages);
     if (citation) {
       return {
@@ -418,11 +426,12 @@ exports.handler = async (event) => {
       };
     }
 
+    // 2. Попробовать объяснить уже процитированный пункт
     const explained = await tryHandleExplain(
       userText,
       incomingMessages,
       language,
-      apiKey
+      apiKey,
     );
     if (explained) {
       return {
@@ -431,6 +440,7 @@ exports.handler = async (event) => {
       };
     }
 
+    // 3. Общий философский / информационный ответ
     const siteContext = await loadSiteContext(language);
 
     const manifestoSlice = sliceText(manifestoRU, 3200);
@@ -444,7 +454,10 @@ exports.handler = async (event) => {
 
     const historyForModel = incomingMessages
       .slice(-10)
-      .map((m) => `${m.role === "user" ? "Пользователь" : "Домовой"}: ${m.content}`)
+      .map(
+        (m) =>
+          `${m.role === "user" ? "Пользователь" : "Домовой"}: ${m.content}`,
+      )
       .join("\n");
 
     const systemPrompt = `
@@ -498,7 +511,7 @@ ${userText || "(вопрос не распознан)"}\n`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
+        model: DEFAULT_MODEL,
         messages: [
           {
             role: "system",
@@ -516,13 +529,15 @@ ${userText || "(вопрос не распознан)"}\n`;
     if (!completion.ok) {
       const text = await completion.text().catch(() => "");
       console.error(
-        "[ai-domovoy] OpenAI error:",
+        "[ai-domovoy] OpenAI main error:",
         completion.status,
-        text.slice(0, 200)
+        text.slice(0, 200),
       );
       return {
-        statusCode: 500,
+        statusCode: 200,
         body: JSON.stringify({
+          answer:
+            "Сейчас у меня проблемы со связью с основным мозгом. Попробуй задать вопрос чуть позже.",
           error: "OpenAI request failed",
         }),
       };
@@ -538,10 +553,12 @@ ${userText || "(вопрос не распознан)"}\n`;
       body: JSON.stringify({ answer }),
     };
   } catch (e) {
-    console.error("[ai-domovoy] Handler error:", e);
+    console.error("[ai-domovoy] Handler fatal error:", e);
     return {
-      statusCode: 500,
+      statusCode: 200,
       body: JSON.stringify({
+        answer:
+          "Кажется, я запутался в проводах. На стороне сервера произошла ошибка, но платформа жива. Попробуй ещё раз или переформулируй вопрос.",
         error: "Internal Server Error",
       }),
     };

@@ -83,84 +83,82 @@ async function loadSiteContext(language) {
   }
 
   try {
-    const newsUrl = `${FIREBASE_DB_URL}/newsFeed.json`;
-    const messagesUrl = `${FIREBASE_DB_URL}/assistantMessages.json?orderBy=%22createdAt%22&limitToLast=30`;
-    const forumUrl = `${FIREBASE_DB_URL}/forumTopics.json`;
+    const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+    const postsUrl = `${FIREBASE_DB_URL}/forum/posts.json`;
 
-    const [newsRaw, messagesRaw, forumRaw] = await Promise.all([
-      fetchJSON(newsUrl).catch(() => ({})),
-      fetchJSON(messagesUrl).catch(() => ({})),
-      fetchJSON(forumUrl).catch(() => ({})),
+    const [topicsRaw, postsRaw] = await Promise.all([
+      fetchJSON(topicsUrl).catch(() => ({})),
+      fetchJSON(postsUrl).catch(() => ({})),
     ]);
 
-    // --- ЛЕНТА ---
-    const newsItems = Object.entries(newsRaw || {})
-      .map(([id, n]) => ({ id, ...(n || {}) }))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 15);
+    // Превращаем темы в массив
+    const topics = Object.entries(topicsRaw || {}).map(([id, t]) => ({
+      id,
+      ...(t || {}),
+    }));
+
+    // Сортируем по времени (последние сверху)
+    const sortedTopics = topics.sort(
+      (a, b) => (b.createdAt || 0) - (a.createdAt || 0),
+    );
+
+    // ---------- БЛОК НОВОСТЕЙ (section === "news") ----------
+    const newsItems = sortedTopics
+      .filter((t) => (t.section || "").toLowerCase() === "news")
+      .slice(0, 10);
 
     const newsBlock =
       newsItems.length > 0
         ? newsItems
             .map((n) => {
-              const section = n.section || "news";
-              const lang = n.lang || "ru";
-              const title = (n.title || "(без названия)").toString();
+              const langCode = n.lang || language || "ru";
+              const title = (n.title || "(новость)").toString();
               const content = sliceText(
                 (n.content || "").toString(),
                 600,
               );
-              return `[ЛЕНТА][${section}][${lang}] ${title}\n${content}`;
+              return `[ЛЕНТА][${langCode}] ${title}\n${content}`;
             })
             .join("\n\n")
         : "";
 
-    // --- ФОРУМ ---
-    const forumItems = Object.entries(forumRaw || {})
-      .map(([id, t]) => ({ id, ...(t || {}) }))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 20);
+    // ---------- БЛОК ФОРУМА (все темы, кроме news) ----------
+    const discussionTopics = sortedTopics
+      .filter((t) => (t.section || "").toLowerCase() !== "news")
+      .slice(0, 10);
+
+    const forumBlocks = [];
+
+    for (const t of discussionTopics) {
+      const topicPosts = Object.entries((postsRaw && postsRaw[t.id]) || {}).map(
+        ([pid, p]) => ({ id: pid, ...(p || {}) }),
+      );
+
+      const lastComments = topicPosts
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 3);
+
+      if (lastComments.length > 0) {
+        forumBlocks.push(
+          `Тема: ${t.title || "(без названия)"}\n` +
+            lastComments
+              .map((c) =>
+                `– ${
+                  c.authorNickname || c.author || "аноним"
+                }: ${sliceText(
+                  (c.text || c.content || "").toString(),
+                  240,
+                )}`,
+              )
+              .join("\n"),
+        );
+      }
+    }
 
     const forumBlock =
-      forumItems.length > 0
-        ? forumItems
-            .map((t) => {
-              const section = t.section || "general";
-              const lang = t.lang || "ru";
-              const title = (t.title || "(без названия)").toString();
-              const preview = sliceText(
-                (t.preview || t.firstMessage || "").toString(),
-                400,
-              );
-              return `[ФОРУМ][${section}][${lang}] ${title}\n${preview}`;
-            })
-            .join("\n\n")
-        : "";
+      forumBlocks.length > 0 ? forumBlocks.join("\n\n") : "";
 
-    // --- ДИАЛОГИ ДОМОВОГО ---
-    const msgItems = Object.entries(messagesRaw || {})
-      .map(([id, m]) => ({ id, ...(m || {}) }))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 20);
-
-    const messagesBlock =
-      msgItems.length > 0
-        ? msgItems
-            .map((m) => {
-              const page = m.page || "/";
-              const userText = (m.userText || "").toString();
-              const assistantText = sliceText(
-                (m.assistantText || "").toString(),
-                400,
-              );
-              return `[ДИАЛОГ][${page}] пользователь: ${userText}\nдомовой: ${assistantText}`;
-            })
-            .join("\n\n")
-        : "";
-
-    const combined = [newsBlock, forumBlock, messagesBlock]
-      .filter(Boolean)
-      .join("\n\n");
+    const combined = [newsBlock, forumBlock].filter(Boolean).join("\n\n");
 
     return combined;
   } catch (e) {
@@ -168,6 +166,7 @@ async function loadSiteContext(language) {
     return "";
   }
 }
+
 
 // ---------- Генерация голосового ответа ----------
 

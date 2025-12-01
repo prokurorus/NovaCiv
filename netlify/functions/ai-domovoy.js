@@ -107,20 +107,19 @@ async function loadSiteContext(language) {
       .filter((t) => (t.section || "").toLowerCase() === "news")
       .slice(0, 10);
 
+    // --- КОРОТКИЕ НОВОСТИ ---
     const newsBlock =
       newsItems.length > 0
-        ? newsItems
+        ? newsItems.slice(0, 3)
             .map((n) => {
-              const langCode = n.lang || language || "ru";
-              const title = (n.title || "(новость)").toString();
-              const content = sliceText(
-                (n.content || "").toString(),
-                600,
-              );
-              return `[ЛЕНТА][${langCode}] ${title}\n${content}`;
+              const title = n.title || "(новость)";
+              const content = n.content || n.text || "";
+              const short = sliceText(content, 180);
+              return `• ${title}\n  ${short}`;
             })
             .join("\n\n")
         : "";
+
 
     // ---------- БЛОК ФОРУМА (все темы, кроме news) ----------
     const discussionTopics = sortedTopics

@@ -82,11 +82,12 @@ const emptyTextByLang: Record<Language, string> = {
 };
 
 const discussLabelByLang: Record<Language, string> = {
-  ru: "Обсудить на форуме",
-  en: "Discuss on the forum",
-  de: "Im Forum diskutieren",
-  es: "Debatir en el foro",
+  ru: "Читать полностью",
+  en: "Read full post",
+  de: "Vollständigen Beitrag lesen",
+  es: "Leer la publicación completa",
 };
+
 
 function formatDate(value: number, language: Language): string {
   const date = new Date(value || 0);

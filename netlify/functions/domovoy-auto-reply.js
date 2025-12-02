@@ -1,31 +1,33 @@
 // netlify/functions/domovoy-auto-reply.js
 //
 // Авто-ответы Домового в темах форума NovaCiv.
+// Работает поверх той же структуры, что и domovoy-reply:
+//   forum/topics/{topicId}
+//   forum/comments/{topicId}/{commentId}
 //
-// Логика (первая версия, бережная):
-// - Берём последние ~40 тем из forum/topics (section === "news").
-// - Для каждой темы загружаем последние ответы из forum/posts/<topicId>.
-// - Находим самый свежий НЕ-Домового пост с вопросительным знаком.
-// - Если после него ещё нет ответа автора "Domovoy" — задаём модели вопрос:
-//   "Ответь коротко и по существу на этот комментарий в духе Устава/Манифеста".
-// - Пишем ответ как новый пост с authorNickname: "Domovoy".
-//
-// Защита от спама:
-// - Не отвечаем на сообщения старше 24 часов.
-// - Не отвечаем на слишком короткие сообщения (< 20 символов).
-// - За один запуск даём максимум 5 ответов.
+// Логика (бережная):
+// – берём последние ~40 тем раздела "news", созданных Домовым;
+// – для каждой темы загружаем комментарии из forum/comments/<topicId>;
+// – находим самый свежий НЕ-Домового комментарий с вопросительным знаком;
+// – если после него ещё нет ответа Домового — просим модель дать короткий ответ;
+// – создаём новый комментарий от Домового.
+// Ограничения:
+// – не отвечаем на комментарии старше 24 часов;
+// – не отвечаем на очень короткие сообщения (< 20 символов);
+// – максимум 5 ответов за один запуск.
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
+const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const DOMOVOY_CRON_SECRET = process.env.DOMOVOY_CRON_SECRET || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-// Лёгкий логгер
+const DOMOVOY_NAME_EN = "Domovoy";
+const DOMOVOY_NAME_RU = "Домовой NovaCiv";
+
 function log(...args) {
   console.log("[domovoy-auto-reply]", ...args);
 }
 
-// Универсальный fetch JSON с базовой обработкой ошибок
 async function fetchJson(url, options = {}) {
   const res = await fetch(url, options);
   if (!res.ok) {
@@ -35,7 +37,7 @@ async function fetchJson(url, options = {}) {
   return await res.json();
 }
 
-// Загрузка последних тем Домового (раздел news)
+// Загружаем последние темы, созданные Домовым, в разделе "news"
 async function loadRecentDomovoyTopics(limit = 40) {
   if (!FIREBASE_DB_URL) {
     throw new Error("FIREBASE_DB_URL is not configured");
@@ -49,9 +51,7 @@ async function loadRecentDomovoyTopics(limit = 40) {
   const url = `${FIREBASE_DB_URL}/forum/topics.json?${params.toString()}`;
   const data = await fetchJson(url);
 
-  if (!data || typeof data !== "object") {
-    return [];
-  }
+  if (!data || typeof data !== "object") return [];
 
   const topics = Object.entries(data).map(([id, raw]) => {
     const t = raw || {};
@@ -67,7 +67,7 @@ async function loadRecentDomovoyTopics(limit = 40) {
     };
   });
 
-  // Только раздел news и только Домовой
+  // Только раздел news и только темы, созданные Домовым
   const filtered = topics.filter((t) => {
     if (t.section !== "news") return false;
     const isDomovoy =
@@ -76,122 +76,97 @@ async function loadRecentDomovoyTopics(limit = 40) {
     return isDomovoy;
   });
 
-  // От новых к старым
   filtered.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   return filtered;
 }
 
-// Загрузка последних ответов по теме
-async function loadPostsForTopic(topicId, limit = 30) {
-  const params = new URLSearchParams({
-    orderBy: JSON.stringify("createdAt"),
-    limitToLast: String(limit),
-  });
-
-  const url = `${FIREBASE_DB_URL}/forum/posts/${topicId}.json?${params.toString()}`;
+// Загружаем комментарии к теме из forum/comments/<topicId>
+async function loadCommentsForTopic(topicId) {
+  const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
   const data = await fetchJson(url).catch((e) => {
-    log("loadPostsForTopic error", topicId, e.message);
+    log("loadCommentsForTopic error", topicId, e.message);
     return null;
   });
 
-  if (!data || typeof data !== "object") {
-    return [];
-  }
+  if (!data || typeof data !== "object") return [];
 
-  const posts = Object.entries(data).map(([id, raw]) => {
-    const p = raw || {};
+  const comments = Object.entries(data).map(([id, raw]) => {
+    const c = raw || {};
     return {
       id,
-      content: p.content || "",
-      createdAt: p.createdAt || 0,
-      authorNickname: p.authorNickname || null,
-      lang: p.lang || null,
-      repliedToPostId: p.repliedToPostId || null,
-      sourceId: p.sourceId || null,
+      content: c.content || "",
+      createdAt: c.createdAt || 0,
+      authorNickname: c.authorNickname || "",
+      lang: c.lang || null,
+      domovoyReplied: !!c.domovoyReplied,
+      isSystem: !!c.isSystem,
+      sourceId: c.sourceId || "",
     };
   });
 
-  posts.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  return posts;
+  // от старых к новым
+  comments.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  return comments;
 }
 
-// Выбор сообщения, на которое стоит ответить
-function pickMessageToReply(posts) {
-  if (!posts.length) return null;
+// ищем комментарий, на который стоит ответить
+function pickCommentToReply(comments) {
+  if (!comments.length) return null;
 
-  // Находим последний пост с вопросом, написанный НЕ Домовым
-  const lastQuestion = [...posts]
+  const now = Date.now();
+
+  // последний вопросительный комментарий не от Домового
+  const lastQuestion = [...comments]
     .reverse()
-    .find((p) => {
-      if (!p.content || typeof p.content !== "string") return false;
-      if (p.authorNickname === "Domovoy" || p.authorNickname === "Домовой NovaCiv")
-        return false;
-      const text = p.content.trim();
+    .find((c) => {
+      const text = (c.content || "").trim();
+      if (!text) return false;
       if (text.length < 20) return false;
-      return text.includes("?");
+      if (!text.includes("?")) return false;
+
+      const author = (c.authorNickname || "").trim();
+      if (author === DOMOVOY_NAME_EN || author === DOMOVOY_NAME_RU) return false;
+      if (c.isSystem) return false;
+
+      // комментарий не старше 24 часов
+      if (!c.createdAt || now - c.createdAt > 24 * 60 * 60 * 1000) return false;
+
+      return true;
     });
 
   if (!lastQuestion) return null;
 
-  // Был ли после него ответ от Домового?
-  const laterDomovoy = posts.some(
-    (p) =>
-      p.createdAt > lastQuestion.createdAt &&
-      (p.authorNickname === "Domovoy" || p.authorNickname === "Домовой NovaCiv")
-  );
+  // был ли после него ответ от Домового
+  const laterDomovoy = comments.some((c) => {
+    if (!c.createdAt || c.createdAt <= lastQuestion.createdAt) return false;
+    const author = (c.authorNickname || "").trim();
+    return author === DOMOVOY_NAME_EN || author === DOMOVOY_NAME_RU;
+  });
 
   if (laterDomovoy) return null;
 
-  // Ограничение по давности: не старше 24 часов
-  const now = Date.now();
-  if (now - lastQuestion.createdAt > 24 * 60 * 60 * 1000) {
-    return null;
-  }
-
-  // Всё ок — можно отвечать
   return lastQuestion;
 }
 
-// Определяем язык ответа
-function getReplyLang(topic, post) {
-  if (post && post.lang) return post.lang;
+function getReplyLang(topic, comment) {
+  if (comment && comment.lang) return comment.lang;
   if (topic && topic.lang) return topic.lang;
   return "en";
 }
 
-// Мэппинг языка в locale и подсказку
-function getLangMeta(langCode) {
-  if (langCode === "ru") {
-    return {
-      locale: "ru-RU",
-      hint: "Ответь по-русски.",
-    };
-  }
-  if (langCode === "de") {
-    return {
-      locale: "de-DE",
-      hint: "Antworte auf Deutsch.",
-    };
-  }
-  if (langCode === "es") {
-    return {
-      locale: "es-ES",
-      hint: "Responde en español.",
-    };
-  }
-  return {
-    locale: "en-US",
-    hint: "Reply in English.",
-  };
+function getLangHint(langCode) {
+  if (langCode === "ru") return "Ответь по-русски.";
+  if (langCode === "de") return "Antworte auf Deutsch.";
+  if (langCode === "es") return "Respondi en español.";
+  return "Reply in English.";
 }
 
-// Генерация ответа Домового через OpenAI
-async function generateDomovoyReply({ topic, post, lang }) {
+async function generateDomovoyReply({ topic, comment, lang }) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
 
-  const { hint } = getLangMeta(lang);
+  const hint = getLangHint(lang);
 
   const systemPrompt = `
 You are "Domovoy", the quiet house AI of the NovaCiv digital community.
@@ -201,14 +176,11 @@ non-violence, respect for body autonomy, open algorithms, debt-free and
 non-monopolistic economy, local autonomy of communities, and the idea that
 mind and life are more valuable than any matter.
 
-You answer calmly, honestly and without propaganda. You speak to an adult
-who is tired of manipulation. You never call for violence or humiliation.
+You answer calmly, honestly and without propaganda.
 `.trim();
 
   const userPrompt = `
 ${hint}
-
-You see a topic on the NovaCiv forum and a comment that may require a reply.
 
 Topic title:
 "${topic.title}"
@@ -216,18 +188,16 @@ Topic title:
 Topic intro:
 ${topic.content || "(no intro)"}
 
-User comment (the one you answer to):
-${post.content}
+User comment:
+${comment.content}
 
-Your task:
+Task:
 - Give a short, clear answer in 2–4 paragraphs.
 - Do not repeat the question; answer it.
-- If appropriate, gently link the answer to the Charter or Manifesto ideas,
-  but without legal quotes or article numbers.
-- Invite the person to think and continue the discussion, but without pathos.
-
-Do NOT mention that you are an AI or model. Just speak as "Domovoy".
-Do not use emojis and hashtags.
+- If appropriate, gently connect to NovaCiv Charter/Manifesto ideas,
+  but without article numbers and without pathos.
+- Do not mention that you are an AI. Speak simply as "Domovoy".
+- No emojis, no hashtags.
 `.trim();
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -253,8 +223,10 @@ Do not use emojis and hashtags.
   }
 
   const data = await res.json();
-  const choice = data.choices?.[0]?.message?.content;
-  const content = (choice || "").trim();
+  const content =
+    data.choices?.[0]?.message?.content
+      ? data.choices[0].message.content.trim()
+      : "";
 
   if (!content) {
     throw new Error("Empty Domovoy reply from OpenAI");
@@ -263,19 +235,19 @@ Do not use emojis and hashtags.
   return content;
 }
 
-// Сохраняем ответ в forum/posts/<topicId>
-async function saveReplyToForum({ topicId, replyText, lang, repliedToPostId }) {
-  const url = `${FIREBASE_DB_URL}/forum/posts/${topicId}.json`;
+// сохраняем ответ как новый комментарий
+async function saveReplyComment({ topicId, replyText, lang, replyToId }) {
+  const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
   const now = Date.now();
 
   const payload = {
     content: replyText,
     createdAt: now,
-    createdAtServer: now,
-    authorNickname: "Domovoy",
+    createdAtServer: new Date().toISOString(),
+    authorNickname: DOMOVOY_NAME_RU,
     lang,
     sourceId: "domovoy_auto_reply",
-    repliedToPostId: repliedToPostId || null,
+    replyToId: replyToId || null,
   };
 
   const res = await fetch(url, {
@@ -287,15 +259,14 @@ async function saveReplyToForum({ topicId, replyText, lang, repliedToPostId }) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Failed to save reply for topic ${topicId}: HTTP ${res.status} – ${text}`
+      `Failed to save reply for topic ${topicId}: HTTP ${res.status} – ${text}`,
     );
   }
 
-  const data = await res.json().catch(() => ({}));
-  return data;
+  return await res.json().catch(() => ({}));
 }
 
-// ---------- Основной handler ----------
+// ---------- handler ----------
 
 exports.handler = async (event) => {
   try {
@@ -303,7 +274,7 @@ exports.handler = async (event) => {
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
-    // Проверка токена, как в domovoy-auto-post
+    // проверка токена
     if (DOMOVOY_CRON_SECRET) {
       const qs = event.queryStringParameters || {};
       if (!qs.token || qs.token !== DOMOVOY_CRON_SECRET) {
@@ -330,36 +301,35 @@ exports.handler = async (event) => {
     for (const topic of topics) {
       if (replies.length >= MAX_REPLIES_PER_RUN) break;
 
-      const posts = await loadPostsForTopic(topic.id, 30);
-      const targetPost = pickMessageToReply(posts);
+      const comments = await loadCommentsForTopic(topic.id);
+      const target = pickCommentToReply(comments);
+      if (!target) continue;
 
-      if (!targetPost) continue;
-
-      const lang = getReplyLang(topic, targetPost);
+      const lang = getReplyLang(topic, target);
 
       try {
         const replyText = await generateDomovoyReply({
           topic,
-          post: targetPost,
+          comment: target,
           lang,
         });
 
-        await saveReplyToForum({
+        await saveReplyComment({
           topicId: topic.id,
           replyText,
           lang,
-          repliedToPostId: targetPost.id,
+          replyToId: target.id,
         });
 
-        log("Replied in topic", topic.id, "to post", targetPost.id);
+        log("Replied in topic", topic.id, "to comment", target.id);
 
         replies.push({
           topicId: topic.id,
-          repliedToPostId: targetPost.id,
+          replyToCommentId: target.id,
           lang,
         });
       } catch (e) {
-        log("Error while replying in topic", topic.id, e);
+        log("Error while replying in topic", topic.id, e.message || e);
       }
     }
 

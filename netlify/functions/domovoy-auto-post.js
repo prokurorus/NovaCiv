@@ -192,11 +192,6 @@ async function saveToForum({ title, content, lang, postKind }) {
   return { topicId, topicData };
 }
 
-async function sendToTelegram({ chatId, text }) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId) {
-    log("Telegram config not set or chatId empty, skip Telegram");
-    return null;
-  }
 
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 

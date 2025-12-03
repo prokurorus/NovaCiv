@@ -45,6 +45,9 @@ netlify/functions/*.js — серверная логика (OpenAI, Firebase, Te
 
 Функции:
 
+netlify/functions/post-news-to-telegram.js – берёт готовые новости из Firebase (forum/topics, section "news") и отправляет их в телеграм-каналы по языкам, помечая отправленные через поле telegramPosted.
+
+
 ai-domovoy.js
   — Главный диалоговый ИИ-домовой сайта.
   — Отвечает на вопросы пользователей.

@@ -73,27 +73,25 @@ const SOURCES = [
   },
 ];
 
-// Вывод по языкам (форум + Telegram)
+// Вывод по языкам (только форум; Telegram теперь отдельной функцией)
 const LANG_OUTPUTS = [
   {
     code: "en",
     label: "English",
-    telegramChatId: TELEGRAM_NEWS_CHAT_ID_EN,
     saveToForum: true,
   },
   {
     code: "ru",
     label: "Russian",
-    telegramChatId: TELEGRAM_NEWS_CHAT_ID_RU,
     saveToForum: true,
   },
   {
     code: "de",
     label: "German",
-    telegramChatId: TELEGRAM_NEWS_CHAT_ID_DE,
     saveToForum: true,
   },
 ];
+
 
 // ---------- PROMPTS ----------
 

@@ -301,66 +301,7 @@ async function saveNewsToForumLang(item, analyticText, langCode) {
   }
 }
 
-// ---------- TELEGRAM ----------
 
-const taglineByLang = {
-  en: "Digital community without rulers — only citizens.",
-  ru: "Цифровое сообщество без правителей — только граждане.",
-  de: "Digitale Gemeinschaft ohne Herrscher – nur Bürger.",
-};
-
-
-  lines.push("");
-
-  if (item.title) {
-    lines.push(item.title);
-    lines.push("");
-  }
-
-  if (item.link) {
-    lines.push(`Source: ${item.link}`);
-    lines.push("");
-  }
-
-  lines.push(analyticText.trim());
-  lines.push("");
-
-  const now = new Date();
-  const stamp = now.toISOString().slice(0, 16).replace("T", " ");
-
-  const tagline =
-    taglineByLang[langCode] || taglineByLang.en || taglineByLang.ru;
-
-  lines.push(tagline);
-  lines.push("Read more on NovaCiv: https://novaciv.space/news");
-  lines.push(`Posted via NovaCiv • ${stamp} UTC`);
-
-  return lines.join("\n");
-}
-
-
-  const text = buildTelegramText(item, analyticText, langCode);
-
-  try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        disable_web_page_preview: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      console.error("Telegram API error (news):", res.status, body);
-    }
-  } catch (err) {
-    console.error("Telegram send error (news):", err);
-  }
-}
 
 // ---------- OPENAI ANALYSIS & TRANSLATION ----------
 

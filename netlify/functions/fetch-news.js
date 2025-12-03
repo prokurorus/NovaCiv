@@ -531,6 +531,7 @@ exports.handler = async (event) => {
 
         for (const cfg of LANG_OUTPUTS) {
           const code = cfg.code;
+        } 
 
           // Если у источника нет этого языка — пропускаем
           if (

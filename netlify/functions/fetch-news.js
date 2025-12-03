@@ -324,16 +324,7 @@ const taglineByLang = {
   de: "Digitale Gemeinschaft ohne Herrscher – nur Bürger.",
 };
 
-function buildTelegramText(item, analyticText, langCode) {
-  const lines = [];
 
-  lines.push("🌐 NovaCiv — Movement news");
-  if (item.pubDate) {
-    const d = new Date(item.pubDate);
-    if (!isNaN(d.getTime())) {
-      lines.push(d.toLocaleDateString("en-GB"));
-    }
-  }
   lines.push("");
 
   if (item.title) {
@@ -362,10 +353,6 @@ function buildTelegramText(item, analyticText, langCode) {
   return lines.join("\n");
 }
 
-async function sendNewsToTelegram(item, analyticText, chatId, langCode) {
-  if (!TELEGRAM_BOT_TOKEN || !chatId) {
-    return;
-  }
 
   const text = buildTelegramText(item, analyticText, langCode);
 
@@ -639,16 +626,7 @@ exports.handler = async (event) => {
             await saveNewsToForumLang(item, textForLang, code);
           }
 
-          if (cfg.telegramChatId) {
-            await sendNewsToTelegram(
-              item,
-              textForLang,
-              cfg.telegramChatId,
-              code,
-            );
-          }
-        }
-
+         
         processedKeys[key] = {
           processedAt: Date.now(),
           sourceId: item.sourceId || null,

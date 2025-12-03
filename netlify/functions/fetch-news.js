@@ -531,7 +531,6 @@ exports.handler = async (event) => {
 
         for (const cfg of LANG_OUTPUTS) {
           const code = cfg.code;
-        } 
 
           // Если у источника нет этого языка — пропускаем
           if (
@@ -542,6 +541,7 @@ exports.handler = async (event) => {
             continue;
           }
 
+          // Перевод, если нужен
           if (!textsByLang[code]) {
             const translated = await translateText(analyticEn, code);
             textsByLang[code] = translated;
@@ -549,17 +549,22 @@ exports.handler = async (event) => {
 
           const textForLang = textsByLang[code];
 
+          // Сохраняем в форум
           if (cfg.saveToForum) {
             await saveNewsToForumLang(item, textForLang, code);
           }
+        }
 
-         
+        // --- Закрыли цикл LANG_OUTPUTS ‼️ ---
+        // Теперь финализируем обработку этой новости
+
         processedKeys[key] = {
           processedAt: Date.now(),
           sourceId: item.sourceId || null,
           link: item.link || null,
           title: item.title || null,
         };
+
         if (titleKey) {
           titleKeys[titleKey] = {
             processedAt: Date.now(),
@@ -570,6 +575,7 @@ exports.handler = async (event) => {
 
         successCount += 1;
         titles.push(item.title || "(no title)");
+
       } catch (err) {
         console.error("Failed to process news item:", item.title, err);
       }

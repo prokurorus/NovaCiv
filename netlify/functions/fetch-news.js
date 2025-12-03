@@ -17,21 +17,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
-// Telegram
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-
-// Старые env как fallback
-const TELEGRAM_NEWS_CHAT_ID = process.env.TELEGRAM_NEWS_CHAT_ID;
-const TELEGRAM_CHAT_ID_FALLBACK = process.env.TELEGRAM_CHAT_ID;
-
-// Отдельные каналы по языкам
-const TELEGRAM_NEWS_CHAT_ID_EN =
-  process.env.TELEGRAM_NEWS_CHAT_ID_EN ||
-  TELEGRAM_NEWS_CHAT_ID ||
-  TELEGRAM_CHAT_ID_FALLBACK;
-
-const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU || "";
-const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE || "";
 
 // Максимум новых RSS-элементов за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;

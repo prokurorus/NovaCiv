@@ -16,7 +16,7 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const DOMOVOY_CRON_SECRET = process.env.DOMOVOY_CRON_SECRET || "";
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+
 
 // Telegram-чаты для новостей движения NovaCiv
 const TELEGRAM_CHAT_RU = process.env.TELEGRAM_CHAT_RU || "";
@@ -193,8 +193,7 @@ async function saveToForum({ title, content, lang, postKind }) {
 }
 
 
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
+ 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

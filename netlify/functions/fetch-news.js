@@ -547,11 +547,27 @@ exports.handler = async (event) => {
 
           const textForLang = textsByLang[code];
 
-          // Сохраняем в форум
+          // Сохраняем только в форум
           if (cfg.saveToForum) {
             await saveNewsToForumLang(item, textForLang, code);
           }
         }
+
+        processedKeys[key] = {
+          processedAt: Date.now(),
+          sourceId: item.sourceId || null,
+          link: item.link || null,
+          title: item.title || null,
+        };
+
+        if (titleKey) {
+          titleKeys[titleKey] = {
+            processedAt: Date.now(),
+            sourceId: item.sourceId || null,
+            link: item.link || null,
+          };
+        }
+
 
         // --- Закрыли цикл LANG_OUTPUTS ‼️ ---
         // Теперь финализируем обработку этой новости

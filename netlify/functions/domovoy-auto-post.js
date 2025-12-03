@@ -611,19 +611,14 @@ exports.handler = async (event) => {
           lang: code,
         });
 
-        const telegramRes = await sendToTelegram({
-          chatId: telegramChatId,
-          text: telegramText,
-        });
-
         results.push({
           lang: code,
           ok: true,
           mode,
           topicId: forumRes.topicId,
           manifestUrl,
-          telegram: telegramRes ? "sent" : "skipped",
         });
+
       } catch (langErr) {
         log(`Error for lang ${code}:`, langErr);
         results.push({

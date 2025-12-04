@@ -97,40 +97,58 @@ async function getQuoteFromDomovoy(lang, maxChars) {
     throw new Error("DOMOVOY_API_URL is not set");
   }
 
+  // Базовые промпты для разных языков
   const templates = {
-    ru: `Сформулируй одну короткую, но содержательную цитату для ролика (до ${maxChars} символов) от имени сообщества NovaCiv. Это должна быть завершённая мысль без пояснений.`,
-    en: `Create one meaningful short quote (up to ${maxChars} chars) for a NovaCiv video. A complete idea without explanations.`,
-    de: `Formuliere ein kurzes bedeutungsvolles Zitat (bis ${maxChars} Zeichen) für ein NovaCiv-Video. Ein abgeschlossener Gedanke ohne Erklärungen.`,
-    es: `Crea una cita corta pero significativa (hasta ${maxChars} caracteres) para un video de NovaCiv. Una idea completa sin explicaciones.`,
+    ru: `Сформулируй одну короткую, но содержательную цитату (до ${maxChars} символов) от имени сообщества NovaCiv. Это должна быть законченная мысль, которая звучит как фраза для видео.`,
+    en: `Create one short but meaningful quote (up to ${maxChars} characters) on behalf of NovaCiv. It should be a complete thought that sounds like a line for a video.`,
+    de: `Formuliere ein kurzes, aber bedeutungsvolles Zitat (bis zu ${maxChars} Zeichen) im Namen von NovaCiv. Es soll ein abgeschlossener Gedanke sein, der wie eine Zeile für ein Video klingt.`,
+    es: `Crea una cita corta pero significativa (hasta ${maxChars} caracteres) en nombre de NovaCiv. Debe ser una idea completa que suene como una frase para un video.`,
+  };
+
+  const fallbackQuotes = {
+    ru: "NovaCiv — это попытка построить цивилизацию, в которой власть принадлежит не правителям, а сознательным гражданам.",
+    en: "NovaCiv is a quiet attempt to build a civilization where power belongs not to rulers, but to conscious citizens.",
+    de: "NovaCiv ist ein Versuch, eine Zivilisation aufzubauen, in der die Macht nicht Herrschern, sondern bewussten Bürgern gehört.",
+    es: "NovaCiv es un intento de crear una civilización donde el poder pertenezca no a los gobernantes, sino a los ciudadanos conscientes.",
   };
 
   const question = templates[lang] || templates.en;
+  const fallback = fallbackQuotes[lang] || fallbackQuotes.en;
 
-  const res = await fetchFn(DOMOVOY_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,        // ← Домовой принимает ТОЛЬКО question
-      history: [],
-      lang,
-      page: "/shorts/auto-citation"
-    }),
-  });
+  try {
+    const res = await fetchWithTimeout(
+      DOMOVOY_API_URL,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,           // Домовой читает именно это поле
+          history: [],
+          lang,
+          page: "/shorts/auto-citation",
+        }),
+      },
+      10000 // ⏱ ждём максимум 10 секунд
+    );
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Domovoy HTTP ${res.status}: ${txt}`);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Domovoy HTTP ${res.status}: ${txt}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const text =
+      data.answer || data.reply || data.message || data.text || data.result;
+
+    if (!text || typeof text !== "string") {
+      throw new Error("Domovoy returned empty or invalid answer");
+    }
+
+    return text.trim();
+  } catch (err) {
+    console.error("Domovoy quote error, using fallback:", err);
+    return fallback;
   }
-
-  const data = await res.json().catch(() => ({}));
-  const text =
-    data.answer || data.reply || data.message || data.text || data.result;
-
-  if (!text || typeof text !== "string") {
-    throw new Error("Domovoy returned empty or invalid answer");
-  }
-
-  return text.trim();
 }
 
 

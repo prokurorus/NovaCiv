@@ -11,6 +11,9 @@
   to = "/index.html"
   status = 200
 
+[functions]
+  included_files = ["media/**"]
+
 [functions."news-cron"]
   # Раз в час по UTC
   schedule = "0 * * * *"

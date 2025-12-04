@@ -71,6 +71,25 @@ async function loadPreset() {
   return JSON.parse(raw);
 }
 
+// Обёртка над fetch с таймаутом
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetchFn(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+
 // --------- БЛОК: получение цитаты ---------
 
 async function getQuoteFromDomovoy(lang, maxChars) {

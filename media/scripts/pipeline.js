@@ -4,7 +4,12 @@
 const fs = require("fs/promises");
 const path = require("path");
 const { execFile } = require("child_process");
-const fetch = require("node-fetch");
+// Универсальный fetch: в Netlify/Node 18 берём глобальный,
+// локально при необходимости подгружаем node-fetch через dynamic import.
+const fetch =
+  globalThis.fetch ||
+  ((...args) => import("node-fetch").then(({ default: f }) => f(...args)));
+
 const ffmpegPath = require("ffmpeg-static");
 
 // ---------- БАЗОВЫЕ ПУТИ ----------

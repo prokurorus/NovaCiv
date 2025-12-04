@@ -29,6 +29,15 @@ const DIR_OUTPUT = path.join(WRITABLE_ROOT, "output");
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DOMOVOY_API_URL = process.env.DOMOVOY_API_URL; // например: https://novaciv.space/.netlify/functions/domovoy-quote
 
+// ---------- ГАРАНТИРОВАННОЕ СОЗДАНИЕ ВСЕХ ПАПОК ----------
+async function ensureAllDirs() {
+  await fs.mkdir(DIR_STATIC, { recursive: true });
+  await fs.mkdir(DIR_ANIM, { recursive: true });
+  await fs.mkdir(DIR_AUDIO, { recursive: true });
+  await fs.mkdir(DIR_OUTPUT, { recursive: true });
+}
+
+
 async function ensureEnv() {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");

@@ -1,0 +1,10 @@
+ID: manifest_en_01
+SOURCE: Manifest
+LANG: en
+
+Sometimes a single honest question
+is enough to see how absurd our world is.
+
+NovaCiv does not promise paradise and does not search for enemies.
+It simply asks:
+if we are so intelligent, why is it so hard for us to live together?

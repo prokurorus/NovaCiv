@@ -277,6 +277,7 @@ async function muxAudioVideo(bgVideoPath, audioPath, lang) {
 
 async function runPipeline(logger = console) {
   await ensureEnv();
+  await ensureAllDirs();   // ← ДОБАВЛЕННАЯ СТРОКА
 
   logger.log("🚀 NovaCiv pipeline start");
 

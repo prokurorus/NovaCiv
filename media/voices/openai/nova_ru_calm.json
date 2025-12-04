@@ -3,8 +3,11 @@
   "model": "gpt-4.1-mini",
   "voice": "alloy",
   "language": "ru",
+  "label": "NovaCiv Russian — спокойный",
   "style": "calm",
   "rate": 1.0,
   "pitch": 0.0,
-  "pause_ms_between_blocks": 300
+  "pause_ms_between_blocks": 300,
+  "max_block_duration_sec": 14,
+  "notes": "Спокойный, доверительный голос для философских роликов и чтения манифеста."
 }

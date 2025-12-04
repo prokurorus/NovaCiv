@@ -208,35 +208,56 @@ async function getQuote(preset, lang) {
 
 // --------- БЛОК: синтез голоса ---------
 
-async function synthesizeSpeech(text, lang) {
-  const fileName = `nova_voice_${Date.now()}.mp3`;
-  const outPath = path.join(DIR_AUDIO, fileName);
-
-  const res = await fetchFn("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OPENAI_TTS_MODEL,
-      voice: "alloy",
-      input: text,
-      format: "mp3",
-    }),
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`OpenAI TTS HTTP ${res.status}: ${txt}`);
+async function synthesizeSpeech({ text, voice_preset, lang, outputDir }) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not set");
   }
 
-  const arrayBuffer = await res.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  await fs.writeFile(outPath, buffer);
+  const outFile = path.join(
+    outputDir,
+    `nova_voice_${Date.now()}.mp3`
+  );
 
-  return outPath;
+  const payload = {
+    model: OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
+    voice: "alloy",
+    format: "mp3",
+    input: text,
+  };
+
+  try {
+    // ⚡ используем обёртку с таймаутом (10–12 сек)
+    const response = await fetchWithTimeout(
+      "https://api.openai.com/v1/audio/speech",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+      12000 // 12 секунд максимум на TTS
+    );
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      throw new Error(
+        `OpenAI TTS HTTP ${response.status}: ${errText}`
+      );
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.promises.writeFile(outFile, buffer);
+    return outFile;
+  } catch (err) {
+    console.error("TTS error:", err);
+    throw new Error(
+      "TTS generation failed: " + (err.message || String(err))
+    );
+  }
 }
+
 
 // --------- БЛОК: сборка видео ---------
 

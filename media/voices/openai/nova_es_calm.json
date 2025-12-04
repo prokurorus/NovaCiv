@@ -1,0 +1,13 @@
+{
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "voice": "alloy",
+  "language": "es",
+  "label": "NovaCiv Español — tranquilo",
+  "style": "calm",
+  "rate": 1.02,
+  "pitch": 0.05,
+  "pause_ms_between_blocks": 260,
+  "max_block_duration_sec": 12,
+  "notes": "Мягкий, чуть тёплый испанский голос."
+}

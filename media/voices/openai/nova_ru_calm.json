@@ -1,0 +1,10 @@
+{
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "voice": "alloy",
+  "language": "ru",
+  "style": "calm",
+  "rate": 1.0,
+  "pitch": 0.0,
+  "pause_ms_between_blocks": 300
+}

@@ -5,25 +5,24 @@ const fs = require("fs/promises");
 const path = require("path");
 const { execFile } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
-const VIDEO_SIZE = "720x1280";   // было 1080x1920
-const MAX_VIDEO_SEC = 20;        // режем до 20 секунд
 
+// Вертикальный размер попроще — чтобы быстрее рендерилось и точно успевало за 30 сек
+const VIDEO_SIZE = "720x1280";
+const MAX_VIDEO_SEC = 20;
 
-// Универсальный fetch: в Netlify (Node 18+) используем глобальный,
-// локально — динамический импорт node-fetch при необходимости.
+// ---------- Универсальный fetch ----------
+
 const fetchFn =
   (typeof fetch !== "undefined" && fetch) ||
   ((...args) => import("node-fetch").then(({ default: f }) => f(...args)));
 
-// --------- КОНФИГ ПУТЕЙ ---------
+// ---------- Пути (Netlify может писать только в /tmp) ----------
 
-// В Netlify функция может писать только в /tmp
 const WRITABLE_ROOT = "/tmp/novaciv-media";
-
 const DIR_AUDIO = path.join(WRITABLE_ROOT, "audio");
 const DIR_OUTPUT = path.join(WRITABLE_ROOT, "output");
 
-// Пресет для шортов
+// Пресет для шортов (лежит в репо, читаем как обычный файл только для настроек)
 const PRESET_PATH = path.join(
   __dirname,
   "..",
@@ -31,31 +30,25 @@ const PRESET_PATH = path.join(
   "short_auto_citation.json"
 );
 
-// --------- ENV ---------
+// ---------- ENV ----------
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const DOMOVOY_API_URL = process.env.DOMOVOY_API_URL;
 
-// Проверка env
 function ensureEnv() {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
-  }
-  if (!OPENAI_TTS_MODEL) {
-    throw new Error("OPENAI_TTS_MODEL is not set");
-  }
-  // DOMOVOY_API_URL можем не требовать жёстко — есть fallback
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not set");
+  if (!OPENAI_TTS_MODEL) throw new Error("OPENAI_TTS_MODEL is not set");
 }
 
-// Гарантируем наличие всех нужных директорий в /tmp
+// Гарантируем каталоги в /tmp
 async function ensureAllDirs() {
   for (const dir of [WRITABLE_ROOT, DIR_AUDIO, DIR_OUTPUT]) {
     await fs.mkdir(dir, { recursive: true });
   }
 }
 
-// --------- УТИЛИТЫ ---------
+// ---------- Утилиты ----------
 
 function execFfmpeg(args) {
   return new Promise((resolve, reject) => {
@@ -70,20 +63,23 @@ function execFfmpeg(args) {
 }
 
 async function loadPreset() {
-  const raw = await fs.readFile(PRESET_PATH, "utf8");
-  return JSON.parse(raw);
+  try {
+    const raw = await fs.readFile(PRESET_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    // Если файла нет — используем дефолт
+    return {
+      text_source: { options: { max_chars: 420 } },
+    };
+  }
 }
 
-// Обёртка над fetch с таймаутом
+// fetch с таймаутом
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
-
   try {
-    const res = await fetchFn(url, {
-      ...options,
-      signal: controller.signal,
-    });
+    const res = await fetchFn(url, { ...options, signal: controller.signal });
     clearTimeout(id);
     return res;
   } catch (err) {
@@ -92,15 +88,13 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
   }
 }
 
-
-// --------- БЛОК: получение цитаты ---------
+// ---------- Получение цитаты ----------
 
 async function getQuoteFromDomovoy(lang, maxChars) {
   if (!DOMOVOY_API_URL) {
     throw new Error("DOMOVOY_API_URL is not set");
   }
 
-  // Базовые промпты для разных языков
   const templates = {
     ru: `Сформулируй одну короткую, но содержательную цитату (до ${maxChars} символов) от имени сообщества NovaCiv. Это должна быть законченная мысль, которая звучит как фраза для видео.`,
     en: `Create one short but meaningful quote (up to ${maxChars} characters) on behalf of NovaCiv. It should be a complete thought that sounds like a line for a video.`,
@@ -125,13 +119,13 @@ async function getQuoteFromDomovoy(lang, maxChars) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question,           // Домовой читает именно это поле
+          question,
           history: [],
           lang,
           page: "/shorts/auto-citation",
         }),
       },
-      10000 // ⏱ ждём максимум 10 секунд
+      10000
     );
 
     if (!res.ok) {
@@ -154,12 +148,10 @@ async function getQuoteFromDomovoy(lang, maxChars) {
   }
 }
 
-
-// Fallback: напрямую через OpenAI, если Домовой не сработал
 async function getQuoteViaOpenAI(lang, maxChars) {
   const systemPrompt = `
 Ты — голос цифрового сообщества NovaCiv.
-Создай одну короткую, законченный мыслью цитату для ролика до ${maxChars} символов.
+Создай одну короткую, законченной мыслью цитату для ролика до ${maxChars} символов.
 Цитата должна быть понятна без контекста и отражать ценности свободы, ненасилия, прямой демократии и ценности разума.
 Не добавляй никаких пояснений, только сам текст цитаты.
 `;
@@ -198,103 +190,89 @@ async function getQuoteViaOpenAI(lang, maxChars) {
 async function getQuote(preset, lang) {
   const maxChars = preset?.text_source?.options?.max_chars || 420;
 
-  // 1) Пытаемся через Домового
   try {
     return await getQuoteFromDomovoy(lang, maxChars);
   } catch (err) {
     console.error("Domovoy quote error, fallback to OpenAI:", err.message);
   }
 
-  // 2) Fallback напрямую через OpenAI
   return await getQuoteViaOpenAI(lang, maxChars);
 }
 
-// --------- БЛОК: синтез голоса ---------
+// ---------- Синтез голоса ----------
 
-async function synthesizeSpeech({ text, voice_preset, lang, outputDir }) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
-  }
-
-  const outFile = path.join(
-    outputDir,
-    `nova_voice_${Date.now()}.mp3`
-  );
+async function synthesizeSpeech(text, lang) {
+  const outFile = path.join(DIR_AUDIO, `nova_voice_${Date.now()}.mp3`);
 
   const payload = {
-    model: OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
+    model: OPENAI_TTS_MODEL,
     voice: "alloy",
     format: "mp3",
     input: text,
   };
 
   try {
-    // ⚡ используем обёртку с таймаутом (10–12 сек)
     const response = await fetchWithTimeout(
       "https://api.openai.com/v1/audio/speech",
       {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
       },
-      12000 // 12 секунд максимум на TTS
+      12000
     );
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
-      throw new Error(
-        `OpenAI TTS HTTP ${response.status}: ${errText}`
-      );
+      throw new Error(`OpenAI TTS HTTP ${response.status}: ${errText}`);
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.promises.writeFile(outFile, buffer);
+    await fs.writeFile(outFile, buffer);
     return outFile;
   } catch (err) {
     console.error("TTS error:", err);
-    throw new Error(
-      "TTS generation failed: " + (err.message || String(err))
-    );
+    throw new Error("TTS generation failed: " + (err.message || String(err)));
   }
 }
 
-
-// --------- БЛОК: сборка видео ---------
+// ---------- Сборка видео (простой белый фон) ----------
 
 async function createVideoWithSimpleBackground(audioPath) {
   const fileName = `nova_short_${Date.now()}.mp4`;
   const outPath = path.join(DIR_OUTPUT, fileName);
 
-  // Вертикальное видео 1080x1920, белый фон, длительность = длительности аудио (через -shortest)
+  const ffmpegArgs = [
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=white:s=${VIDEO_SIZE}`,
+    "-i",
+    audioPath,
+    "-c:v",
+    "libx264",
+    "-tune",
+    "stillimage",
+    "-c:a",
+    "aac",
+    "-shortest",
+    "-pix_fmt",
+    "yuv420p",
+    "-t",
+    String(MAX_VIDEO_SEC),
+    outPath,
+  ];
 
-const ffmpegArgs = [
-  "-y",
-  "-f",
-  "lavfi",
-  "-i",
-  `color=white:s=${VIDEO_SIZE}`,
-  "-i",
-  audioPath,
-  "-c:v",
-  "libx264",
-  "-tune",
-  "stillimage",
-  "-c:a",
-  "aac",
-  "-shortest",
-  "-pix_fmt",
-  "yuv420p",
-  "-t",
-  String(MAX_VIDEO_SEC), // максимум 20 сек
-  outputPath,
-];
+  await execFfmpeg(ffmpegArgs);
 
+  return { fileName, outPath };
+}
 
-
-// --------- ГЛАВНАЯ ФУНКЦИЯ КОНВЕЙЕРА ---------
+// ---------- Главная функция конвейера ----------
 
 async function runPipeline(logger = console, options = {}) {
   ensureEnv();

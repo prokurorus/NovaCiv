@@ -1,0 +1,10 @@
+ID: manifest_es_01
+SOURCE: Manifest
+LANG: es
+
+A veces basta una sola pregunta honesta
+para ver lo absurda que se ha vuelto nuestra realidad.
+
+NovaCiv no promete un paraíso ni busca enemigos.
+Solo pregunta:
+si somos tan inteligentes, ¿por qué nos cuesta tanto vivir juntos?

@@ -79,22 +79,22 @@ async function getQuoteFromDomovoy(lang, maxChars) {
   }
 
   const templates = {
-    ru: `Сформулируй одну короткую, но содержательную цитату для ролика до ${maxChars} символов от имени сообщества NovaCiv. Это должна быть законченая мысль, понятная без контекста. Не добавляй пояснений, только текст цитаты.`,
-    en: `Create one short but meaningful quote (up to ${maxChars} characters) for a video, speaking as the NovaCiv community itself. It must be a complete thought, understandable without context. No explanations, only the quote text.`,
-    de: `Formuliere ein kurzes, aber inhaltsreiches Zitat (bis zu ${maxChars} Zeichen) für ein Video im Namen der Gemeinschaft NovaCiv. Es soll ein vollständiger Gedanke sein, verständlich ohne Kontext. Keine Erklärungen, nur den Text des Zitats.`,
-    es: `Crea una cita corta pero significativa (hasta ${maxChars} caracteres) para un vídeo, hablando en nombre de la comunidad NovaCiv. Debe ser un pensamiento completo, comprensible sin contexto. Sin explicaciones, solo el texto de la cita.`,
+    ru: `Сформулируй одну короткую, но содержательную цитату для ролика (до ${maxChars} символов) от имени сообщества NovaCiv. Это должна быть завершённая мысль без пояснений.`,
+    en: `Create one meaningful short quote (up to ${maxChars} chars) for a NovaCiv video. A complete idea without explanations.`,
+    de: `Formuliere ein kurzes bedeutungsvolles Zitat (bis ${maxChars} Zeichen) für ein NovaCiv-Video. Ein abgeschlossener Gedanke ohne Erklärungen.`,
+    es: `Crea una cita corta pero significativa (hasta ${maxChars} caracteres) para un video de NovaCiv. Una idea completa sin explicaciones.`,
   };
 
-  const message = templates[lang] || templates.en;
+  const question = templates[lang] || templates.en;
 
   const res = await fetchFn(DOMOVOY_API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      message,
+      question,        // ← Домовой принимает ТОЛЬКО question
       history: [],
       lang,
-      page: "/shorts/auto-citation",
+      page: "/shorts/auto-citation"
     }),
   });
 
@@ -113,6 +113,7 @@ async function getQuoteFromDomovoy(lang, maxChars) {
 
   return text.trim();
 }
+
 
 // Fallback: напрямую через OpenAI, если Домовой не сработал
 async function getQuoteViaOpenAI(lang, maxChars) {

@@ -88,14 +88,31 @@ function getNextLanguage() {
 // ---------- 1. ЦИТАТА ОТ ДОМОВОГО ----------
 
 async function getQuoteFromDomovoy(lang, options) {
-  const url = new URL(DOMOVOY_API_URL);
-  url.searchParams.set("lang", lang);
-  if (options?.from) url.searchParams.set("from", options.from.join(","));
-  if (options?.max_chars) url.searchParams.set("max_chars", String(options.max_chars));
+  const maxChars = options?.max_chars || 420;
 
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: { Accept: "application/json" },
+  const templates = {
+    ru: `Сформулируй одну короткую вдохновляющую цитату (до ${maxChars} символов) на русском языке, основанную на Манифесте и Уставе цифрового сообщества NovaCiv. Говори от первого лица от имени NovaCiv. Не добавляй пояснений, только текст цитаты.`,
+    en: `Create one short inspiring quote (up to ${maxChars} characters) in English, based on the Manifesto and Charter of the digital community NovaCiv. Speak in the first person as NovaCiv itself. No explanations, only the quote text.`,
+    de: `Formuliere ein kurzes inspirierendes Zitat (bis zu ${maxChars} Zeichen) auf Deutsch, basierend auf dem Manifest und der Charta der digitalen Gemeinschaft NovaCiv. Sprich in der Ich-Form im Namen von NovaCiv. Keine Erklärungen, nur den Text des Zitats.`,
+    es: `Crea una cita corta e inspiradora (hasta ${maxChars} caracteres) en español, basada en el Manifiesto y la Carta de la comunidad digital NovaCiv. Habla en primera persona como si fueras NovaCiv. Sin explicaciones, solo el texto de la cita.`,
+  };
+
+  const question = templates[lang] || templates.en;
+
+  const body = {
+    lang,
+    question,
+    history: [],
+    page: "/shorts/auto-citation",
+  };
+
+  const res = await fetch(DOMOVOY_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -103,9 +120,15 @@ async function getQuoteFromDomovoy(lang, options) {
   }
 
   const data = await res.json();
-  if (!data.text) throw new Error("Domovoy response has no 'text'");
-  return data.text;
+  const text = data.answer || data.text;
+  if (!text) {
+    throw new Error("Domovoy response has no 'answer'");
+  }
+
+  // На всякий случай чуть подрежем, если вышло длиннее лимита
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
 }
+
 
 // ---------- 2. ГЕНЕРАЦИЯ КАРТИНКИ (OpenAI Images) ----------
 

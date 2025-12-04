@@ -1,316 +1,269 @@
 // media/scripts/pipeline.js
-// Главный конвейер NovaCiv: цитата → картинка → анимация → голос → видео
+// Автоконвейер NovaCiv: цитата → голос → видео (вертикальный ролик)
 
 const fs = require("fs/promises");
 const path = require("path");
 const { execFile } = require("child_process");
-// Универсальный fetch: в Netlify/Node 18 берём глобальный,
-// локально при необходимости подгружаем node-fetch через dynamic import.
-const fetch =
-  globalThis.fetch ||
-  ((...args) => import("node-fetch").then(({ default: f }) => f(...args)));
-
 const ffmpegPath = require("ffmpeg-static");
 
-// ---------- БАЗОВЫЕ ПУТИ ----------
+// Универсальный fetch: в Netlify (Node 18+) используем глобальный,
+// локально — динамический импорт node-fetch при необходимости.
+const fetchFn =
+  (typeof fetch !== "undefined" && fetch) ||
+  ((...args) => import("node-fetch").then(({ default: f }) => f(...args)));
 
-const MEDIA_ROOT = path.resolve(__dirname, ".."); // .../media
-// В облаке писать можно только в /tmp, локально — в сам проект
-const WRITABLE_ROOT =
-  process.env.NETLIFY === "true" ? "/tmp/novaciv-media" : MEDIA_ROOT;
+// --------- КОНФИГ ПУТЕЙ ---------
 
-const PRESET_PATH = path.join(MEDIA_ROOT, "shorts-presets", "short_auto_citation.json");
+// В Netlify функция может писать только в /tmp
+const WRITABLE_ROOT = "/tmp/novaciv-media";
 
-const DIR_STATIC = path.join(WRITABLE_ROOT, "backgrounds", "static");
-const DIR_ANIM = path.join(WRITABLE_ROOT, "backgrounds", "animated");
 const DIR_AUDIO = path.join(WRITABLE_ROOT, "audio");
 const DIR_OUTPUT = path.join(WRITABLE_ROOT, "output");
 
+// Пресет для шортов
+const PRESET_PATH = path.join(
+  __dirname,
+  "..",
+  "shorts-presets",
+  "short_auto_citation.json"
+);
+
+// --------- ENV ---------
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const DOMOVOY_API_URL = process.env.DOMOVOY_API_URL; // например: https://novaciv.space/.netlify/functions/domovoy-quote
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const DOMOVOY_API_URL = process.env.DOMOVOY_API_URL;
 
-// ---------- ГАРАНТИРОВАННОЕ СОЗДАНИЕ ВСЕХ ПАПОК ----------
-async function ensureAllDirs() {
-  await fs.mkdir(DIR_STATIC, { recursive: true });
-  await fs.mkdir(DIR_ANIM, { recursive: true });
-  await fs.mkdir(DIR_AUDIO, { recursive: true });
-  await fs.mkdir(DIR_OUTPUT, { recursive: true });
-}
-
-
-async function ensureEnv() {
+// Проверка env
+function ensureEnv() {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");
   }
-  if (!DOMOVOY_API_URL) {
-    throw new Error("DOMOVOY_API_URL is not set");
+  if (!OPENAI_TTS_MODEL) {
+    throw new Error("OPENAI_TTS_MODEL is not set");
+  }
+  // DOMOVOY_API_URL можем не требовать жёстко — есть fallback
+}
+
+// Гарантируем наличие всех нужных директорий в /tmp
+async function ensureAllDirs() {
+  for (const dir of [WRITABLE_ROOT, DIR_AUDIO, DIR_OUTPUT]) {
+    await fs.mkdir(dir, { recursive: true });
   }
 }
 
-// ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
-
-async function ensureDir(dir) {
-  await fs.mkdir(dir, { recursive: true });
-}
+// --------- УТИЛИТЫ ---------
 
 function execFfmpeg(args) {
   return new Promise((resolve, reject) => {
-    execFile(ffmpegPath, args, (err, stdout, stderr) => {
-      if (err) {
-        console.error("FFmpeg error:", stderr.toString());
-        return reject(err);
+    execFile(ffmpegPath, args, (error, stdout, stderr) => {
+      if (error) {
+        error.stderr = stderr;
+        return reject(error);
       }
-      resolve(stdout.toString());
+      resolve({ stdout, stderr });
     });
   });
 }
 
-async function readJson(file) {
-  const txt = await fs.readFile(file, "utf8");
-  return JSON.parse(txt);
+async function loadPreset() {
+  const raw = await fs.readFile(PRESET_PATH, "utf8");
+  return JSON.parse(raw);
 }
 
-// ---------- РОТАЦИЯ ЯЗЫКОВ ----------
-// Без файлов — просто детерминированная последовательность по времени.
-// EN каждый второй ролик, между ними: RU → DE → ES → RU …
+// --------- БЛОК: получение цитаты ---------
 
-const ROTATION = {
-  primary: "en",
-  primaryInterval: 2,
-  others: ["ru", "de", "es"],
-};
-
-function getNextLanguage() {
-  // шаг счётчика ~по 6 минут, но это не критично — важно лишь чередование
-  const counter = Math.floor(Date.now() / (1000 * 60 * 6));
-
-  let lang;
-  if ((counter + 1) % ROTATION.primaryInterval === 0) {
-    lang = ROTATION.primary;
-  } else {
-    const idx = Math.floor(counter / ROTATION.primaryInterval) % ROTATION.others.length;
-    lang = ROTATION.others[idx];
+async function getQuoteFromDomovoy(lang, maxChars) {
+  if (!DOMOVOY_API_URL) {
+    throw new Error("DOMOVOY_API_URL is not set");
   }
-  return lang;
-}
-
-// ---------- 1. ЦИТАТА ОТ ДОМОВОГО ----------
-
-async function getQuoteFromDomovoy(lang, options) {
-  const maxChars = options?.max_chars || 420;
 
   const templates = {
-    ru: `Сформулируй одну короткую вдохновляющую цитату (до ${maxChars} символов) на русском языке, основанную на Манифесте и Уставе цифрового сообщества NovaCiv. Говори от первого лица от имени NovaCiv. Не добавляй пояснений, только текст цитаты.`,
-    en: `Create one short inspiring quote (up to ${maxChars} characters) in English, based on the Manifesto and Charter of the digital community NovaCiv. Speak in the first person as NovaCiv itself. No explanations, only the quote text.`,
-    de: `Formuliere ein kurzes inspirierendes Zitat (bis zu ${maxChars} Zeichen) auf Deutsch, basierend auf dem Manifest und der Charta der digitalen Gemeinschaft NovaCiv. Sprich in der Ich-Form im Namen von NovaCiv. Keine Erklärungen, nur den Text des Zitats.`,
-    es: `Crea una cita corta e inspiradora (hasta ${maxChars} caracteres) en español, basada en el Manifiesto y la Carta de la comunidad digital NovaCiv. Habla en primera persona como si fueras NovaCiv. Sin explicaciones, solo el texto de la cita.`,
+    ru: `Сформулируй одну короткую, но содержательную цитату для ролика до ${maxChars} символов от имени сообщества NovaCiv. Это должна быть законченая мысль, понятная без контекста. Не добавляй пояснений, только текст цитаты.`,
+    en: `Create one short but meaningful quote (up to ${maxChars} characters) for a video, speaking as the NovaCiv community itself. It must be a complete thought, understandable without context. No explanations, only the quote text.`,
+    de: `Formuliere ein kurzes, aber inhaltsreiches Zitat (bis zu ${maxChars} Zeichen) für ein Video im Namen der Gemeinschaft NovaCiv. Es soll ein vollständiger Gedanke sein, verständlich ohne Kontext. Keine Erklärungen, nur den Text des Zitats.`,
+    es: `Crea una cita corta pero significativa (hasta ${maxChars} caracteres) para un vídeo, hablando en nombre de la comunidad NovaCiv. Debe ser un pensamiento completo, comprensible sin contexto. Sin explicaciones, solo el texto de la cita.`,
   };
 
-  const question = templates[lang] || templates.en;
+  const message = templates[lang] || templates.en;
 
-  const body = {
-    lang,
-    question,
-    history: [],
-    page: "/shorts/auto-citation",
-  };
-
-  const res = await fetch(DOMOVOY_API_URL, {
+  const res = await fetchFn(DOMOVOY_API_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Domovoy quote error: ${res.status} ${res.statusText}`);
-  }
-
-  const data = await res.json();
-  const text = data.answer || data.text;
-  if (!text) {
-    throw new Error("Domovoy response has no 'answer'");
-  }
-
-  // На всякий случай чуть подрежем, если вышло длиннее лимита
-  return text.length > maxChars ? text.slice(0, maxChars) : text;
-}
-
-
-// ---------- 2. ГЕНЕРАЦИЯ КАРТИНКИ (OpenAI Images) ----------
-
-async function generateImageForQuote(text, lang) {
-  await ensureDir(DIR_STATIC);
-  const prompt = `Ultra-minimalistic white embossed bas-relief abstract background, vertical 9:16, calm futuristic style, no text, no color, high detail. Theme hint: ${text.slice(
-    0,
-    160
-  )}`;
-
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "gpt-image-1",
-      prompt,
-      size: "1024x1792",
-      n: 1,
+      message,
+      history: [],
+      lang,
+      page: "/shorts/auto-citation",
     }),
   });
 
   if (!res.ok) {
-    const errTxt = await res.text();
-    throw new Error("OpenAI image error: " + errTxt);
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Domovoy HTTP ${res.status}: ${txt}`);
   }
 
-  const data = await res.json();
-  const b64 = data.data[0].b64_json;
-  const buf = Buffer.from(b64, "base64");
-  const filename = `bg_${Date.now()}_${lang}.png`;
-  const fullPath = path.join(DIR_STATIC, filename);
-  await fs.writeFile(fullPath, buf);
-  return fullPath;
+  const data = await res.json().catch(() => ({}));
+  const text =
+    data.answer || data.reply || data.message || data.text || data.result;
+
+  if (!text || typeof text !== "string") {
+    throw new Error("Domovoy returned empty or invalid answer");
+  }
+
+  return text.trim();
 }
 
-// ---------- 3. АНИМАЦИЯ КАРТИНКИ В ВИДЕО-ЛУП ----------
+// Fallback: напрямую через OpenAI, если Домовой не сработал
+async function getQuoteViaOpenAI(lang, maxChars) {
+  const systemPrompt = `
+Ты — голос цифрового сообщества NovaCiv.
+Создай одну короткую, законченный мыслью цитату для ролика до ${maxChars} символов.
+Цитата должна быть понятна без контекста и отражать ценности свободы, ненасилия, прямой демократии и ценности разума.
+Не добавляй никаких пояснений, только сам текст цитаты.
+`;
 
-async function animateImage(imagePath, durationSec) {
-  await ensureDir(DIR_ANIM);
-  const outPath = path.join(
-    DIR_ANIM,
-    path.basename(imagePath).replace(/\.(png|jpg|jpeg)$/i, "_loop.mp4")
-  );
+  const userPrompt =
+    lang === "ru"
+      ? "Создай одну цитату от имени сообщества NovaCiv."
+      : "Create one quote on behalf of the NovaCiv community.";
 
-  // Эффект: лёгкий zoom + breathing light
-  const filter =
-    `zoompan=z='min(1.1,1+0.02*t)':d=1:s=1080x1920,` +
-    `format=yuv420p,` +
-    `eq=brightness='0.02*sin(0.6*t)'`;
-
-  const args = [
-    "-loop",
-    "1",
-    "-i",
-    imagePath,
-    "-t",
-    String(durationSec),
-    "-vf",
-    filter,
-    "-r",
-    "30",
-    "-an",
-    "-y",
-    outPath,
-  ];
-
-  await execFfmpeg(args);
-  return outPath;
-}
-
-// ---------- 4. ОЗВУЧКА (OpenAI TTS) ----------
-
-async function generateSpeech(text, lang, voicePresetName) {
-  await ensureDir(DIR_AUDIO);
-
-  const voicePresetPath = path.join(MEDIA_ROOT, "voices", "openai", `${voicePresetName}.json`);
-  const preset = await readJson(voicePresetPath);
-
-  const res = await fetch("https://api.openai.com/v1/audio/speech", {
+  const res = await fetchFn("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini-tts",
-      voice: preset.voice || "alloy",
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt.trim() },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 256,
+    }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`OpenAI quote HTTP ${res.status}: ${txt}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  return String(text).trim();
+}
+
+async function getQuote(preset, lang) {
+  const maxChars = preset?.text_source?.options?.max_chars || 420;
+
+  // 1) Пытаемся через Домового
+  try {
+    return await getQuoteFromDomovoy(lang, maxChars);
+  } catch (err) {
+    console.error("Domovoy quote error, fallback to OpenAI:", err.message);
+  }
+
+  // 2) Fallback напрямую через OpenAI
+  return await getQuoteViaOpenAI(lang, maxChars);
+}
+
+// --------- БЛОК: синтез голоса ---------
+
+async function synthesizeSpeech(text, lang) {
+  const fileName = `nova_voice_${Date.now()}.mp3`;
+  const outPath = path.join(DIR_AUDIO, fileName);
+
+  const res = await fetchFn("https://api.openai.com/v1/audio/speech", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_TTS_MODEL,
+      voice: "alloy",
       input: text,
       format: "mp3",
-      language: preset.language || lang,
     }),
   });
 
   if (!res.ok) {
-    const errTxt = await res.text();
-    throw new Error("OpenAI TTS error: " + errTxt);
+    const txt = await res.text().catch(() => "");
+    throw new Error(`OpenAI TTS HTTP ${res.status}: ${txt}`);
   }
 
   const arrayBuffer = await res.arrayBuffer();
-  const buf = Buffer.from(arrayBuffer);
-  const outPath = path.join(DIR_AUDIO, `voice_${Date.now()}_${lang}.mp3`);
-  await fs.writeFile(outPath, buf);
+  const buffer = Buffer.from(arrayBuffer);
+  await fs.writeFile(outPath, buffer);
+
   return outPath;
 }
 
-// ---------- 5. СКЛЕЙКА АУДИО + ВИДЕО ----------
+// --------- БЛОК: сборка видео ---------
 
-async function muxAudioVideo(bgVideoPath, audioPath, lang) {
-  await ensureDir(DIR_OUTPUT);
-  const outPath = path.join(
-    DIR_OUTPUT,
-    `novaciv_short_${lang}_${Date.now()}.mp4`
-  );
+async function createVideoWithSimpleBackground(audioPath) {
+  const fileName = `nova_short_${Date.now()}.mp4`;
+  const outPath = path.join(DIR_OUTPUT, fileName);
 
+  // Вертикальное видео 1080x1920, белый фон, длительность = длительности аудио (через -shortest)
   const args = [
+    "-y",
+    "-f",
+    "lavfi",
     "-i",
-    bgVideoPath,
+    "color=white:s=1080x1920",
+    "-loop",
+    "1",
     "-i",
     audioPath,
     "-c:v",
-    "copy",
+    "libx264",
+    "-tune",
+    "stillimage",
     "-c:a",
     "aac",
     "-shortest",
-    "-y",
+    "-pix_fmt",
+    "yuv420p",
     outPath,
   ];
 
   await execFfmpeg(args);
-  return outPath;
+  return { fileName, outPath };
 }
 
-// ---------- ЭКСПОНИРУЕМЫЙ КОНВЕЙЕР ----------
+// --------- ГЛАВНАЯ ФУНКЦИЯ КОНВЕЙЕРА ---------
 
-async function runPipeline(logger = console) {
-  await ensureEnv();
-  await ensureAllDirs();   // ← ДОБАВЛЕННАЯ СТРОКА
+async function runPipeline(logger = console, options = {}) {
+  ensureEnv();
+  await ensureAllDirs();
 
-  logger.log("🚀 NovaCiv pipeline start");
+  const lang = options.lang || "ru";
 
-  const preset = await readJson(PRESET_PATH);
-  const lang = getNextLanguage();
-  logger.log("🌐 Language:", lang);
+  logger.log("🚀 NovaCiv media pipeline started", { lang });
 
-  const textOptions = preset.text_source?.options || {};
-  const quote = await getQuoteFromDomovoy(lang, textOptions);
-  logger.log("💬 Quote:", quote);
+  const preset = await loadPreset();
 
-  const imagePath = await generateImageForQuote(quote, lang);
-  logger.log("🖼 Image:", imagePath);
+  const quote = await getQuote(preset, lang);
+  logger.log("📝 Quote:", quote);
 
-  const bgVideoPath = await animateImage(imagePath, preset.length_target_sec || 40);
-  logger.log("🎞 Animated bg:", bgVideoPath);
+  const audioPath = await synthesizeSpeech(quote, lang);
+  logger.log("🎧 Audio path:", audioPath);
 
-  const voicePresetName = preset.voice_presets[lang];
-  const audioPath = await generateSpeech(quote, lang, voicePresetName);
-  logger.log("🔊 Audio:", audioPath);
+  const video = await createVideoWithSimpleBackground(audioPath);
+  logger.log("🎬 Video path:", video.outPath);
 
-  const finalVideo = await muxAudioVideo(bgVideoPath, audioPath, lang);
-  logger.log("✅ Done:", finalVideo);
-
-  return { lang, quote, finalVideo };
+  return {
+    ok: true,
+    lang,
+    quote,
+    audioPath,
+    videoFile: video.fileName,
+    videoPath: video.outPath,
+  };
 }
 
-module.exports = { runPipeline };
-
-// Локальный запуск: node media/scripts/pipeline.js
-if (require.main === module) {
-  runPipeline(console).catch((err) => {
-    console.error("❌ Pipeline failed:", err);
-    process.exit(1);
-  });
-}
+module.exports = {
+  runPipeline,
+};

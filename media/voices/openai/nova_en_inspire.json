@@ -1,0 +1,13 @@
+{
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "voice": "alloy",
+  "language": "en",
+  "label": "NovaCiv English — inspiring",
+  "style": "inspire",
+  "rate": 1.05,
+  "pitch": 0.1,
+  "pause_ms_between_blocks": 250,
+  "max_block_duration_sec": 12,
+  "notes": "Чуть более быстрый и эмоциональный голос для коротких англоязычных роликов."
+}

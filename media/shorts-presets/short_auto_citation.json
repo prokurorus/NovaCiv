@@ -1,26 +1,18 @@
 {
   "id": "short_auto_citation",
+  "description": "Auto short with a meaningful NovaCiv quote (up to ~40 seconds)",
   "length_target_sec": 40,
-  "format": "9:16",
-  "background_video": "nova_loop_01.mp4",
-  "voice_presets": {
-    "ru": "nova_ru_calm",
-    "en": "nova_en_inspire",
-    "de": "nova_de_calm",
-    "es": "nova_es_calm"
-  },
   "text_source": {
-    "type": "domovoy_quote",
+    "type": "domovoy",
     "options": {
-      "from": ["manifest", "charter"],
-      "max_chars": 420
+      "max_chars": 420,
+      "from": ["manifesto", "charter"]
     }
   },
-  "cta_by_lang": {
-    "ru": "Подпишись на будущее планеты",
-    "en": "Subscribe to the future of our civilization",
-    "de": "Abonniere die Zukunft unserer Zivilisation",
-    "es": "Suscríbete al futuro de la civilización"
-  },
-  "site_overlay": "novaciv.space"
+  "voice_presets": {
+    "ru": "nova_ru_calm",
+    "en": "nova_en_calm",
+    "de": "nova_de_calm",
+    "es": "nova_es_calm"
+  }
 }

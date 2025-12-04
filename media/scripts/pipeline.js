@@ -213,8 +213,6 @@ async function createVideoWithSimpleBackground(audioPath) {
     "lavfi",
     "-i",
     "color=white:s=1080x1920",
-    "-loop",
-    "1",
     "-i",
     audioPath,
     "-c:v",
@@ -232,6 +230,7 @@ async function createVideoWithSimpleBackground(audioPath) {
   await execFfmpeg(args);
   return { fileName, outPath };
 }
+
 
 // --------- ГЛАВНАЯ ФУНКЦИЯ КОНВЕЙЕРА ---------
 

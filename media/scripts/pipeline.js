@@ -5,6 +5,9 @@ const fs = require("fs/promises");
 const path = require("path");
 const { execFile } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
+const VIDEO_SIZE = "720x1280";   // было 1080x1920
+const MAX_VIDEO_SEC = 20;        // режем до 20 секунд
+
 
 // Универсальный fetch: в Netlify (Node 18+) используем глобальный,
 // локально — динамический импорт node-fetch при необходимости.
@@ -266,29 +269,29 @@ async function createVideoWithSimpleBackground(audioPath) {
   const outPath = path.join(DIR_OUTPUT, fileName);
 
   // Вертикальное видео 1080x1920, белый фон, длительность = длительности аудио (через -shortest)
-  const args = [
-    "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    "color=white:s=1080x1920",
-    "-i",
-    audioPath,
-    "-c:v",
-    "libx264",
-    "-tune",
-    "stillimage",
-    "-c:a",
-    "aac",
-    "-shortest",
-    "-pix_fmt",
-    "yuv420p",
-    outPath,
-  ];
 
-  await execFfmpeg(args);
-  return { fileName, outPath };
-}
+const ffmpegArgs = [
+  "-y",
+  "-f",
+  "lavfi",
+  "-i",
+  `color=white:s=${VIDEO_SIZE}`,
+  "-i",
+  audioPath,
+  "-c:v",
+  "libx264",
+  "-tune",
+  "stillimage",
+  "-c:a",
+  "aac",
+  "-shortest",
+  "-pix_fmt",
+  "yuv420p",
+  "-t",
+  String(MAX_VIDEO_SEC), // максимум 20 сек
+  outputPath,
+];
+
 
 
 // --------- ГЛАВНАЯ ФУНКЦИЯ КОНВЕЙЕРА ---------

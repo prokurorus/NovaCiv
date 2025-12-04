@@ -1,23 +1,24 @@
 // netlify/functions/generate-video-background.js
-// Тяжёлый рендер видео (background-функция)
 
-const { runShortAutoCitation } = require("../../media/scripts/pipeline");
+const { runPipeline } = require("../../media/scripts/pipeline");
 
 exports.handler = async (event, context) => {
-  const lang =
-    (event.queryStringParameters && event.queryStringParameters.lang) ||
-    "ru";
-
   try {
-    const result = await runShortAutoCitation({ lang });
+    console.log("generate-video-background started", {
+      requestId: context && context.awsRequestId,
+      eventBody: event && event.body,
+    });
 
-    // Для background-функции ответ не важен, но пусть будет:
+    // Запускаем основной конвейер генерации шорта
+    const result = await runPipeline(console);
+
+    console.log("generate-video-background finished", result);
+
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        message: "Background video job finished",
-        result,
+        ...result,
       }),
     };
   } catch (err) {
@@ -27,7 +28,7 @@ exports.handler = async (event, context) => {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
-        error: err.message || String(err),
+        error: String(err),
       }),
     };
   }

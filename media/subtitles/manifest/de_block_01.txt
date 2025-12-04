@@ -1,0 +1,10 @@
+ID: manifest_de_01
+SOURCE: Manifest
+LANG: de
+
+Manchmal reicht eine einzige ehrliche Frage,
+um zu sehen, wie absurd unsere Welt geworden ist.
+
+NovaCiv verspricht kein Paradies und sucht keine Feinde.
+Sie stellt nur die Frage:
+Wenn wir so klug sind, warum fällt es uns so schwer, miteinander zu leben?

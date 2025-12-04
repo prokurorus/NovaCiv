@@ -1,0 +1,18 @@
+{
+  "id": "short_citation_ru_30",
+  "language": "ru",
+  "length": "30s",
+  "format": "9:16",
+  "voice_preset": "nova_ru_calm",
+  "background": "android-face-relief.png",
+  "source_type": "manifest",
+  "text_block_id": "manifest_ru_01",
+  "cta": {
+    "text": "Подпишись на будущее планеты",
+    "position": "end"
+  },
+  "overlay_site": {
+    "text": "novaciv.space",
+    "position": "bottom"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "short_citation_de_30",
+  "language": "de",
+  "length": "30s",
+  "format": "9:16",
+  "voice_preset": "nova_de_calm",
+  "background": "android-face-relief.png",
+  "source_type": "manifest",
+  "text_block_id": "manifest_de_01",
+  "cta": {
+    "text": "Abonniere die Zukunft der Zivilisation",
+    "position": "end"
+  },
+  "overlay_site": {
+    "text": "novaciv.space",
+    "position": "bottom"
+  }
+}

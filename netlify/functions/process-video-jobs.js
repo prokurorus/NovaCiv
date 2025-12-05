@@ -101,7 +101,7 @@ function mergeVideoAndAudio(videoPath, audioPath, outputPath) {
 
 async function sendToTelegram(finalVideoPath, job) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHANNEL_ID; // @channelusername или id
+  const chatId = process.env.TELEGRAM_CHAT_ID;  // @channelusername или id
 
   if (!botToken || !chatId) {
     throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHANNEL_ID not set");

@@ -20,7 +20,6 @@ function initFirebase() {
 
     const serviceAccount = JSON.parse(serviceAccountJson);
 
-    // URL БД: берём из переменных окружения
     const dbUrl =
       process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
     if (!dbUrl) {
@@ -39,8 +38,8 @@ function initFirebase() {
   return admin.database();
 }
 
-// выбираем одну задачу со статусом "pending"
-async function getPendingJob(db) {
+// выбираем одну задачу со статусом "pending" ИЛИ "processing"
+async function getNextJob(db) {
   const snapshot = await db.ref("videoJobs").once("value");
   const val = snapshot.val();
   if (!val) return null;
@@ -54,9 +53,12 @@ async function getPendingJob(db) {
     return aCreated - bCreated;
   });
 
-  // берём первую задачу со статусом "pending"
+  // берём первую задачу, которая ещё не завершена
   for (const [key, job] of entries) {
-    if (job.status === "pending") {
+    const status = (job.status || "pending").toLowerCase();
+
+    // обрабатываем и "pending", и старые "processing"
+    if (status === "pending" || status === "processing") {
       return { key, job };
     }
   }
@@ -70,7 +72,7 @@ function getTelegramChatIdForLang(lang) {
   const ru = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
   const de = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
-  switch (lang) {
+  switch ((lang || "ru").toLowerCase()) {
     case "ru":
       return ru || base;
     case "de":
@@ -101,7 +103,7 @@ async function sendToTelegram(finalVideoPath, job) {
   form.append("chat_id", chatId);
   form.append("supports_streaming", "true");
 
-  // аккуратная подпись под роликом
+  // подпись под роликом
   const captionLines = [];
 
   if (job.topic) {
@@ -109,7 +111,6 @@ async function sendToTelegram(finalVideoPath, job) {
   }
 
   if (job.script) {
-    // обрежем скрипт, чтобы не захламлять подпись
     const text =
       job.script.length > 350
         ? job.script.slice(0, 347) + "..."
@@ -135,30 +136,29 @@ async function sendToTelegram(finalVideoPath, job) {
   });
 }
 
-// основная логика: взять задачу → сделать видео → отправить → очистить
 exports.handler = async () => {
   try {
     const db = initFirebase();
 
-    // 1. ищем задачу
-    const pending = await getPendingJob(db);
-    if (!pending) {
+    // 1. ищем любую активную задачу (pending или processing)
+    const next = await getNextJob(db);
+    if (!next) {
       return {
         statusCode: 200,
         body: JSON.stringify({ ok: true, message: "no pending jobs" }),
       };
     }
 
-    const { key, job } = pending;
+    const { key, job } = next;
     const lang = job.language || "ru";
 
-    // 2. помечаем как "processing"
+    // 2. помечаем как "processing" (ещё раз, даже если уже был такой статус)
     await db.ref(`videoJobs/${key}`).update({
       status: "processing",
       processingStartedAt: Date.now(),
     });
 
-    // 3. запускаем наш конвейер
+    // 3. запускаем конвейер
     const result = await runPipeline(console, { lang });
 
     const finalPath =
@@ -170,13 +170,13 @@ exports.handler = async () => {
     // 4. шлём в Telegram
     await sendToTelegram(finalPath, job);
 
-    // 5. обновляем мету (язык последнего ролика и время)
+    // 5. обновляем мету
     await db.ref("videoJobsMeta").update({
       lastLang: lang,
       updatedAt: Date.now(),
     });
 
-    // 6. удаляем задачу из очереди (освобождаем место, как ты и хотел)
+    // 6. удаляем задачу (как ты и хотел, чтобы БД не росла бесконечно)
     await db.ref(`videoJobs/${key}`).remove();
 
     return {

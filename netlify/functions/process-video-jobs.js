@@ -2,168 +2,145 @@
 
 const admin = require("firebase-admin");
 const fs = require("fs");
+const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
 
-// наш уже настроенный конвейер видео NovaCiv
+// наш конвейер генерации видео
 const { runPipeline } = require("../../media/scripts/pipeline");
 
 let initialized = false;
 
-function init() {
+function initFirebase() {
   if (!initialized) {
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
     if (!serviceAccountJson) {
       throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
     }
+
     const serviceAccount = JSON.parse(serviceAccountJson);
 
-    const databaseURL =
-      process.env.FIREBASE_DB_URL ||
-      process.env.FIREBASE_DATABASE_URL ||
-      "https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app";
+    // URL БД: берём из переменных окружения
+    const dbUrl =
+      process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
+    if (!dbUrl) {
+      throw new Error(
+        "FIREBASE_DB_URL или FIREBASE_DATABASE_URL не задана (Firebase Realtime DB URL)"
+      );
+    }
 
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      databaseURL,
+      databaseURL: dbUrl,
     });
 
     initialized = true;
   }
+  return admin.database();
 }
 
-// берём первое задание со статусом "pending"
+// выбираем одну задачу со статусом "pending"
 async function getPendingJob(db) {
-  const snapshot = await db
-    .ref("videoJobs")
-    .orderByChild("status")
-    .equalTo("pending")
-    .limitToFirst(1)
-    .once("value");
-
+  const snapshot = await db.ref("videoJobs").once("value");
   const val = snapshot.val();
   if (!val) return null;
 
-  const key = Object.keys(val)[0];
-  return { key, job: val[key] };
-}
+  const entries = Object.entries(val);
 
-// ---------- ЯЗЫК / КАНАЛ / ПОДПИСЬ ----------
-
-function resolveLang(job) {
-  return (job.language || "ru").toLowerCase();
-}
-
-function resolveTelegramChatId(job) {
-  const lang = resolveLang(job);
-
-  // отдельные каналы
-  if (lang === "ru") {
-    return (
-      process.env.TELEGRAM_NEWS_CHAT_ID_RU ||
-      process.env.TELEGRAM_NEWS_CHAT_ID ||
-      process.env.TELEGRAM_CHAT_ID
-    );
-  }
-
-  if (lang === "de") {
-    return (
-      process.env.TELEGRAM_NEWS_CHAT_ID_DE ||
-      process.env.TELEGRAM_NEWS_CHAT_ID ||
-      process.env.TELEGRAM_CHAT_ID
-    );
-  }
-
-  if (lang === "en") {
-    return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-  }
-
-  if (lang === "es") {
-    // пока отдельного канала нет — кидаем в общий англ / основной
-    return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-  }
-
-  // запасной вариант
-  return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
-}
-
-function resolveCaption(job) {
-  const lang = resolveLang(job);
-
-  const captions = {
-    ru:
-      "NovaCiv — цифровая цивилизация без правителей.\n" +
-      "Войти в сознание: https://novaciv.space",
-    en:
-      "NovaCiv — a digital civilization without rulers.\n" +
-      "Enter consciousness: https://novaciv.space",
-    de:
-      "NovaCiv – eine digitale Zivilisation ohne Herrscher.\n" +
-      "Betritt das Bewusstsein: https://novaciv.space",
-    es:
-      "NovaCiv — una civilización digital sin gobernantes.\n" +
-      "Entra en la conciencia: https://novaciv.space",
-  };
-
-  return captions[lang] || captions.en;
-}
-
-// ---------- ГЕНЕРАЦИЯ ВИДЕО ----------
-
-// генерируем видео через наш pipeline (как он есть сейчас)
-async function generateVideoWithPipeline(job) {
-  const language = resolveLang(job);
-
-  // ВАЖНО: первый аргумент — logger (console), второй — options.
-  // Здесь можно будет доуточнять пресеты / фон, не трогая функции.
-  const result = await runPipeline(console, {
-    lang: language,
-    preset: job.preset || "short_auto_citation",
+  // сортируем по времени создания (FIFO)
+  entries.sort((a, b) => {
+    const aCreated = a[1].createdAt || 0;
+    const bCreated = b[1].createdAt || 0;
+    return aCreated - bCreated;
   });
 
-  // pipeline возвращает пути к файлам
-  const finalPath =
-    result.videoPath || result.outputPath || result.finalVideoPath;
-
-  if (!finalPath) {
-    throw new Error("Pipeline did not return final video path");
+  // берём первую задачу со статусом "pending"
+  for (const [key, job] of entries) {
+    if (job.status === "pending") {
+      return { key, job };
+    }
   }
 
-  return finalPath;
+  return null;
 }
 
-// ---------- ОТПРАВКА В TELEGRAM ----------
+// выбор правильного чата по языку
+function getTelegramChatIdForLang(lang) {
+  const base = process.env.TELEGRAM_NEWS_CHAT_ID;
+  const ru = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
+  const de = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
+  switch (lang) {
+    case "ru":
+      return ru || base;
+    case "de":
+      return de || base;
+    // en / es и всё остальное — базовый канал
+    default:
+      return base;
+  }
+}
+
+// отправка готового файла в Telegram
 async function sendToTelegram(finalVideoPath, job) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = resolveTelegramChatId(job);
-
-  if (!botToken || !chatId) {
-    throw new Error("TELEGRAM_BOT_TOKEN or Telegram Chat ID not set");
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN не задан");
   }
 
-  const caption = resolveCaption(job);
+  const chatId = getTelegramChatIdForLang(job.language || "ru");
+  if (!chatId) {
+    throw new Error(
+      "Не задан chat_id для Telegram (TELEGRAM_NEWS_CHAT_ID* переменные)"
+    );
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendVideo`;
 
   const form = new FormData();
   form.append("chat_id", chatId);
-  form.append("caption", caption);
   form.append("supports_streaming", "true");
-  form.append("video", fs.createReadStream(finalVideoPath));
 
-  const url = `https://api.telegram.org/bot${botToken}/sendVideo`;
+  // аккуратная подпись под роликом
+  const captionLines = [];
+
+  if (job.topic) {
+    captionLines.push(job.topic);
+  }
+
+  if (job.script) {
+    // обрежем скрипт, чтобы не захламлять подпись
+    const text =
+      job.script.length > 350
+        ? job.script.slice(0, 347) + "..."
+        : job.script;
+    captionLines.push(text);
+  }
+
+  captionLines.push("");
+  captionLines.push("https://novaciv.space");
+
+  form.append("caption", captionLines.join("\n"));
+
+  const fileStream = fs.createReadStream(finalVideoPath);
+  form.append("video", fileStream, {
+    filename: path.basename(finalVideoPath),
+    contentType: "video/mp4",
+  });
 
   await axios.post(url, form, {
     headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
   });
 }
 
-// ---------- HANDLER ----------
-
-exports.handler = async (event, context) => {
+// основная логика: взять задачу → сделать видео → отправить → очистить
+exports.handler = async () => {
   try {
-    init();
-    const db = admin.database();
+    const db = initFirebase();
 
+    // 1. ищем задачу
     const pending = await getPendingJob(db);
     if (!pending) {
       return {
@@ -173,14 +150,33 @@ exports.handler = async (event, context) => {
     }
 
     const { key, job } = pending;
-    console.log("Processing video job", key, "lang:", resolveLang(job));
+    const lang = job.language || "ru";
 
-    await db.ref(`videoJobs/${key}/status`).set("processing");
+    // 2. помечаем как "processing"
+    await db.ref(`videoJobs/${key}`).update({
+      status: "processing",
+      processingStartedAt: Date.now(),
+    });
 
-    const finalPath = await generateVideoWithPipeline(job);
+    // 3. запускаем наш конвейер
+    const result = await runPipeline(console, { lang });
 
+    const finalPath =
+      result.videoPath || result.outputPath || result.finalVideoPath;
+    if (!finalPath) {
+      throw new Error("Pipeline did not return final video path");
+    }
+
+    // 4. шлём в Telegram
     await sendToTelegram(finalPath, job);
 
+    // 5. обновляем мету (язык последнего ролика и время)
+    await db.ref("videoJobsMeta").update({
+      lastLang: lang,
+      updatedAt: Date.now(),
+    });
+
+    // 6. удаляем задачу из очереди (освобождаем место, как ты и хотел)
     await db.ref(`videoJobs/${key}`).remove();
 
     return {
@@ -188,7 +184,8 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({ ok: true, processed: key }),
     };
   } catch (err) {
-    console.error(err);
+    console.error("process-video-jobs error:", err);
+
     return {
       statusCode: 500,
       body: JSON.stringify({ ok: false, error: err.message }),

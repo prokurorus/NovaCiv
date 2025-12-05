@@ -259,11 +259,9 @@ async function createVideoWithSimpleBackground(audioPath) {
     "stillimage",
     "-c:a",
     "aac",
-    "-shortest",
+    "-shortest",          // длительность берём по самому короткому потоку (аудио)
     "-pix_fmt",
     "yuv420p",
-    "-t",
-    String(MAX_VIDEO_SEC),
     outPath,
   ];
 
@@ -271,6 +269,7 @@ async function createVideoWithSimpleBackground(audioPath) {
 
   return { fileName, outPath };
 }
+
 
 // ---------- Главная функция конвейера ----------
 

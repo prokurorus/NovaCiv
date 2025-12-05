@@ -18,10 +18,15 @@ function init() {
     }
     const serviceAccount = JSON.parse(serviceAccountJson);
 
+    // Тот же надёжный механизм, что и в create-video-job
+    const databaseURL =
+      process.env.FIREBASE_DB_URL ||
+      process.env.FIREBASE_DATABASE_URL ||
+      "https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app";
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      // ВАЖНО: используем именно FIREBASE_DB_URL (как в переменных Netlify)
-      databaseURL: process.env.FIREBASE_DB_URL,
+      databaseURL,
     });
 
     initialized = true;
@@ -62,9 +67,7 @@ async function generateVideoWithPipeline(job) {
 
   // подстрахуемся на случай разных имён полей
   const finalPath =
-    result.finalVideoPath ||
-    result.outputPath ||
-    result.videoPath;
+    result.finalVideoPath || result.outputPath || result.videoPath;
 
   if (!finalPath) {
     throw new Error("Pipeline did not return final video path");

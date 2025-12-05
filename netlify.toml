@@ -12,7 +12,12 @@
   status = 200
 
 [functions]
+  # кладём статические файлы (фоновые картинки и т.п.)
   included_files = ["media/**"]
+  # говорим Netlify не упаковывать ffmpeg-static внутрь бандла, а подложить как внешний модуль
+  external_node_modules = ["ffmpeg-static"]
+  # на всякий случай фиксируем бандлер
+  node_bundler = "esbuild"
 
 [functions."news-cron"]
   # Раз в час по UTC

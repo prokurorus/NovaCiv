@@ -48,17 +48,82 @@ async function getPendingJob(db) {
   return { key, job: val[key] };
 }
 
+// ---------- ЯЗЫК / КАНАЛ / ПОДПИСЬ ----------
+
+function resolveLang(job) {
+  return (job.language || "ru").toLowerCase();
+}
+
+function resolveTelegramChatId(job) {
+  const lang = resolveLang(job);
+
+  // отдельные каналы
+  if (lang === "ru") {
+    return (
+      process.env.TELEGRAM_NEWS_CHAT_ID_RU ||
+      process.env.TELEGRAM_NEWS_CHAT_ID ||
+      process.env.TELEGRAM_CHAT_ID
+    );
+  }
+
+  if (lang === "de") {
+    return (
+      process.env.TELEGRAM_NEWS_CHAT_ID_DE ||
+      process.env.TELEGRAM_NEWS_CHAT_ID ||
+      process.env.TELEGRAM_CHAT_ID
+    );
+  }
+
+  if (lang === "en") {
+    return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  }
+
+  if (lang === "es") {
+    // пока отдельного канала нет — кидаем в общий англ / основной
+    return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  }
+
+  // запасной вариант
+  return process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+}
+
+function resolveCaption(job) {
+  const lang = resolveLang(job);
+
+  const captions = {
+    ru:
+      "NovaCiv — цифровая цивилизация без правителей.\n" +
+      "Войти в сознание: https://novaciv.space",
+    en:
+      "NovaCiv — a digital civilization without rulers.\n" +
+      "Enter consciousness: https://novaciv.space",
+    de:
+      "NovaCiv – eine digitale Zivilisation ohne Herrscher.\n" +
+      "Betritt das Bewusstsein: https://novaciv.space",
+    es:
+      "NovaCiv — una civilización digital sin gobernantes.\n" +
+      "Entra en la conciencia: https://novaciv.space",
+  };
+
+  return captions[lang] || captions.en;
+}
+
+// ---------- ГЕНЕРАЦИЯ ВИДЕО ----------
+
 // генерируем видео через наш pipeline (как он есть сейчас)
 async function generateVideoWithPipeline(job) {
-  const language = job.language || "ru";
+  const language = resolveLang(job);
 
-  // ВАЖНО: первый аргумент — logger (console), второй — options
+  // ВАЖНО: первый аргумент — logger (console), второй — options.
+  // Здесь можно будет доуточнять пресеты / фон, не трогая функции.
   const result = await runPipeline(console, {
     lang: language,
+    preset: job.preset || "short_auto_citation",
   });
 
-  // pipeline сейчас возвращает videoPath и прочие поля
-  const finalPath = result.videoPath || result.outputPath || result.finalVideoPath;
+  // pipeline возвращает пути к файлам
+  const finalPath =
+    result.videoPath || result.outputPath || result.finalVideoPath;
 
   if (!finalPath) {
     throw new Error("Pipeline did not return final video path");
@@ -67,18 +132,17 @@ async function generateVideoWithPipeline(job) {
   return finalPath;
 }
 
-// отправка готового файла в Telegram
+// ---------- ОТПРАВКА В TELEGRAM ----------
+
 async function sendToTelegram(finalVideoPath, job) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const chatId = resolveTelegramChatId(job);
 
   if (!botToken || !chatId) {
-    throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set");
+    throw new Error("TELEGRAM_BOT_TOKEN or Telegram Chat ID not set");
   }
 
-  const caption =
-    "NovaCiv — цифровая цивилизация без правителей.\n" +
-    "Войти в сознание: https://novaciv.space";
+  const caption = resolveCaption(job);
 
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -92,6 +156,8 @@ async function sendToTelegram(finalVideoPath, job) {
     headers: form.getHeaders(),
   });
 }
+
+// ---------- HANDLER ----------
 
 exports.handler = async (event, context) => {
   try {
@@ -107,7 +173,7 @@ exports.handler = async (event, context) => {
     }
 
     const { key, job } = pending;
-    console.log("Processing video job", key);
+    console.log("Processing video job", key, "lang:", resolveLang(job));
 
     await db.ref(`videoJobs/${key}/status`).set("processing");
 

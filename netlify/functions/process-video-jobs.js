@@ -48,25 +48,17 @@ async function getPendingJob(db) {
   return { key, job: val[key] };
 }
 
-// генерируем видео через наш pipeline
+// генерируем видео через наш pipeline (как он есть сейчас)
 async function generateVideoWithPipeline(job) {
   const language = job.language || "ru";
-  const text = job.script;
-  const topic = job.topic || "NovaCiv";
 
-  // ВАЖНО: logger передаём вторым аргументом, а не полем объекта
-  const result = await runPipeline(
-    {
-      preset: "short_auto_citation",
-      language,
-      quoteText: text,
-      quoteSource: topic,
-    },
-    console // logger, у которого есть .log, .error и т.п.
-  );
+  // ВАЖНО: первый аргумент — logger (console), второй — options
+  const result = await runPipeline(console, {
+    lang: language,
+  });
 
-  const finalPath =
-    result.finalVideoPath || result.outputPath || result.videoPath;
+  // pipeline сейчас возвращает videoPath и прочие поля
+  const finalPath = result.videoPath || result.outputPath || result.finalVideoPath;
 
   if (!finalPath) {
     throw new Error("Pipeline did not return final video path");

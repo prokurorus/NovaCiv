@@ -1,15 +1,14 @@
 // netlify/functions/process-video-jobs.js
 
 const admin = require("firebase-admin");
-const OpenAI = require("openai");
 const fs = require("fs");
-const path = require("path");
-const { execSync } = require("child_process");
 const axios = require("axios");
 const FormData = require("form-data");
 
+// наш уже настроенный конвейер видео NovaCiv
+const { runPipeline } = require("../../media/scripts/pipeline");
+
 let initialized = false;
-let openai;
 
 function init() {
   if (!initialized) {
@@ -21,17 +20,15 @@ function init() {
 
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-    });
-
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      // ВАЖНО: используем именно FIREBASE_DB_URL (как в переменных Netlify)
+      databaseURL: process.env.FIREBASE_DB_URL,
     });
 
     initialized = true;
   }
 }
 
+// берём первое задание со статусом "pending"
 async function getPendingJob(db) {
   const snapshot = await db
     .ref("videoJobs")
@@ -47,64 +44,42 @@ async function getPendingJob(db) {
   return { key, job: val[key] };
 }
 
-async function generateVideo(job) {
-  // 1. создаём видео через Sora
-  const videoJob = await openai.videos.create({
-    model: "sora-2",
-    prompt: job.prompt,
-    size: "720x1280",
-    seconds: "8",
+// генерируем видео через наш pipeline (без Sora)
+async function generateVideoWithPipeline(job) {
+  // минимальный набор полей для конвейера
+  const language = job.language || "ru";
+  const text = job.script;
+  const topic = job.topic || "NovaCiv";
+
+  // runPipeline уже знает, как делать короткий ролик
+  // (цитата + фон + TTS + ffmpeg)
+  const result = await runPipeline({
+    preset: "short_auto_citation",
+    language,
+    quoteText: text,
+    quoteSource: topic,
   });
 
-  let current;
-  // 2. ждём, пока job станет completed
-  for (;;) {
-    current = await openai.videos.retrieve(videoJob.id);
-    if (current.status === "completed") break;
-    if (current.status === "failed") {
-      throw new Error("Video generation failed: " + JSON.stringify(current.error));
-    }
-    // немного подождать перед следующей проверкой
-    await new Promise((r) => setTimeout(r, 5000));
+  // подстрахуемся на случай разных имён полей
+  const finalPath =
+    result.finalVideoPath ||
+    result.outputPath ||
+    result.videoPath;
+
+  if (!finalPath) {
+    throw new Error("Pipeline did not return final video path");
   }
 
-  // 3. качаем контент
-  const response = await openai.videos.downloadContent(videoJob.id);
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  const videoPath = path.join("/tmp", `video-${videoJob.id}.mp4`);
-  fs.writeFileSync(videoPath, buffer);
-
-  return videoPath;
+  return finalPath;
 }
 
-async function generateVoice(job) {
-  const speechResponse = await openai.audio.speech.create({
-    model: "gpt-4o-mini-tts",
-    voice: "alloy",
-    input: job.script,
-  });
-
-  const speechBuffer = Buffer.from(await speechResponse.arrayBuffer());
-  const audioPath = path.join("/tmp", `voice-${job.id}.mp3`);
-  fs.writeFileSync(audioPath, speechBuffer);
-
-  return audioPath;
-}
-
-function mergeVideoAndAudio(videoPath, audioPath, outputPath) {
-  // ffmpeg должен быть доступен в среде (binary в репо или layer)
-  const cmd = `ffmpeg -y -i "${videoPath}" -i "${audioPath}" -map 0:v -map 1:a -c:v copy -c:a aac -shortest "${outputPath}"`;
-  execSync(cmd, { stdio: "inherit" });
-}
-
+// отправка готового файла в Telegram
 async function sendToTelegram(finalVideoPath, job) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;  // @channelusername или id
+  const chatId = process.env.TELEGRAM_CHAT_ID; // можно использовать канал/чат для роликов
 
   if (!botToken || !chatId) {
-    throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHANNEL_ID not set");
+    throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set");
   }
 
   const caption =
@@ -129,6 +104,7 @@ exports.handler = async (event, context) => {
     init();
     const db = admin.database();
 
+    // 1. ищем задание
     const pending = await getPendingJob(db);
     if (!pending) {
       return {
@@ -138,21 +114,18 @@ exports.handler = async (event, context) => {
     }
 
     const { key, job } = pending;
-
     console.log("Processing video job", key);
 
-    // помечаем как "processing", чтобы не взяли второй раз
+    // 2. помечаем как "processing", чтобы не схватить второй раз
     await db.ref(`videoJobs/${key}/status`).set("processing");
 
-    const videoPath = await generateVideo(job);
-    const audioPath = await generateVoice(job);
+    // 3. генерим видео через готовый ffmpeg-конвейер
+    const finalPath = await generateVideoWithPipeline(job);
 
-    const finalPath = path.join("/tmp", `final-${job.id}.mp4`);
-    mergeVideoAndAudio(videoPath, audioPath, finalPath);
-
+    // 4. шлём в Telegram
     await sendToTelegram(finalPath, job);
 
-    // после успешной отправки — удаляем задание (как ты и хотел)
+    // 5. удаляем задание, чтобы не забивать БД
     await db.ref(`videoJobs/${key}`).remove();
 
     return {

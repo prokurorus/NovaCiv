@@ -18,7 +18,6 @@ function init() {
     }
     const serviceAccount = JSON.parse(serviceAccountJson);
 
-    // Тот же надёжный механизм, что и в create-video-job
     const databaseURL =
       process.env.FIREBASE_DB_URL ||
       process.env.FIREBASE_DATABASE_URL ||
@@ -49,23 +48,21 @@ async function getPendingJob(db) {
   return { key, job: val[key] };
 }
 
-// генерируем видео через наш pipeline (без Sora)
+// генерируем видео через наш pipeline
 async function generateVideoWithPipeline(job) {
-  // минимальный набор полей для конвейера
   const language = job.language || "ru";
   const text = job.script;
   const topic = job.topic || "NovaCiv";
 
-  // runPipeline уже знает, как делать короткий ролик
-  // (цитата + фон + TTS + ffmpeg)
+  // КРИТИЧНО: передаём logger: console, чтобы внутри не было logger.log is not a function
   const result = await runPipeline({
     preset: "short_auto_citation",
     language,
     quoteText: text,
     quoteSource: topic,
+    logger: console,
   });
 
-  // подстрахуемся на случай разных имён полей
   const finalPath =
     result.finalVideoPath || result.outputPath || result.videoPath;
 
@@ -79,7 +76,7 @@ async function generateVideoWithPipeline(job) {
 // отправка готового файла в Telegram
 async function sendToTelegram(finalVideoPath, job) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID; // можно использовать канал/чат для роликов
+  const chatId = process.env.TELEGRAM_CHAT_ID;
 
   if (!botToken || !chatId) {
     throw new Error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set");
@@ -107,7 +104,6 @@ exports.handler = async (event, context) => {
     init();
     const db = admin.database();
 
-    // 1. ищем задание
     const pending = await getPendingJob(db);
     if (!pending) {
       return {
@@ -119,16 +115,12 @@ exports.handler = async (event, context) => {
     const { key, job } = pending;
     console.log("Processing video job", key);
 
-    // 2. помечаем как "processing", чтобы не схватить второй раз
     await db.ref(`videoJobs/${key}/status`).set("processing");
 
-    // 3. генерим видео через готовый ffmpeg-конвейер
     const finalPath = await generateVideoWithPipeline(job);
 
-    // 4. шлём в Telegram
     await sendToTelegram(finalPath, job);
 
-    // 5. удаляем задание, чтобы не забивать БД
     await db.ref(`videoJobs/${key}`).remove();
 
     return {

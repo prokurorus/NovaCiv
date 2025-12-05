@@ -1,14 +1,13 @@
 // media/scripts/pipeline.js
-// Автоконвейер NovaCiv: цитата → голос → видео (вертикальный ролик)
+// Автоконвейер NovaCiv: цитата → голос → картинка → видео (вертикальный ролик)
 
 const fs = require("fs/promises");
 const path = require("path");
 const { execFile } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
 
-// Вертикальный размер попроще — чтобы быстрее рендерилось и точно успевало за 30 сек
+// Вертикальный размер попроще — чтобы быстрее рендерилось
 const VIDEO_SIZE = "720x1280";
-const MAX_VIDEO_SEC = 20;
 
 // ---------- Универсальный fetch ----------
 
@@ -21,6 +20,7 @@ const fetchFn =
 const WRITABLE_ROOT = "/tmp/novaciv-media";
 const DIR_AUDIO = path.join(WRITABLE_ROOT, "audio");
 const DIR_OUTPUT = path.join(WRITABLE_ROOT, "output");
+const DIR_IMAGES = path.join(WRITABLE_ROOT, "images");
 
 // Пресет для шортов (лежит в репо, читаем как обычный файл только для настроек)
 const PRESET_PATH = path.join(
@@ -43,7 +43,7 @@ function ensureEnv() {
 
 // Гарантируем каталоги в /tmp
 async function ensureAllDirs() {
-  for (const dir of [WRITABLE_ROOT, DIR_AUDIO, DIR_OUTPUT]) {
+  for (const dir of [WRITABLE_ROOT, DIR_AUDIO, DIR_OUTPUT, DIR_IMAGES]) {
     await fs.mkdir(dir, { recursive: true });
   }
 }
@@ -239,7 +239,63 @@ async function synthesizeSpeech(text, lang) {
   }
 }
 
-// ---------- Сборка видео (простой белый фон) ----------
+// ---------- Генерация фоновой картинки через OpenAI ----------
+
+async function generateBackgroundImage(quote, lang) {
+  const fileName = `nova_bg_${Date.now()}.png`;
+  const outPath = path.join(DIR_IMAGES, fileName);
+
+  const basePromptByLang = {
+    ru: `Ультраминималистичный белый барельеф, цифровая цивилизация NovaCiv: абстрактные человеческие силуэты, линии нейросети и мягкий свет. Никакого текста, логотипов или букв. Вертикальная композиция, 9:16, чистый белый фон с мягкими серыми тенями.`,
+    en: `Ultra-minimalist white bas-relief, digital civilization NovaCiv: abstract human silhouettes, neural network lines and soft light. No text, no logos or letters. Vertical 9:16 composition, clean white background with soft grey shadows.`,
+    de: `Ultraminimalistisches weißes Relief einer digitalen Zivilisation NovaCiv: abstrakte Menschensilhouetten, Linien eines neuronalen Netzes und weiches Licht. Kein Text, keine Logos oder Buchstaben. Vertikales 9:16-Format, weißer Hintergrund mit sanften grauen Schatten.`,
+    es: `Ilustración ultraminimalista en relieve blanco de la civilización digital NovaCiv: siluetas humanas abstractas, líneas de red neuronal y luz suave. Sin texto, sin logotipos ni letras. Composición vertical 9:16, fondo blanco limpio con sombras grises suaves.`,
+  };
+
+  const basePrompt = basePromptByLang[lang] || basePromptByLang.en;
+
+  const fullPrompt = `${basePrompt} Sutilmente refleja настроение этой цитаты: "${quote}".`;
+
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.openai.com/v1/images/generations",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-image-1",
+          prompt: fullPrompt,
+          n: 1,
+          size: "1024x1792", // вертикальное изображение
+        }),
+      },
+      20000
+    );
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`OpenAI image HTTP ${res.status}: ${txt}`);
+    }
+
+    const data = await res.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    if (!b64) {
+      throw new Error("OpenAI image: empty response");
+    }
+
+    const buffer = Buffer.from(b64, "base64");
+    await fs.writeFile(outPath, buffer);
+    return outPath;
+  } catch (err) {
+    console.error("Image generation error, fallback to white background:", err);
+    return null;
+  }
+}
+
+// ---------- Сборка видео (фон: картинка или белый) ----------
 
 async function createVideoWithSimpleBackground(audioPath) {
   const fileName = `nova_short_${Date.now()}.mp4`;
@@ -259,7 +315,7 @@ async function createVideoWithSimpleBackground(audioPath) {
     "stillimage",
     "-c:a",
     "aac",
-    "-shortest",          // длительность берём по самому короткому потоку (аудио)
+    "-shortest",
     "-pix_fmt",
     "yuv420p",
     outPath,
@@ -270,6 +326,36 @@ async function createVideoWithSimpleBackground(audioPath) {
   return { fileName, outPath };
 }
 
+async function createVideoWithImageBackground(imagePath, audioPath) {
+  const fileName = `nova_short_${Date.now()}.mp4`;
+  const outPath = path.join(DIR_OUTPUT, fileName);
+
+  const ffmpegArgs = [
+    "-y",
+    "-loop",
+    "1",
+    "-i",
+    imagePath,
+    "-i",
+    audioPath,
+    "-vf",
+    `scale=${VIDEO_SIZE}:force_original_aspect_ratio=cover,format=yuv420p`,
+    "-c:v",
+    "libx264",
+    "-tune",
+    "stillimage",
+    "-c:a",
+    "aac",
+    "-shortest",
+    "-pix_fmt",
+    "yuv420p",
+    outPath,
+  ];
+
+  await execFfmpeg(ffmpegArgs);
+
+  return { fileName, outPath };
+}
 
 // ---------- Главная функция конвейера ----------
 
@@ -289,7 +375,18 @@ async function runPipeline(logger = console, options = {}) {
   const audioPath = await synthesizeSpeech(quote, lang);
   logger.log("🎧 Audio path:", audioPath);
 
-  const video = await createVideoWithSimpleBackground(audioPath);
+  // Пытаемся сгенерировать уникальный фон
+  const imagePath = await generateBackgroundImage(quote, lang);
+  if (imagePath) {
+    logger.log("🖼️ Image path:", imagePath);
+  } else {
+    logger.log("🖼️ Image generation failed, using white background");
+  }
+
+  const video = imagePath
+    ? await createVideoWithImageBackground(imagePath, audioPath)
+    : await createVideoWithSimpleBackground(audioPath);
+
   logger.log("🎬 Video path:", video.outPath);
 
   return {
@@ -297,6 +394,7 @@ async function runPipeline(logger = console, options = {}) {
     lang,
     quote,
     audioPath,
+    imagePath: imagePath || null,
     videoFile: video.fileName,
     videoPath: video.outPath,
   };

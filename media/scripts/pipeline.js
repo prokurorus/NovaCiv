@@ -313,8 +313,14 @@ async function createVideoWithImageBackground(imagePath, audioPath) {
   const fileName = `nova_short_${Date.now()}.mp4`;
   const outPath = path.join(DIR_OUTPUT, fileName);
 
-  // Масштабируем картинку, сохраняя пропорции, и дополняем до 720x1280 белыми полями
-  const filter = `scale=${VIDEO_SIZE}:force_original_aspect_ratio=decrease,pad=${VIDEO_SIZE}:(ow-iw)/2:(oh-ih)/2:white,format=yuv420p`;
+  // 1) Масштабируем так, чтобы картинка полностью покрывала 720x1280,
+  //    сохраняя пропорции (increase = не сжимать по меньшей стороне).
+  // 2) Обрезаем лишнее до точного размера 720x1280.
+  // 3) Приводим к формату yuv420p для максимальной совместимости.
+  const filter =
+    "scale=720:1280:force_original_aspect_ratio=increase," +
+    "crop=720:1280," +
+    "format=yuv420p";
 
   const ffmpegArgs = [
     "-y",

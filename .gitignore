@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# DO NOT COMMIT FIREBASE SERVICE ACCOUNT KEYS
+*firebase-adminsdk-*.json

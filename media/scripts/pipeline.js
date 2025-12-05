@@ -22,6 +22,10 @@ const DIR_AUDIO = path.join(WRITABLE_ROOT, "audio");
 const DIR_OUTPUT = path.join(WRITABLE_ROOT, "output");
 const DIR_IMAGES = path.join(WRITABLE_ROOT, "images");
 
+// Фоны лежат в репозитории: media/backgrounds
+const BACKGROUNDS_ROOT = path.join(__dirname, "..", "backgrounds");
+
+
 // Пресет для шортов (лежит в репо, читаем как обычный файл только для настроек)
 const PRESET_PATH = path.join(
   __dirname,

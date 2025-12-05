@@ -54,14 +54,16 @@ async function generateVideoWithPipeline(job) {
   const text = job.script;
   const topic = job.topic || "NovaCiv";
 
-  // КРИТИЧНО: передаём logger: console, чтобы внутри не было logger.log is not a function
-  const result = await runPipeline({
-    preset: "short_auto_citation",
-    language,
-    quoteText: text,
-    quoteSource: topic,
-    logger: console,
-  });
+  // ВАЖНО: logger передаём вторым аргументом, а не полем объекта
+  const result = await runPipeline(
+    {
+      preset: "short_auto_citation",
+      language,
+      quoteText: text,
+      quoteSource: topic,
+    },
+    console // logger, у которого есть .log, .error и т.п.
+  );
 
   const finalPath =
     result.finalVideoPath || result.outputPath || result.videoPath;

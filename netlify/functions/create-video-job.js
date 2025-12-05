@@ -13,9 +13,15 @@ function initFirebase() {
 
     const serviceAccount = JSON.parse(serviceAccountJson);
 
+    // ЖЁСТКО подстраховываемся: берём URL из переменных или используем прямой
+    const databaseURL =
+      process.env.FIREBASE_DB_URL ||
+      process.env.FIREBASE_DATABASE_URL ||
+      "https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app";
+
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
+      databaseURL,
     });
 
     initialized = true;

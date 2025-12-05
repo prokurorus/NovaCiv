@@ -1,288 +1,394 @@
-FILE_MAP  — структура проекта NovaCiv (novaciv.space)
-Версия: 2025-12-03
+1. Общая архитектура репозитория
 
-Назначение файла
-----------------
-Этот файл — “карта” проекта для нас двоих.
-Он помогает быстро вспомнить:
-- какие директории и ключевые файлы существуют;
-- за что отвечает каждая крупная часть;
-- какие Netlify-функции и вспомогательные модули уже реализованы;
-- что уже используется в бою, а что черновик.
+Корень репо: NovaCiv-main/
 
-При добавлении новых файлов:
-- лучше всего сразу дописывать сюда краткое описание,
-- чтобы в будущем не тратить время на повторное “распознавание” архитектуры.
+1.1. Основные директории
 
-Корень репозитория
-------------------
-/ (root)
-- package.json, package-lock.json  — зависимости проекта (React, Vite, Firebase, Netlify Functions и т.д.).
-- vite.config.*                    — конфигурация Vite (сборка фронтенда).
-- tsconfig.* / jsconfig.*          — настройки TypeScript / пути импорта.
-- index.html                       — HTML-шаблон для SPA (точка входа Vite).
-- netlify.toml                     — конфигурация Netlify:
-  - build.command = "npm run build"
-  - publish = "dist"
-  - директория функций: netlify/functions
-- README.md                        — общее описание проекта (публичное).
-- FILE_MAP_NovaCiv.txt             — этот файл-карта.
+src/ — фронтенд (React + Vite)
 
-Папка public/
--------------
-public/
-- favicon.ico, og-image.png, robots.txt, sitemap.xml  — базовые статические файлы сайта.
-- manifest.json                    — PWA-манифест.
-- lovable-uploads/android.png      — текущий главный барельеф-андроид.
-- placeholder.svg и др.            — вспомогательная графика.
+src/main.tsx — вход в приложение, монтирует <App />
 
-Папка media/ — “Media Lab” и автогенерация видео
-------------------------------------------------
+src/App.tsx — каркас главной страницы (герой, блоки, футер, виджет Домового)
+
+src/components/ — общие компоненты
+
+src/pages/ — логические страницы/экраны
+
+src/lib/ — вспомогательные модули (Firebase, форматирование, интеграции)
+
+netlify/functions/ — серверные (serverless) функции
+
+работают в окружении Netlify, используют переменные окружения и Firebase Admin.
+
 media/
-- .gitkeep                         — служебный.
 
-media/backgrounds/
-- .gitkeep                         — пока без реальных фонов.
-- (в будущем) статические и анимированные подложки для шортов.
+media/backgrounds/ — фоновые изображения для видео-шортов
 
-media/brand/
-- .gitkeep
-- style.md                         — заметки по визуальному стилю NovaCiv (барельеф, минимализм, монохром).
+media/audio/ (если появится) — можно хранить статики, сейчас TTS идёт из OpenAI
 
-media/scripts/
-- .gitkeep
-- README.md                        — краткое описание медиа-конвейера.
-- pipeline.js                      — ГЛАВНЫЙ конвейер генерации шортов:
-  - берёт пресет (`shorts-presets/short_auto_citation.json`);
-  - вызывает Домового по DOMOVOY_API_URL, получает цитату;
-  - подбирает язык и голос по пресету;
-  - генерирует аудио через OpenAI TTS;
-  - применяет фон (статический или анимированный);
-  - собирает всё в итоговый MP4 (через ffmpeg-static);
-  - пишет результаты во временную папку (`/tmp/novaciv-media` в Netlify).
+media/scripts/ — вспомогательные скрипты разработки (не всё используется в проде)
 
-media/shorts-presets/
-- .gitkeep
-- short_auto_citation.json         — главный пресет автогенерации:
-  - до ~40 секунд;
-  - источник текста — Домовой (манифест + устав);
-  - языки: ru/en/de/es, голоса из media/voices.
-- short_citation_ru_30.json        — шорт-цитаты до ~30 сек, русский голос.
-- short_citation_en_30.json        — то же, английский.
-- short_citation_de_30.json        — то же, немецкий.
-- short_citation_es_30.json        — то же, испанский.
+public/ — статические ресурсы для фронтенда (favicon, иконки и т.п.)
 
-media/subtitles/
-- .gitkeep
-- charter/                         — текстовые блоки для субтитров по Уставу.
-  - ru_block_01.txt, en_block_01.txt
-- manifest/                        — текстовые блоки для субтитров по Манифесту.
-  - ru_block_01.txt, en_block_01.txt, de_block_01.txt, es_block_01.txt
+netlify.toml — конфигурация Netlify (функции, путь netlify/functions, NODE_VERSION, FFMPEG_PATH и т.д.)
 
-media/voices/
-- .gitkeep
-- openai/
-  - .gitkeep
-  - nova_ru_calm.json              — спокойный, доверительный голос Домового (RU).
-  - nova_en_inspire.json           — чуть более вдохновляющий голос (EN).
-  - nova_de_calm.json              — спокойный голос (DE).
-  - nova_es_calm.json              — спокойный голос (ES).
+package.json — зависимости фронта и функций.
 
-Папка netlify/ — серверные функции
-----------------------------------
-netlify/functions/*.js — серверная логика (OpenAI, Firebase, Telegram, рассылки, медиа).
+2. Фронтенд (React) — структура
+2.1. Компоненты (src/components/)
+
+TopNav.tsx
+Верхнее меню, кнопки навигации по разделам («Главная», «Наше видение», «Устав», «Манифест», «Присоединиться», «Форум»). Подсветка активного пункта.
+
+LanguageSwitcher.tsx
+Переключатель языков интерфейса (RU / EN / DE / ES).
+
+AssistantWidget.tsx
+Виджет Домового:
+
+отображает чат;
+
+отправляет сообщения на DOMOVOY_API_URL;
+
+пишет историю запросов в Firebase (assistantMessages/...);
+
+умеет работать с разными языками (поле language).
+
+ForumThread.tsx, ForumTopicList.tsx и др.
+Отображение тем форума и сообщений (данные из Firebase forum/...).
+
+Мелкие UI-блоки (cards, hero-блоки, секции и т.п.), отвечающие только за верстку.
+
+2.2. Страницы (src/pages/)
+
+(Фактические маршруты назначаются в роутере, но логически структура такая:)
+
+Home.tsx
+Главная страница: краткое объяснение NovaCiv, кнопки входа в сознание, визуальный белый барельеф.
+
+VisionPage.tsx (название может быть иное, но в структуре есть страница «Наше видение»)
+Расширённое описание философии и целей.
+
+Манифесты:
+
+Manifesto-ru.tsx
+
+Manifesto-en.tsx
+
+Manifesto-de.tsx
+
+Manifesto-es.tsx
+Каждый файл содержит полный текст манифеста на своём языке, выводимый как обычный текст в стиле whitespace-pre-wrap.
+
+Устав:
+
+Charter-ru.tsx
+
+Charter-en.tsx
+
+Charter-de.tsx
+
+Charter-es.tsx
+Аналогично: полные тексты устава по языкам.
+
+Страница «Присоединиться»:
+
+JoinPage.tsx (название типа Join.tsx / JoinPage.tsx в src/pages/)
+Счетчики, кнопки «Присоединяюсь» и «Мне нравится», соц-иконки, форма контакта.
+
+Форум:
+
+ForumPage.tsx
+Отображение списка разделов, тем, сообщений. Работа через Firebase Realtime Database (ветка forum/...).
+
+Вспомогательные:
+
+NotFound.tsx (если есть) — 404 / fallback.
+
+3. Серверные функции Netlify (netlify/functions/)
+
+Текущий набор файлов:
 
 ai-domovoy.js
-  — Главный диалоговый ИИ-Домовой сайта.
-  — Отвечает на вопросы, умеет цитировать Устав и Манифест, работать на RU/EN/DE.
-  — Используется фронтом через хуки (useChat) и виджет помощника.
+
+Читает историю и новые сообщения из Firebase (assistantMessages / movementFeed);
+
+Использует OPENAI_API_KEY, OPENAI_MODEL;
+
+Отвечает текстом, сохраняет диалог;
+
+Используется DOMOVOY_API_URL на фронте.
 
 ai-voice.js
-  — Голосовой модуль (TTS/ASR).
-  — Работает с OpenAI Speech API.
-  — Используется голосовым помощником (в будущем также Media Lab).
 
-domovoy-auto-post.js
-  — Автогенерация философских постов Домового без постинга в Telegram.
-  — Режимы:
-      1) charter_quote
-      2) question_to_reader
-      3) term_explainer
-      4) charter_series (серии по разделам Устава)
-  — Создаёт посты в Firebase (форум, раздел news / movement feed).
+Генерация голоса (TTS) через OpenAI (OPENAI_TTS_MODEL);
 
-domovoy-reply.js
-  — Ответчик Домового для Ленты:
-      * ищет новые комментарии в разделе news,
-      * отвечает мягким тоном,
-      * помечает обработанные комментарии, чтобы не дублировать ответы.
+Может отправлять результаты на почту/в Firebase;
 
-domovoy-auto-reply.js
-  — Вспомогательная функция автоответов (исторически; можно рассматривать как технический слой над domovoy-reply.js).
+Использует OPENAI_API_KEY, SENDGRID_API_KEY (если почта), и пути в media/audio / tmp.
 
-fetch-news.js
-  — Подбор новостей из внешних RSS-лент.
-  — Анализирует через OpenAI и создаёт темы в разделе news форума.
-  — Ничего не постит в Telegram — только пишет в Firebase.
+create-video-job.js
 
-news-cron.js
-  — Следит за новыми темами в news.
-  — Решает, что уже можно отправлять в Telegram-каналы.
+Получает запрос на создание видео-шорта (язык, текст, тип ролика);
 
-post-news-to-telegram.js
-  — Берёт готовые новости из Firebase (раздел news) и отправляет их в Telegram-каналы по языкам.
-  — Помечает отправленные посты (telegramPosted), чтобы исключить дубли.
+Добавляет задачу в Firebase videoJobs/{jobId} со статусом pending;
+
+Защищён секретом DOMOVOY_CRON_SECRET (если вызывается по крону / из домового).
+
+process-video-jobs.js
+
+Читает очередную pending-задачу из videoJobs;
+
+С помощью OpenAI генерирует голос (TTS), вызывает FFmpeg для сборки видео;
+
+Берёт фон из media/backgrounds/<lang>/...;
+
+Публикует ролик:
+
+в Telegram (через TELEGRAM_BOT_TOKEN и соответствующие TELEGRAM_NEWS_CHAT_ID_*);
+
+на YouTube Shorts (если включен YOUTUBE_UPLOAD_ENABLED и заданы YouTube-переменные);
+
+Обновляет статус задачи (done / error) в videoJobs.
+
+fetch-news.js / broadcast-news.js (точные имена см. в папке)
+
+Подбор новостей из внешних RSS / API;
+
+Запись очереди в Firebase newsQueue, кэш в newsMeta;
+
+Автоматический постинг переработанных новостей в Telegram-каналы NovaCiv;
+
+Использует NEWS_CRON_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_NEWS_CHAT_ID*, OPENAI_API_KEY (переписывание новости через призму NovaCiv).
 
 post-to-telegram.js
-  — Низкоуровневая работа с Telegram Bot API:
-      * отправка сообщений,
-      * переиспользуется несколькими функциями.
 
-send-email.js
-  — Отправка писем с сайта (формы обратной связи / “Присоединиться”).
+Базовая отправка сообщений / медиа в Telegram-каналы;
 
-generate-video.js   (НОВОЕ — Media Lab)
-  — HTTP-функция `/.netlify/functions/generate-video`.
-  — Запускает `media/scripts/pipeline.runPipeline()` в облаке (Netlify).
-  — На выходе:
-      * язык ролика,
-      * текст цитаты,
-      * путь к итоговому видеофайлу (MP4) в рабочей директории функции.
-  — На данный момент только генерирует и возвращает информацию;
-    дальнейший автопостинг в TikTok / YouTube / Telegram можно навесить позже.
+Общий вспомогательный endpoint для остальных функций.
 
-Папка src/ — фронтенд
----------------------
-src/main.tsx
-- Точка входа фронтенда:
-  - подключает React, Router, стили;
-  - рендерит корневой <App />.
+send-contact-email.js (или похожее название)
 
-src/App.tsx
-- Корневой компонент приложения:
-  - общая рамка сайта,
-  - подключение верхнего меню и LanguageSwitcher,
-  - маршрутизация по страницам (Home, Vision, Manifesto, Charter, News, Forum, Join и т.д.).
+Обработка формы с сайта («Присоединиться»);
 
-src/index.css, src/App.css
-- Базовые стили, Tailwind-классы, типографика.
+Отправка письма на почту через SENDGRID_API_KEY;
 
-src/components/
----------------
-components/Header.tsx
-  — Шапка сайта с логотипом NovaCiv и основным меню.
+Дополнительно может писать заявку в Firebase (contactRequests).
 
-components/TopNav.tsx
-  — Верхняя навигация (главные разделы, подсветка активного).
+Другие небольшие утилиты (например, cron-domovoy-reply.js, cron-domovoy-news.js)
 
-components/LanguageSwitcher.tsx
-  — Переключатель языков (RU / EN / DE / ES и др.).
-  — Синхронизирован со страницами и с форумом.
+Периодически «будят» Домового и новости через секреты DOMOVOY_CRON_SECRET, DOMOVOY_REPLY_CRON_SECRET, NEWS_CRON_SECRET.
 
-components/AssistantWidget.tsx
-  — Виджет Домового:
-      * плавающая кнопка на страницах,
-      * окно чата,
-      * связь с Netlify-функцией ai-domovoy.js
-        через хуки и fetch.
+Все функции используют Firebase Admin через FIREBASE_SERVICE_ACCOUNT_JSON и FIREBASE_DATABASE_URL / FIREBASE_DB_URL.
 
-components/SupporterCounter.tsx
-  — Счётчики “Visitors / Likes / Joined” на странице Vision / Join.
+4. Медиа-ресурсы (media/)
 
-components/ui/*
-  — Набор базовых UI-компонентов (карточки, кнопки, дропдауны и т.п.)
-    в стиле shadcn/ui.
+media/backgrounds/ru/
 
-src/hooks/
-----------
-hooks/useChat.ts
-  — Логика общения с Домовым на фронтенде:
-      * хранение истории сообщений;
-      * вызов netlify-функции ai-domovoy;
-      * обработка состояний (loading, error).
+Набор JPG-фонов для русскоязычных шортов: bg-ru-1.jpg, bg-ru-2.jpg, …
 
-hooks/useMember.ts, useStats.ts
-  — Работа с участниками и статистикой (лайки, счётчики присоединившихся).
+media/backgrounds/en/
 
-hooks/use-mobile.tsx
-  — Мелкие адаптивные вещи для мобильных устройств.
+Фоны для английских шортов: bg-en-1.jpg, bg-en-2.jpg, …
 
-hooks/useToast.ts
-  — Всплывающие уведомления.
+media/backgrounds/de/
 
-src/lib/
---------
-lib/firebase.ts
-  — Клиент Firebase Realtime Database.
-  — Используется для форума, новостей, счётчиков.
+Фоны для немецких шортов: bg-de-1.jpg, bg-de-2.jpg, …
 
-lib/counters.ts
-  — Работа со статистикой (visitors, likes, joined).
+media/backgrounds/es/
 
-lib/utils.ts
-  — Вспомогательные функции (классы, форматирование и т.д.).
+Фоны для испанских шортов.
 
-src/data/
----------
-data/translations.ts
-  — Тексты и переводы для многоязычного интерфейса
-    (заголовки, подписи кнопок и т.п.).
+⚙️ В process-video-jobs.js пути к фонам выглядят так (относительно корня функции в Netlify):
 
-src/pages/ — основные страницы
-------------------------------
-pages/Home.tsx
-  — Стартовый экран (вход в сознание, “вторая главная”).
-  — Лёгкая подача философии NovaCiv.
+const backgroundsDir = path.join(__dirname, "..", "..", "..", "media", "backgrounds", lang);
 
-pages/Index.tsx
-  — Технический роут, обычно редирект/организация главной.
 
-pages/Vision.tsx
-  — Страница “Our Vision / Наше видение”:
-      * блоки Manifesto / Charter,
-      * счётчики visitors/likes/joined.
+Где lang — ru | en | de | es. Там случайно выбирается один файл из каталога.
 
-pages/Manifesto-*.tsx, Manifesto.tsx
-  — Страницы Манифеста на разных языках (RU/EN/DE/ES).
-  — Текст уже финальный, без жирных выделений, только `whitespace-pre-wrap`.
+5. Firebase Realtime Database — логическая схема
 
-pages/Charter-*.tsx, Charter.tsx
-  — Страницы Устава на разных языках.
-  — Структура: преамбулы + нормативы, вся разметка выровнена
-    для корректного отображения на сайте.
+Экспорт: novaciv-web-default-rtdb-export.json
 
-pages/News.tsx
-  — Лента движения NovaCiv:
-      * выводит темы раздела news из Firebase;
-      * фильтрация по языкам;
-      * ссылки на обсуждение в форуме.
+5.1. Основные ветки
 
-pages/ForumPage.tsx
-  — Интерфейс форума:
-      * разделы, темы, ответы;
-      * лайки, избранное;
-      * связь с Firebase.
+assistantMessages/
 
-pages/TopicPage.tsx
-  — Просмотр конкретной темы форума + ветка комментариев.
+История диалогов с Домовым;
 
-pages/Join.tsx
-  — Страница “Присоединиться”:
-      * два больших счётчика (присоединились / нравится);
-      * кнопки “Присоединяюсь” и “Мне нравится”;
-      * вёрстка под десктоп и мобайл.
+Структура:
 
-pages/NotFound.tsx
-  — 404-страница.
+assistantMessages/{sessionId}/{messageId}
 
-Как пользоваться этой картой
-----------------------------
-1. Перед изменениями структуры:
-   - пробегись глазами по этому файлу, чтобы вспомнить, что уже есть.
-2. После добавления новых страниц/функций/модулей:
-   - добавь сюда 1–3 строки описания в тот же стиль.
-3. Когда нужно “показать конкретный файл”:
-   - просто скажи мне путь из этой карты (например,
-     `netlify/functions/generate-video.js` или
-     `media/shorts-presets/short_auto_citation.json`) —
-     и можно работать точечно, без пересылки всего архива.
+role: "user" | "assistant"
+
+text: текст сообщения
+
+language: ru/en/de/es
+
+timestamp.
+
+movementFeed/
+
+Лента событий/новостей внутри NovaCiv (идеологические посты, новости, лог Домового и т.п.);
+
+Используется для отображения «движения» и, возможно, для автопостинга.
+
+forum/
+
+forum/topics/{topicId} — темы (заголовок, язык, автор, timestamps);
+
+forum/posts/{topicId}/{postId} — сообщения в теме (автор, текст, время);
+
+Может быть ветка favorites, likes и др. (по последнему экспорту).
+
+contactRequests/
+
+Все заявки с формы «Присоединиться».
+
+Поля: имя, email / Telegram, сообщение, предпочитаемая роль и т.п.
+
+newsQueue/
+
+Сырые / подготовленные новости, ожидающие публикации;
+
+Используется функциями fetch-news / broadcast-news.
+
+newsMeta/
+
+Техническая информация по новостям (последние заголовки, время последней загрузки, защита от дублей).
+
+videoJobs/
+
+Очередь задач генерации видео-шортов:
+
+videoJobs/{jobId}:
+
+language: ru/en/de/es
+
+text: исходный текст ролика
+
+status: pending | processing | done | error
+
+targets: ["telegram", "youtube"] (куда слать)
+
+createdAt, updatedAt
+
+result: ссылки на опубликованные ролики / сообщения (если есть).
+
+Дополнительные служебные ветки (логи, telemetry, черновики Домового) — по мере развития проекта.
+
+6. Переменные окружения Netlify — сводная таблица
+6.1. Домовой и общая AI-логика
+
+OPENAI_API_KEY
+Ключ доступа к OpenAI. Используется:
+
+netlify/functions/ai-domovoy.js
+
+netlify/functions/ai-voice.js
+
+netlify/functions/process-video-jobs.js
+
+netlify/functions/broadcast-news.js (переписывание новостей).
+
+OPENAI_MODEL
+Основная текстовая модель (например, gpt-4.1-mini). Используется в ai-domovoy.js, broadcast-news.js.
+
+OPENAI_TTS_MODEL
+Модель для синтеза речи (TTS). Используется в ai-voice.js и process-video-jobs.js.
+
+DOMOVOY_API_URL
+URL до функции Домового (обычно /.netlify/functions/ai-domovoy).
+Используется на фронте в src/components/AssistantWidget.tsx.
+
+DOMOVOY_CRON_SECRET
+Секрет для крон-функций, которые ставят новые задания Домовому / видео.
+
+DOMOVOY_REPLY_CRON_SECRET
+Секрет для периодического ответа Домового (авто-ответы, пинги).
+
+6.2. Firebase
+
+FIREBASE_DATABASE_URL / FIREBASE_DB_URL
+URL Realtime Database. Используются во всех функциях, работающих с БД.
+
+FIREBASE_SERVICE_ACCOUNT_JSON
+JSON-учётка сервиса Firebase Admin.
+Парсится в netlify/functions/firebaseAdmin.js и других функциях.
+
+6.3. Telegram
+
+TELEGRAM_BOT_TOKEN
+Токен бота, через которого всё отправляется.
+
+TELEGRAM_CHAT_ID
+Основной чат/канал (например, NovaCiv RU).
+
+TELEGRAM_NEWS_CHAT_ID
+Канал под новости (EN).
+
+TELEGRAM_NEWS_CHAT_ID_DE
+Немецкий новостной канал.
+
+TELEGRAM_NEWS_CHAT_ID_RU
+Русский новостной канал.
+
+Используются в:
+
+netlify/functions/post-to-telegram.js
+
+netlify/functions/broadcast-news.js
+
+netlify/functions/process-video-jobs.js (постинг видео).
+
+6.4. Новости и крон-ключи
+
+NEWS_CRON_SECRET
+Секрет для функций:
+
+fetch-news.js (подбор новостей)
+
+broadcast-news.js (рассылка по каналам).
+
+6.5. Почта / формы
+
+SENDGRID_API_KEY
+Ключ SendGrid для отправки писем:
+
+netlify/functions/send-contact-email.js
+
+возможно ai-voice.js (если отсылаем голосовые ответы).
+
+6.6. YouTube (Shorts)
+
+YOUTUBE_CLIENT_ID
+
+YOUTUBE_CLIENT_SECRET
+
+YOUTUBE_REFRESH_TOKEN
+OAuth-пара из консоли Google, привязанная к каналу NovaCiv — The New Civilization.
+
+YOUTUBE_UPLOAD_ENABLED
+Флаг true/false.
+Если true, process-video-jobs.js после сборки видео:
+
+использует YouTube Data API v3 (youtube.upload) для загрузки ролика в канал.
+
+Используются только в:
+
+netlify/functions/process-video-jobs.js
+
+7. Как этим пользоваться дальше
+
+Любые изменения — сначала сверяемся с этой картой:
+
+есть ли уже нужный файл/папка;
+
+какие функции завязаны на Firebase и переменные.
+
+Новые сущности в БД — добавляем в §5.
+
+Новые переменные окружения — фиксируем в §6 сразу после добавления на Netlify.
+
+Новые функции или страницы — дописываем в §2 и §3 (кратко: путь → назначение).

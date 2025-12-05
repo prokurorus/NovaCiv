@@ -136,67 +136,9 @@ async function sendToTelegram(finalVideoPath, job) {
   });
 }
 
-exports.handler = async () => {
-  try {
-    const db = initFirebase();
-
-    // 1. ищем любую активную задачу (pending или processing)
-    const next = await getNextJob(db);
-    if (!next) {
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ ok: true, message: "no pending jobs" }),
-      };
-    }
-
-    const { key, job } = next;
-    const lang = job.language || "ru";
-
-    // 2. помечаем как "processing" (ещё раз, даже если уже был такой статус)
-    await db.ref(`videoJobs/${key}`).update({
-      status: "processing",
-      processingStartedAt: Date.now(),
-    });
-
-    // 3. запускаем конвейер
-    const result = await runPipeline(console, { lang });
-
-    const finalPath =
-      result.videoPath || result.outputPath || result.finalVideoPath;
-    if (!finalPath) {
-      throw new Error("Pipeline did not return final video path");
-    }
-
-    // 4. шлём в Telegram
-    await sendToTelegram(finalPath, job);
-
-    // 5. обновляем мету
-    await db.ref("videoJobsMeta").update({
-      lastLang: lang,
-      updatedAt: Date.now(),
-    });
-
-    // 6. удаляем задачу (как ты и хотел, чтобы БД не росла бесконечно)
-    await db.ref(`videoJobs/${key}`).remove();
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ ok: true, processed: key }),
-    };
-  } catch (err) {
-    console.error("process-video-jobs error:", err);
-
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ ok: false, error: err.message }),
-    };
-  }
-};
 // -------------------- YOUTUBE UPLOAD HELPERS --------------------
 
-const fs = require("fs");
-
-// читаем настройки для YouTube из окружения
+// флаг включения YouTube-аплоада
 const YT_UPLOAD_ENABLED =
   (process.env.YOUTUBE_UPLOAD_ENABLED || "").toLowerCase() === "true";
 const YT_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID;
@@ -352,3 +294,70 @@ async function uploadToYouTube(videoPath, language, quote) {
   }
 }
 
+// -------------------- MAIN HANDLER --------------------
+
+exports.handler = async () => {
+  try {
+    const db = initFirebase();
+
+    // 1. ищем любую активную задачу (pending или processing)
+    const next = await getNextJob(db);
+    if (!next) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ ok: true, message: "no pending jobs" }),
+      };
+    }
+
+    const { key, job } = next;
+    const lang = job.language || "ru";
+
+    // 2. помечаем как "processing"
+    await db.ref(`videoJobs/${key}`).update({
+      status: "processing",
+      processingStartedAt: Date.now(),
+    });
+
+    // 3. запускаем конвейер
+    const result = await runPipeline(console, { lang });
+
+    const finalPath =
+      result.videoPath || result.outputPath || result.finalVideoPath;
+    if (!finalPath) {
+      throw new Error("Pipeline did not return final video path");
+    }
+
+    // 4. пробуем залить в YouTube (если включено флагом)
+    try {
+      const quoteForTitle =
+        job.script || job.topic || result.quote || `NovaCiv — ${lang}`;
+      await uploadToYouTube(finalPath, lang, quoteForTitle);
+    } catch (e) {
+      console.error("YouTube upload failed (non-fatal):", e);
+    }
+
+    // 5. шлём в Telegram
+    await sendToTelegram(finalPath, job);
+
+    // 6. обновляем мету
+    await db.ref("videoJobsMeta").update({
+      lastLang: lang,
+      updatedAt: Date.now(),
+    });
+
+    // 7. удаляем задачу
+    await db.ref(`videoJobs/${key}`).remove();
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ ok: true, processed: key }),
+    };
+  } catch (err) {
+    console.error("process-video-jobs error:", err);
+
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ ok: false, error: err.message }),
+    };
+  }
+};

@@ -1,9 +1,22 @@
 // netlify/functions/video-worker.js
-// Этап 1: читаем очередь видео-задач из Firebase, без генерации видео.
+//
+// Полноценный видео-воркер:
+// 1) Берёт первую задачу из videoJobs со статусом "pending"
+// 2) Генерирует видео через pipeline.js (фон + движение + TTS)
+// 3) Отправляет видео в Telegram
+// 4) (опционально) загружает в YouTube, если YOUTUBE_UPLOAD_ENABLED=true
+// 5) Обновляет статус задачи: "done" или "error"
 
+const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
+const FormData = require("form-data");
 const admin = require("firebase-admin");
+const { runPipeline } = require("../../media/scripts/pipeline");
 
 let initialized = false;
+
+// -------------------- Firebase --------------------
 
 function initFirebase() {
   if (!initialized) {
@@ -35,11 +48,192 @@ function initFirebase() {
   return admin.database();
 }
 
-exports.handler = async (event) => {
-  try {
-    const db = initFirebase();
+// -------------------- Telegram --------------------
 
-    // Ищем первую задачу со статусом "pending"
+function getTelegramChatIdForLang(lang) {
+  const base = process.env.TELEGRAM_NEWS_CHAT_ID;
+  const ru = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
+  const de = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
+
+  switch ((lang || "ru").toLowerCase()) {
+    case "ru":
+      return ru || base;
+    case "de":
+      return de || base;
+    default:
+      return base;
+  }
+}
+
+async function sendToTelegram(finalVideoPath, job) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN не задан");
+  }
+
+  const chatId = getTelegramChatIdForLang(job.language || "ru");
+  if (!chatId) {
+    throw new Error(
+      "Не задан chat_id для Telegram (TELEGRAM_NEWS_CHAT_ID* переменные)"
+    );
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendVideo`;
+
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  form.append("supports_streaming", "true");
+
+  const captionLines = [];
+
+  if (job.topic) {
+    captionLines.push(job.topic);
+  }
+
+  if (job.script) {
+    const text =
+      job.script.length > 350
+        ? job.script.slice(0, 347) + "..."
+        : job.script;
+    captionLines.push(text);
+  }
+
+  form.append("caption", captionLines.join("\n\n"));
+
+  const fileStream = fs.createReadStream(finalVideoPath);
+  form.append("video", fileStream, {
+    filename: path.basename(finalVideoPath),
+    contentType: "video/mp4",
+  });
+
+  await axios.post(url, form, {
+    headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
+}
+
+// -------------------- YouTube --------------------
+
+function isYouTubeEnabled() {
+  const enabled = (process.env.YOUTUBE_UPLOAD_ENABLED || "").toLowerCase();
+  return enabled === "true" || enabled === "1";
+}
+
+async function getYouTubeAccessToken() {
+  const {
+    YOUTUBE_CLIENT_ID,
+    YOUTUBE_CLIENT_SECRET,
+    YOUTUBE_REFRESH_TOKEN,
+  } = process.env;
+
+  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !YOUTUBE_REFRESH_TOKEN) {
+    console.log(
+      "[youtube] credentials not fully set, skipping upload",
+      !!YOUTUBE_CLIENT_ID,
+      !!YOUTUBE_CLIENT_SECRET,
+      !!YOUTUBE_REFRESH_TOKEN
+    );
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    client_id: YOUTUBE_CLIENT_ID,
+    client_secret: YOUTUBE_CLIENT_SECRET,
+    refresh_token: YOUTUBE_REFRESH_TOKEN,
+    grant_type: "refresh_token",
+  });
+
+  const res = await axios.post(
+    "https://oauth2.googleapis.com/token",
+    params.toString(),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    }
+  );
+
+  if (!res.data || !res.data.access_token) {
+    throw new Error("[youtube] no access_token in token response");
+  }
+
+  return res.data.access_token;
+}
+
+async function uploadToYouTube(videoPath, lang, title) {
+  if (!isYouTubeEnabled()) {
+    console.log("[youtube] upload disabled via YOUTUBE_UPLOAD_ENABLED");
+    return;
+  }
+
+  const accessToken = await getYouTubeAccessToken();
+  if (!accessToken) {
+    return;
+  }
+
+  const fileStats = fs.statSync(videoPath);
+  const fileSize = fileStats.size;
+
+  const snippet = {
+    title: (title || "NovaCiv short").slice(0, 95),
+    description: `${title || ""}\n\nLanguage: ${lang}\nhttps://novaciv.space`,
+    categoryId: "22", // People & Blogs
+  };
+
+  const status = {
+    privacyStatus: "public",
+    selfDeclaredMadeForKids: false,
+  };
+
+  const initRes = await axios.post(
+    "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status",
+    { snippet, status },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "X-Upload-Content-Length": fileSize,
+        "X-Upload-Content-Type": "video/mp4",
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: (s) => s >= 200 && s < 400,
+    }
+  );
+
+  const uploadUrl = initRes.headers.location;
+  if (!uploadUrl) {
+    console.log("[youtube] no upload URL in initRes headers");
+    return;
+  }
+
+  const stream = fs.createReadStream(videoPath);
+
+  await axios.put(uploadUrl, stream, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "video/mp4",
+      "Content-Length": fileSize,
+    },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    validateStatus: (s) => s >= 200 && s < 400,
+  });
+
+  console.log("[youtube] upload completed");
+}
+
+// -------------------- MAIN HANDLER --------------------
+
+exports.handler = async (event) => {
+  const db = initFirebase();
+
+  let pickedId = null;
+  let job = null;
+
+  try {
+    // 1. Берём первую pending-задачу
     const snap = await db
       .ref("videoJobs")
       .orderByChild("status")
@@ -61,11 +255,49 @@ exports.handler = async (event) => {
       };
     }
 
-    const id = Object.keys(jobs)[0];
-    const job = jobs[id];
+    pickedId = Object.keys(jobs)[0];
+    job = jobs[pickedId];
 
-    // Помечаем задачу как "picked-debug", чтобы видеть, что её забрали
-    await db.ref(`videoJobs/${id}/status`).set("picked-debug");
+    // помечаем как "processing"
+    await db.ref(`videoJobs/${pickedId}/status`).set("processing");
+
+    const lang = (job.language || "ru").toLowerCase();
+    const script = job.script || "";
+
+    console.log("[video-worker] start pipeline:", { pickedId, lang });
+
+    // 2. Генерируем видео через pipeline
+    const result = await runPipeline(console, {
+      lang,
+      script,
+    });
+
+    const finalPath =
+      result.videoPath || result.outputPath || result.finalVideoPath;
+    if (!finalPath) {
+      throw new Error("Pipeline did not return final video path");
+    }
+
+    // 3. YouTube (опционально)
+    try {
+      const quoteForTitle =
+        script || job.topic || result.quote || `NovaCiv — ${lang}`;
+      await uploadToYouTube(finalPath, lang, quoteForTitle);
+    } catch (e) {
+      console.error("[video-worker] YouTube upload failed (non-fatal):", e);
+    }
+
+    // 4. Telegram
+    await sendToTelegram(finalPath, { ...job, language: lang });
+
+    // 5. Обновляем задачу как выполненную
+    await db.ref(`videoJobs/${pickedId}`).update({
+      status: "done",
+      finishedAt: Date.now(),
+      videoPath: finalPath,
+      audioPath: result.audioPath || null,
+      backgroundPath: result.backgroundPath || null,
+    });
 
     return {
       statusCode: 200,
@@ -73,9 +305,9 @@ exports.handler = async (event) => {
       body: JSON.stringify(
         {
           ok: true,
-          id,
-          job,
-          note: "job picked from queue and marked as picked-debug",
+          id: pickedId,
+          lang,
+          message: "video generated and posted",
         },
         null,
         2
@@ -84,6 +316,19 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error("[video-worker] error:", err);
 
+    // если задачу уже взяли — помечаем как "error"
+    if (pickedId) {
+      try {
+        await db.ref(`videoJobs/${pickedId}`).update({
+          status: "error",
+          error: err.message || String(err),
+          finishedAt: Date.now(),
+        });
+      } catch (e2) {
+        console.error("[video-worker] failed to update job status after error:", e2);
+      }
+    }
+
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json; charset=utf-8" },
@@ -91,6 +336,7 @@ exports.handler = async (event) => {
         {
           ok: false,
           error: err.message || String(err),
+          jobId: pickedId,
         },
         null,
         2

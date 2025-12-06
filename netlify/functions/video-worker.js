@@ -12,7 +12,19 @@ const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
 const admin = require("firebase-admin");
-const { runPipeline } = require("../../media/scripts/pipeline");
+let pipelineRunner = null;
+
+// Ленивая загрузка pipeline, чтобы ловить ошибки через try/catch
+function getPipelineRunner() {
+  if (!pipelineRunner) {
+    const imported = require("../../media/scripts/pipeline");
+    // модуль может экспортировать по-разному, подстрахуемся
+    pipelineRunner =
+      imported.runPipeline || imported.default || imported;
+  }
+  return pipelineRunner;
+}
+
 
 let initialized = false;
 

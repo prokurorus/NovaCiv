@@ -284,6 +284,8 @@ exports.handler = async (event) => {
     });
 
     // Запускаем пайплайн генерации
+   // Запускаем пайплайн генерации
+    const runPipeline = getPipelineRunner();
     const pipelineResult = await runPipeline(job);
 
     console.log("[video-worker] pipeline finished", pipelineResult);

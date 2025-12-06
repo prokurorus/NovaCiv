@@ -12,23 +12,12 @@
   status = 200
 
 [functions]
-  # кладём статические файлы (фоновые картинки и т.п.)
   included_files = ["media/**"]
-  # говорим Netlify не упаковывать ffmpeg-static внутрь бандла, а подложить как внешний модуль
   external_node_modules = ["ffmpeg-static"]
-  # на всякий случай фиксируем бандлер
   node_bundler = "esbuild"
 
 [functions."news-cron"]
-  # Раз в час по UTC
   schedule = "0 * * * *"
 
-[functions."create-video-job"]
-  # старый режим: создаёт одну задачу (можно оставить на будущее)
-  schedule = "0 8,20 * * *"
-
 [functions."process-video-jobs"]
-  # Обработка очереди.
-  # Можно запускать чаще, чем создаём задачи.
-  # Здесь пример: каждые 15 минут.
   schedule = "*/15 * * * *"

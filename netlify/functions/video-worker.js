@@ -1,37 +1,25 @@
 // netlify/functions/video-worker.js
 //
-// Полноценный видео-воркер:
+// Видео-воркер NovaCiv:
+//
 // 1) Берёт первую задачу из videoJobs со статусом "pending"
-// 2) Генерирует видео через pipeline.js (фон + движение + TTS)
-// 3) Отправляет видео в Telegram
-// 4) (опционально) загружает в YouTube, если YOUTUBE_UPLOAD_ENABLED=true
-// 5) Обновляет статус задачи: "done" или "error"
+// 2) Генерирует видео через media/scripts/pipeline.js (фон + TTS + ffmpeg)
+// 3) Отправляет видео в Telegram (если заданы переменные)
+// 4) Помечает задачу как "done" или "error"
 
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
 const admin = require("firebase-admin");
+
+let firebaseInitialized = false;
 let pipelineRunner = null;
-
-// Ленивая загрузка pipeline, чтобы ловить ошибки через try/catch
-function getPipelineRunner() {
-  if (!pipelineRunner) {
-    const imported = require("../../media/scripts/pipeline");
-    // модуль может экспортировать по-разному, подстрахуемся
-    pipelineRunner =
-      imported.runPipeline || imported.default || imported;
-  }
-  return pipelineRunner;
-}
-
-
-let initialized = false;
 
 // -------------------- Firebase --------------------
 
 function initFirebase() {
-  if (!initialized) {
+  if (!firebaseInitialized) {
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
     if (!serviceAccountJson) {
       throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
@@ -41,53 +29,69 @@ function initFirebase() {
 
     const dbUrl =
       process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
+
     if (!dbUrl) {
-      throw new Error(
-        "FIREBASE_DB_URL или FIREBASE_DATABASE_URL не заданы (URL Realtime DB)"
-      );
+      throw new Error("FIREBASE_DB_URL / FIREBASE_DATABASE_URL is not set");
     }
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: dbUrl,
-      });
-    }
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: dbUrl,
+    });
 
-    initialized = true;
+    firebaseInitialized = true;
+    console.log("[video-worker] Firebase initialized with", dbUrl);
   }
 
   return admin.database();
 }
 
-// -------------------- Telegram --------------------
+// -------------------- Pipeline loader --------------------
 
-function getTelegramChatIdForLang(lang) {
-  const base = process.env.TELEGRAM_NEWS_CHAT_ID;
-  const ru = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
-  const de = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
+function getPipelineRunner() {
+  if (!pipelineRunner) {
+    const imported = require("../../media/scripts/pipeline");
+    pipelineRunner =
+      imported.runPipeline || imported.default || imported;
 
-  switch ((lang || "ru").toLowerCase()) {
-    case "ru":
-      return ru || base;
-    case "de":
-      return de || base;
-    default:
-      return base;
+    if (typeof pipelineRunner !== "function") {
+      throw new Error(
+        "pipeline.js does not export a callable runPipeline function"
+      );
+    }
   }
+  return pipelineRunner;
 }
 
-async function sendToTelegram(finalVideoPath, job) {
+// -------------------- Telegram helper --------------------
+
+async function sendTelegramVideo({ videoPath, lang, topic }) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
+  const baseChatId = process.env.TELEGRAM_NEWS_CHAT_ID;
+
+  const langLower = (lang || "ru").toLowerCase();
+  const perLangChatIds = {
+    ru: process.env.TELEGRAM_NEWS_CHAT_ID_RU,
+    en: process.env.TELEGRAM_NEWS_CHAT_ID_EN,
+    de: process.env.TELEGRAM_NEWS_CHAT_ID_DE,
+    es: process.env.TELEGRAM_NEWS_CHAT_ID_ES,
+  };
+
+  const chatId = perLangChatIds[langLower] || baseChatId;
+
   if (!token) {
-    throw new Error("TELEGRAM_BOT_TOKEN не задан");
+    console.log("[telegram] TELEGRAM_BOT_TOKEN not set, skipping");
+    return;
   }
 
-  const chatId = getTelegramChatIdForLang(job.language || "ru");
   if (!chatId) {
-    throw new Error(
-      "Не задан chat_id для Telegram (TELEGRAM_NEWS_CHAT_ID* переменные)"
-    );
+    console.log("[telegram] no TELEGRAM_NEWS_CHAT_ID configured, skipping");
+    return;
+  }
+
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    console.log("[telegram] video file not found", videoPath);
+    return;
   }
 
   const url = `https://api.telegram.org/bot${token}/sendVideo`;
@@ -95,145 +99,16 @@ async function sendToTelegram(finalVideoPath, job) {
   const form = new FormData();
   form.append("chat_id", chatId);
   form.append("supports_streaming", "true");
-
-  const captionLines = [];
-
-  if (job.topic) {
-    captionLines.push(job.topic);
-  }
-
-  if (job.script) {
-    const text =
-      job.script.length > 350
-        ? job.script.slice(0, 347) + "..."
-        : job.script;
-    captionLines.push(text);
-  }
-
-  form.append("caption", captionLines.join("\n\n"));
-
-  const fileStream = fs.createReadStream(finalVideoPath);
-  form.append("video", fileStream, {
-    filename: path.basename(finalVideoPath),
-    contentType: "video/mp4",
-  });
-
-  await axios.post(url, form, {
-    headers: form.getHeaders(),
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
-  });
-}
-
-// -------------------- YouTube --------------------
-
-function isYouTubeEnabled() {
-  const enabled = (process.env.YOUTUBE_UPLOAD_ENABLED || "").toLowerCase();
-  return enabled === "true" || enabled === "1";
-}
-
-async function getYouTubeAccessToken() {
-  const {
-    YOUTUBE_CLIENT_ID,
-    YOUTUBE_CLIENT_SECRET,
-    YOUTUBE_REFRESH_TOKEN,
-  } = process.env;
-
-  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !YOUTUBE_REFRESH_TOKEN) {
-    console.log(
-      "[youtube] credentials not fully set, skipping upload",
-      !!YOUTUBE_CLIENT_ID,
-      !!YOUTUBE_CLIENT_SECRET,
-      !!YOUTUBE_REFRESH_TOKEN
-    );
-    return null;
-  }
-
-  const params = new URLSearchParams({
-    client_id: YOUTUBE_CLIENT_ID,
-    client_secret: YOUTUBE_CLIENT_SECRET,
-    refresh_token: YOUTUBE_REFRESH_TOKEN,
-    grant_type: "refresh_token",
-  });
-
-  const res = await axios.post(
-    "https://oauth2.googleapis.com/token",
-    params.toString(),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    }
+  form.append(
+    "caption",
+    topic ? `NovaCiv · ${topic}` : "NovaCiv — цифровая цивилизация"
   );
+  form.append("video", fs.createReadStream(videoPath));
 
-  if (!res.data || !res.data.access_token) {
-    throw new Error("[youtube] no access_token in token response");
-  }
+  const headers = form.getHeaders();
 
-  return res.data.access_token;
-}
-
-async function uploadToYouTube(videoPath, lang, title) {
-  if (!isYouTubeEnabled()) {
-    console.log("[youtube] upload disabled via YOUTUBE_UPLOAD_ENABLED");
-    return;
-  }
-
-  const accessToken = await getYouTubeAccessToken();
-  if (!accessToken) {
-    return;
-  }
-
-  const fileStats = fs.statSync(videoPath);
-  const fileSize = fileStats.size;
-
-  const snippet = {
-    title: (title || "NovaCiv short").slice(0, 95),
-    description: `${title || ""}\n\nLanguage: ${lang}\nhttps://novaciv.space`,
-    categoryId: "22", // People & Blogs
-  };
-
-  const status = {
-    privacyStatus: "public",
-    selfDeclaredMadeForKids: false,
-  };
-
-  const initRes = await axios.post(
-    "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status",
-    { snippet, status },
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        "X-Upload-Content-Length": fileSize,
-        "X-Upload-Content-Type": "video/mp4",
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      validateStatus: (s) => s >= 200 && s < 400,
-    }
-  );
-
-  const uploadUrl = initRes.headers.location;
-  if (!uploadUrl) {
-    console.log("[youtube] no upload URL in initRes headers");
-    return;
-  }
-
-  const stream = fs.createReadStream(videoPath);
-
-  await axios.put(uploadUrl, stream, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "video/mp4",
-      "Content-Length": fileSize,
-    },
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
-    validateStatus: (s) => s >= 200 && s < 400,
-  });
-
-  console.log("[youtube] upload completed");
+  const resp = await axios.post(url, form, { headers });
+  console.log("[telegram] sent video, ok:", resp.data && resp.data.ok);
 }
 
 // -------------------- MAIN HANDLER --------------------
@@ -244,11 +119,9 @@ exports.handler = async (event) => {
   let db = null;
 
   try {
-    // 0. Инициализируем Firebase внутри try,
-    //    чтобы любые ошибки превратить в понятный JSON, а не 502
     db = initFirebase();
 
-    // 1. Берём первую pending-задачу
+    // 1. Берём первую задачу со статусом "pending"
     const snap = await db
       .ref("videoJobs")
       .orderByChild("status")
@@ -270,33 +143,51 @@ exports.handler = async (event) => {
       };
     }
 
-    // выбираем первую задачу
     const [id, value] = Object.entries(jobs)[0];
     pickedId = id;
     job = value;
 
     console.log("[video-worker] picked job", pickedId, job.language);
 
-    // помечаем как picked / processing
+    // помечаем как processing
     await db.ref(`videoJobs/${pickedId}`).update({
       status: "processing",
       pickedAt: Date.now(),
     });
 
-    // Запускаем пайплайн генерации
-   // Запускаем пайплайн генерации
+    // 2. Запускаем пайплайн
     const runPipeline = getPipelineRunner();
-    const pipelineResult = await runPipeline(job);
+
+    const lang = job.language || job.lang || "ru";
+    const script = job.script || "";
+
+    const pipelineResult = await runPipeline(console, {
+      lang,
+      script,
+    });
 
     console.log("[video-worker] pipeline finished", pipelineResult);
 
-    // обновляем задачу как done
+    // 3. Отправляем видео в Telegram, если есть
+    if (pipelineResult && pipelineResult.videoPath) {
+      try {
+        await sendTelegramVideo({
+          videoPath: pipelineResult.videoPath,
+          lang,
+          topic: job.topic,
+        });
+      } catch (e) {
+        console.error("[video-worker] telegram send error", e);
+      }
+    }
+
+    // 4. Обновляем задачу как done
     await db.ref(`videoJobs/${pickedId}`).update({
       status: "done",
       finishedAt: Date.now(),
-      videoPath: pipelineResult.videoPath || null,
-      audioPath: pipelineResult.audioPath || null,
-      backgroundPath: pipelineResult.backgroundPath || null,
+      videoPath: pipelineResult ? pipelineResult.videoPath : null,
+      audioPath: pipelineResult ? pipelineResult.audioPath : null,
+      backgroundPath: pipelineResult ? pipelineResult.backgroundPath : null,
     });
 
     return {
@@ -305,7 +196,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         ok: true,
         id: pickedId,
-        lang: job.language,
+        lang,
         message: "video generated and posted",
         job,
         pipeline: pipelineResult,
@@ -319,7 +210,6 @@ exports.handler = async (event) => {
       job,
     });
 
-    // если мы уже успели пометить задачу — пометим как error
     if (pickedId && db) {
       try {
         await db.ref(`videoJobs/${pickedId}`).update({

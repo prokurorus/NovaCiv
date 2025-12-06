@@ -27,7 +27,7 @@
   # старый режим: создаёт одну задачу (можно оставить на будущее)
   schedule = "0 8,20 * * *"
 
-[functions."auto-create-video-job"]
+[functions."video-jobs-create-4"]
   # КАЖДЫЙ ЗАПУСК = 4 задачи (en, ru, de, es)
   # Пример: 2 раза в день (08:00 и 20:00 по UTC)
   schedule = "0 8,20 * * *"

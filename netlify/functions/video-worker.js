@@ -227,12 +227,12 @@ async function uploadToYouTube(videoPath, lang, title) {
 // -------------------- MAIN HANDLER --------------------
 
 exports.handler = async (event) => {
-  const db = initFirebase();
-
   let pickedId = null;
   let job = null;
+  let db = null;
 
   try {
+    db = initFirebase();
     // 1. Берём первую pending-задачу
     const snap = await db
       .ref("videoJobs")

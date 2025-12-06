@@ -136,9 +136,118 @@ async function sendToTelegram(finalVideoPath, job) {
   });
 }
 
-// -------------------- YOUTUBE helpers (как были) --------------------
-// (оставляем без изменений)
-… весь твой блок YouTube … 
+// -------------------- YOUTUBE helpers --------------------
+
+function isYouTubeEnabled() {
+  const enabled = (process.env.YOUTUBE_UPLOAD_ENABLED || "").toLowerCase();
+  return enabled === "true" || enabled === "1";
+}
+
+async function getYouTubeAccessToken() {
+  const {
+    YOUTUBE_CLIENT_ID,
+    YOUTUBE_CLIENT_SECRET,
+    YOUTUBE_REFRESH_TOKEN,
+  } = process.env;
+
+  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !YOUTUBE_REFRESH_TOKEN) {
+    console.log(
+      "[youtube] credentials not fully set, skipping upload",
+      !!YOUTUBE_CLIENT_ID,
+      !!YOUTUBE_CLIENT_SECRET,
+      !!YOUTUBE_REFRESH_TOKEN
+    );
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    client_id: YOUTUBE_CLIENT_ID,
+    client_secret: YOUTUBE_CLIENT_SECRET,
+    refresh_token: YOUTUBE_REFRESH_TOKEN,
+    grant_type: "refresh_token",
+  });
+
+  const res = await axios.post(
+    "https://oauth2.googleapis.com/token",
+    params.toString(),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    }
+  );
+
+  if (!res.data || !res.data.access_token) {
+    throw new Error("[youtube] no access_token in token response");
+  }
+
+  return res.data.access_token;
+}
+
+async function uploadToYouTube(videoPath, lang, title) {
+  if (!isYouTubeEnabled()) {
+    console.log("[youtube] upload disabled via YOUTUBE_UPLOAD_ENABLED");
+    return;
+  }
+
+  const accessToken = await getYouTubeAccessToken();
+  if (!accessToken) {
+    return;
+  }
+
+  const fileStats = fs.statSync(videoPath);
+  const fileSize = fileStats.size;
+
+  const snippet = {
+    title: (title || "NovaCiv short").slice(0, 95),
+    description: `${title || ""}\n\nLanguage: ${lang}\nhttps://novaciv.space`,
+    categoryId: "22", // People & Blogs
+  };
+
+  const status = {
+    privacyStatus: "public",
+    selfDeclaredMadeForKids: false,
+  };
+
+  // 1. создаём сессию загрузки
+  const initRes = await axios.post(
+    "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status",
+    { snippet, status },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Length": fileSize,
+        "X-Upload-Content-Type": "video/mp4",
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: (s) => s >= 200 && s < 400,
+    }
+  );
+
+  const uploadUrl = initRes.headers.location;
+  if (!uploadUrl) {
+    console.log("[youtube] no upload URL in initRes headers");
+    return;
+  }
+
+  // 2. отправляем файл
+  const stream = fs.createReadStream(videoPath);
+
+  await axios.put(uploadUrl, stream, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "video/mp4",
+      "Content-Length": fileSize,
+    },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    validateStatus: (s) => s >= 200 && s < 400,
+  });
+
+  console.log("[youtube] upload completed");
+}
 
 // -------------------- MAIN HANDLER --------------------
 

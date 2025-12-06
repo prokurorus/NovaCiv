@@ -232,7 +232,10 @@ exports.handler = async (event) => {
   let db = null;
 
   try {
+    // 0. Инициализируем Firebase внутри try,
+    //    чтобы любые ошибки превратить в понятный JSON, а не 502
     db = initFirebase();
+
     // 1. Берём первую pending-задачу
     const snap = await db
       .ref("videoJobs")
@@ -244,103 +247,85 @@ exports.handler = async (event) => {
     const jobs = snap.val();
 
     if (!jobs) {
+      console.log("[video-worker] no pending jobs in videoJobs");
       return {
         statusCode: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(
-          { ok: true, message: "no pending jobs in videoJobs" },
-          null,
-          2
-        ),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: true,
+          message: "no pending jobs in videoJobs",
+        }),
       };
     }
 
-    pickedId = Object.keys(jobs)[0];
-    job = jobs[pickedId];
+    // выбираем первую задачу
+    const [id, value] = Object.entries(jobs)[0];
+    pickedId = id;
+    job = value;
 
-    // помечаем как "processing"
-    await db.ref(`videoJobs/${pickedId}/status`).set("processing");
+    console.log("[video-worker] picked job", pickedId, job.language);
 
-    const lang = (job.language || "ru").toLowerCase();
-    const script = job.script || "";
-
-    console.log("[video-worker] start pipeline:", { pickedId, lang });
-
-    // 2. Генерируем видео через pipeline
-    const result = await runPipeline(console, {
-      lang,
-      script,
+    // помечаем как picked / processing
+    await db.ref(`videoJobs/${pickedId}`).update({
+      status: "processing",
+      pickedAt: Date.now(),
     });
 
-    const finalPath =
-      result.videoPath || result.outputPath || result.finalVideoPath;
-    if (!finalPath) {
-      throw new Error("Pipeline did not return final video path");
-    }
+    // Запускаем пайплайн генерации
+    const pipelineResult = await runPipeline(job);
 
-    // 3. YouTube (опционально)
-    try {
-      const quoteForTitle =
-        script || job.topic || result.quote || `NovaCiv — ${lang}`;
-      await uploadToYouTube(finalPath, lang, quoteForTitle);
-    } catch (e) {
-      console.error("[video-worker] YouTube upload failed (non-fatal):", e);
-    }
+    console.log("[video-worker] pipeline finished", pipelineResult);
 
-    // 4. Telegram
-    await sendToTelegram(finalPath, { ...job, language: lang });
-
-    // 5. Обновляем задачу как выполненную
+    // обновляем задачу как done
     await db.ref(`videoJobs/${pickedId}`).update({
       status: "done",
       finishedAt: Date.now(),
-      videoPath: finalPath,
-      audioPath: result.audioPath || null,
-      backgroundPath: result.backgroundPath || null,
+      videoPath: pipelineResult.videoPath || null,
+      audioPath: pipelineResult.audioPath || null,
+      backgroundPath: pipelineResult.backgroundPath || null,
     });
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify(
-        {
-          ok: true,
-          id: pickedId,
-          lang,
-          message: "video generated and posted",
-        },
-        null,
-        2
-      ),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ok: true,
+        id: pickedId,
+        lang: job.language,
+        message: "video generated and posted",
+        job,
+        pipeline: pipelineResult,
+      }),
     };
-  } catch (err) {
-    console.error("[video-worker] error:", err);
+  } catch (error) {
+    console.error("[video-worker] ERROR", {
+      error: error.message,
+      stack: error.stack,
+      pickedId,
+      job,
+    });
 
-    // если задачу уже взяли — помечаем как "error"
-    if (pickedId) {
+    // если мы уже успели пометить задачу — пометим как error
+    if (pickedId && db) {
       try {
         await db.ref(`videoJobs/${pickedId}`).update({
           status: "error",
-          error: err.message || String(err),
+          error: error.message || "unknown error",
           finishedAt: Date.now(),
         });
       } catch (e2) {
-        console.error("[video-worker] failed to update job status after error:", e2);
+        console.error("[video-worker] failed to update job with error", e2);
       }
     }
 
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify(
-        {
-          ok: false,
-          error: err.message || String(err),
-          jobId: pickedId,
-        },
-        null,
-        2
-      ),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ok: false,
+        error: error.message || "internal error in video-worker",
+        pickedId,
+      }),
     };
   }
 };

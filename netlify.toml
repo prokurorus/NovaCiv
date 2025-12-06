@@ -22,3 +22,10 @@
 [functions."news-cron"]
   # Раз в час по UTC
   schedule = "0 * * * *"
+[functions."create-video-job"]
+  # создаём задачу (выбирает следующий язык по кругу)
+  schedule = "0 8,20 * * *"
+
+[functions."process-video-jobs"]
+  # через пару минут после создания забираем и обрабатываем
+  schedule = "5 8,20 * * *"

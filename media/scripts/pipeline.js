@@ -204,10 +204,12 @@ async function runPipeline(logger = console, options = {}) {
   // 1. Выбираем фон
   const bgPath = pickBackground(lang, logger);
 
-  // 2. Путь для аудио/видео во временной директории
-  const tmpRoot = path.join(process.cwd(), "tmp", "shorts");
-  const audioPath = path.join(tmpRoot, `${Date.now()}_${lang}.mp3`);
-  const videoPath = path.join(tmpRoot, `${Date.now()}_${lang}.mp4`);
+  // 2. Путь для аудио/видео во временной директории (пишем в /tmp — единственное
+  // доступное на Netlify/Lambda место для записи во время выполнения)
+  const tmpRoot = path.join(os.tmpdir(), "novaciv-shorts");
+  const timestamp = Date.now();
+  const audioPath = path.join(tmpRoot, `${timestamp}_${lang}.mp3`);
+  const videoPath = path.join(tmpRoot, `${timestamp}_${lang}.mp4`);
 
   // 3. Генерируем озвучку
   await generateTTS({ lang, script, outPath: audioPath }, logger);

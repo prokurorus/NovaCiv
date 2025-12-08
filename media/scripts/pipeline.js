@@ -5,6 +5,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
 const axios = require("axios");

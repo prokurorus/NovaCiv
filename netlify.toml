@@ -16,7 +16,6 @@
   external_node_modules = ["ffmpeg-static", "openai"]
   node_bundler = "esbuild"
 
-
 [functions."news-cron"]
   schedule = "0 * * * *"
 

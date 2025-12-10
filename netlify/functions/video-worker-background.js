@@ -14,17 +14,16 @@ const FormData = require("form-data");
 const admin = require("firebase-admin");
 
 let firebaseInitialized = false;
-let pipelineRunner = null;
 
-// -------------------- Firebase --------------------
+function initFirebase(logger = console) {
+  if (firebaseInitialized) return;
 
-function initFirebase() {
-  if (!firebaseInitialized) {
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    if (!serviceAccountJson) {
-      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
-    }
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!serviceAccountJson) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
+  }
 
+  try {
     const serviceAccount = JSON.parse(serviceAccountJson);
 
     const dbUrl =
@@ -40,196 +39,229 @@ function initFirebase() {
     });
 
     firebaseInitialized = true;
-    console.log("[video-worker] Firebase initialized with", dbUrl);
+    logger.log("[video-worker] Firebase initialized with", dbUrl);
+  } catch (e) {
+    logger.error("[video-worker] Firebase init error", e);
+    throw e;
   }
-
-  return admin.database();
 }
 
-// -------------------- Pipeline loader --------------------
-
-function getPipelineRunner() {
-  if (!pipelineRunner) {
-    const imported = require("../../media/scripts/pipeline");
-    pipelineRunner =
-      imported.runPipeline || imported.default || imported;
-
-    if (typeof pipelineRunner !== "function") {
-      throw new Error(
-        "pipeline.js does not export a callable runPipeline function"
-      );
-    }
-  }
-  return pipelineRunner;
-}
-
-// -------------------- Telegram helper --------------------
-
-async function sendTelegramVideo({ videoPath, lang, topic }) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const baseChatId = process.env.TELEGRAM_NEWS_CHAT_ID;
-
-  const langLower = (lang || "ru").toLowerCase();
-  const perLangChatIds = {
+function getTelegramChatIdForLang(lang) {
+  const base = process.env.TELEGRAM_NEWS_CHAT_ID;
+  const map = {
     ru: process.env.TELEGRAM_NEWS_CHAT_ID_RU,
     en: process.env.TELEGRAM_NEWS_CHAT_ID_EN,
     de: process.env.TELEGRAM_NEWS_CHAT_ID_DE,
     es: process.env.TELEGRAM_NEWS_CHAT_ID_ES,
   };
 
-  const chatId = perLangChatIds[langLower] || baseChatId;
+  const safeLang = (lang || "ru").toLowerCase();
+
+  return map[safeLang] || base || null;
+}
+
+async function sendTelegramVideo({ lang, videoPath, caption, logger = console }) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = getTelegramChatIdForLang(lang);
 
   if (!token) {
-    console.log("[telegram] TELEGRAM_BOT_TOKEN not set, skipping");
-    return;
+    logger.log("[telegram] TELEGRAM_BOT_TOKEN not set, skipping");
+    return { ok: false, reason: "no token" };
   }
 
   if (!chatId) {
-    console.log("[telegram] no TELEGRAM_NEWS_CHAT_ID configured, skipping");
-    return;
+    logger.log("[telegram] no TELEGRAM_NEWS_CHAT_ID configured, skipping");
+    return { ok: false, reason: "no chatId" };
   }
 
-  if (!videoPath || !fs.existsSync(videoPath)) {
-    console.log("[telegram] video file not found", videoPath);
-    return;
+  if (!fs.existsSync(videoPath)) {
+    logger.log("[telegram] videoPath not found", videoPath);
+    return { ok: false, reason: "no file" };
   }
-
-  const url = `https://api.telegram.org/bot${token}/sendVideo`;
 
   const form = new FormData();
   form.append("chat_id", chatId);
+  form.append("caption", caption || "");
   form.append("supports_streaming", "true");
-  form.append(
-    "caption",
-    topic ? `NovaCiv · ${topic}` : "NovaCiv — цифровая цивилизация"
-  );
   form.append("video", fs.createReadStream(videoPath));
 
-  const headers = form.getHeaders();
+  const url = `https://api.telegram.org/bot${token}/sendVideo`;
 
-  const resp = await axios.post(url, form, { headers });
-  console.log("[telegram] sent video, ok:", resp.data && resp.data.ok);
-}
-
-// -------------------- MAIN HANDLER --------------------
-
-exports.handler = async (event) => {
-  let pickedId = null;
-  let job = null;
-  let db = null;
+  logger.log("[telegram] sending video to", chatId);
 
   try {
-    db = initFirebase();
+    const resp = await axios.post(url, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
 
-    // 1. Берём первую задачу со статусом "pending"
-    const snap = await db
-      .ref("videoJobs")
+    logger.log("[telegram] sent video, ok:", resp.data && resp.data.ok);
+    return resp.data;
+  } catch (err) {
+    if (err.response) {
+      logger.error(
+        "[telegram] send error",
+        err.response.status,
+        err.response.data
+      );
+    } else {
+      logger.error("[telegram] send error", err);
+    }
+    throw err;
+  }
+}
+
+async function handler(event, context) {
+  const logger = console;
+
+  try {
+    initFirebase(logger);
+  } catch (e) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ ok: false, error: "Firebase init failed" }),
+    };
+  }
+
+  const db = admin.database();
+  const ref = db.ref("videoJobs");
+
+  let pickedId = null;
+  let picked = null;
+
+  try {
+    const snapshot = await ref
       .orderByChild("status")
       .equalTo("pending")
       .limitToFirst(1)
       .once("value");
 
-    const jobs = snap.val();
+    const jobs = snapshot.val() || {};
 
-    if (!jobs) {
-      console.log("[video-worker] no pending jobs in videoJobs");
-      return {
-        statusCode: 200,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ok: true,
-          message: "no pending jobs in videoJobs",
-        }),
-      };
+    for (const [id, job] of Object.entries(jobs)) {
+      pickedId = id;
+      picked = job;
+      break;
     }
+  } catch (e) {
+    logger.error("[video-worker] error reading videoJobs", e);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ ok: false, error: "error reading videoJobs" }),
+    };
+  }
 
-    const [id, value] = Object.entries(jobs)[0];
-    pickedId = id;
-    job = value;
-
-    console.log("[video-worker] picked job", pickedId, job.language);
-
-    // помечаем как processing
-    await db.ref(`videoJobs/${pickedId}`).update({
-      status: "processing",
-      pickedAt: Date.now(),
-    });
-
-    // 2. Запускаем пайплайн
-    const runPipeline = getPipelineRunner();
-
-    const lang = job.language || job.lang || "ru";
-    const script = job.script || "";
-
-    const pipelineResult = await runPipeline(console, {
-      lang,
-      script,
-    });
-
-    console.log("[video-worker] pipeline finished", pipelineResult);
-
-    // 3. Отправляем видео в Telegram, если есть
-    if (pipelineResult && pipelineResult.videoPath) {
-      try {
-        await sendTelegramVideo({
-          videoPath: pipelineResult.videoPath,
-          lang,
-          topic: job.topic,
-        });
-      } catch (e) {
-        console.error("[video-worker] telegram send error", e);
-      }
-    }
-
-    // 4. Обновляем задачу как done
-    await db.ref(`videoJobs/${pickedId}`).update({
-      status: "done",
-      finishedAt: Date.now(),
-      videoPath: pipelineResult ? pipelineResult.videoPath : null,
-      audioPath: pipelineResult ? pipelineResult.audioPath : null,
-      backgroundPath: pipelineResult ? pipelineResult.backgroundPath : null,
-    });
-
+  if (!pickedId || !picked) {
+    logger.log("[video-worker] no pending jobs in videoJobs");
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ok: true,
-        id: pickedId,
-        lang,
-        message: "video generated and posted",
-        job,
-        pipeline: pipelineResult,
-      }),
+      body: JSON.stringify({ ok: true, message: "no pending jobs in videoJobs" }),
     };
-  } catch (error) {
-    console.error("[video-worker] ERROR", {
-      error: error.message,
-      stack: error.stack,
-      pickedId,
-      job,
-    });
+  }
 
-    if (pickedId && db) {
-      try {
-        await db.ref(`videoJobs/${pickedId}`).update({
-          status: "error",
-          error: error.message || "unknown error",
-          finishedAt: Date.now(),
-        });
-      } catch (e2) {
-        console.error("[video-worker] failed to update job with error", e2);
-      }
-    }
+  const safeLang = (picked.language || "ru").toLowerCase();
+
+  logger.log(
+    "[video-worker] picked job",
+    pickedId,
+    safeLang,
+    picked.topic || ""
+  );
+
+  const jobRef = ref.child(pickedId);
+
+  try {
+    await jobRef.update({
+      status: "processing",
+      startedAt: Date.now(),
+    });
+  } catch (e) {
+    logger.error("[video-worker] error updating job to processing", e);
+  }
+
+  const { runPipeline } = require("../../media/scripts/pipeline");
+
+  let pipelineResult = null;
+
+  try {
+    pipelineResult = await runPipeline({
+      script: picked.script,
+      lang: safeLang,
+      logger,
+      stamp: Date.now(),
+    });
+  } catch (e) {
+    logger.error("[video-worker] pipeline error", e);
+    try {
+      await jobRef.update({
+        status: "error",
+        errorMessage: String(e && e.message ? e.message : e),
+        finishedAt: Date.now(),
+      });
+    } catch (_) {}
 
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ok: false, error: "pipeline error" }),
+    };
+  }
+
+  logger.log("[video-worker] pipeline finished", pipelineResult);
+
+  const caption =
+    picked.caption ||
+    picked.topic ||
+    "NovaCiv — novaciv.space. Цифровая цивилизация без правителей.";
+
+  try {
+    await sendTelegramVideo({
+      lang: safeLang,
+      videoPath: pipelineResult.videoPath,
+      caption,
+      logger,
+    });
+  } catch (e) {
+    logger.error("[video-worker] telegram send error", e);
+    // не падаем из-за телеги: помечаем job как error, но возвращаем 200
+    try {
+      await jobRef.update({
+        status: "error",
+        errorMessage: "telegram send error",
+        finishedAt: Date.now(),
+      });
+    } catch (_) {}
+
+    return {
+      statusCode: 200,
       body: JSON.stringify({
         ok: false,
-        error: error.message || "internal error in video-worker",
+        error: "telegram send error",
         pickedId,
       }),
     };
   }
-};
+
+  try {
+    await jobRef.update({
+      status: "done",
+      finishedAt: Date.now(),
+      videoPath: pipelineResult.videoPath,
+    });
+  } catch (e) {
+    logger.error("[video-worker] error updating job to done", e);
+  }
+
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      ok: true,
+      id: pickedId,
+      lang: safeLang,
+      message: "video generated and posted",
+      pipeline: pipelineResult,
+    }),
+  };
+}
+
+module.exports = { handler };

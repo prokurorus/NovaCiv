@@ -5,10 +5,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const { spawn } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
-const axios = require("axios");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
@@ -16,127 +14,41 @@ const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 // простой запасной текст, если вдруг script не передали
 const FALLBACK_SCRIPTS = {
   ru: `
-Представь себе цивилизацию, где нет правителей и закрытых кабинетов.
-Все решения принимают сами граждане — открыто и прозрачно.
-
-NovaCiv — это цифровая платформа, которую мы строим вместе,
-чтобы вернуть людям право решать свою судьбу без посредников.
-
-Если тебе откликается эта идея —
-зайди на novaciv точка space
-и подпишись на будущее планеты.
-`,
+NovaCiv — это цифровая цивилизация без правителей.
+Все решения принимают сами люди — открыто и прозрачно.
+Зайди на novaciv точка space и подпишись на будущее планеты.
+`.trim(),
   en: `
-Imagine a civilization with no rulers and no closed rooms.
+NovaCiv is a digital civilization without rulers.
 Decisions are made openly by the citizens themselves.
-
-NovaCiv is a digital platform we build together
-to return people the right to decide their own future.
-
-If this idea resonates with you,
-visit novaciv dot space
-and subscribe to the future of the planet.
-`,
+Visit novaciv dot space and subscribe to the future of the planet.
+`.trim(),
   de: `
-Stell dir eine Zivilisation ohne Herrscher und ohne verschlossene Türen vor.
-Alle Entscheidungen werden offen von den Bürgern selbst getroffen.
-
-NovaCiv ist eine digitale Plattform, die wir gemeinsam aufbauen,
-um den Menschen das Recht zurückzugeben, über ihr Schicksal selbst zu entscheiden.
-
-Wenn dich diese Idee anspricht,
-besuche novaciv Punkt space
-und abonniere die Zukunft des Planeten.
-`,
+NovaCiv ist eine digitale Zivilisation ohne Herrscher.
+Alle Entscheidungen treffen die Bürger offen und transparent.
+Besuche novaciv Punkt space und abonniere die Zukunft des Planeten.
+`.trim(),
   es: `
-Imagina una civilización sin gobernantes ni despachos cerrados.
+NovaCiv es una civilización digital sin gobernantes.
 Todas las decisiones las toman abiertamente los propios ciudadanos.
-
-NovaCiv es una plataforma digital que construimos juntos
-para devolver a las personas el derecho a decidir su propio destino.
-
-Si esta idea resuena contigo,
-entra en novaciv punto space
-y suscríbete al futuro del planeta.
-`,
+Entra en novaciv punto space y suscríbete al futuro del planeta.
+`.trim(),
 };
 
-// небольшая утилита: гарантированно создаём директорию для файла
-function ensureDir(filePath) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-// выбор фоновой картинки по языку
-function pickBackground(lang, logger = console) {
-  const language = (lang || "ru").toLowerCase();
-  const root = process.cwd();
-
-  const candidates = [
-    path.join(root, "media", "backgrounds", language),
-    path.join(root, "media", "backgrounds", "en"),
-    path.join(root, "media", "backgrounds"),
-  ];
-
-  for (const dir of candidates) {
-    try {
-      const files = fs
-        .readdirSync(dir, { withFileTypes: true })
-        .filter(
-          (d) =>
-            d.isFile() && /\.(jpe?g|png)$/i.test(d.name)
-        )
-        .map((d) => path.join(dir, d.name));
-
-      if (files.length > 0) {
-        const chosen = files[Math.floor(Math.random() * files.length)];
-        logger.log("[pipeline] using background", chosen);
-        return chosen;
-      }
-    } catch (e) {
-      // если директории нет — просто идём к следующей
-      continue;
-    }
+function getVoiceForLang(lang) {
+  // Можно потом разнести по разным голосам
+  switch ((lang || "ru").toLowerCase()) {
+    case "ru":
+      return "alloy";
+    case "en":
+      return "alloy";
+    case "de":
+      return "alloy";
+    case "es":
+      return "alloy";
+    default:
+      return "alloy";
   }
-
-  throw new Error("Не удалось найти ни одного фонового изображения");
-}
-
-// генерация TTS через OpenAI
-async function generateTTS({ lang, script, outPath }, logger = console) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is not set");
-  }
-
-  const language = (lang || "ru").toLowerCase();
-  const text =
-    (script && script.trim().length > 0 ? script : FALLBACK_SCRIPTS[language]) ||
-    FALLBACK_SCRIPTS["ru"];
-
-  logger.log("[pipeline] generating TTS, lang:", language);
-
-  ensureDir(outPath);
-
-  const url = "https://api.openai.com/v1/audio/speech";
-
-  const response = await axios.post(
-    url,
-    {
-      model: OPENAI_TTS_MODEL,
-      voice: "alloy",
-      input: text,
-    },
-    {
-      responseType: "arraybuffer",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-
-  fs.writeFileSync(outPath, response.data);
-  logger.log("[pipeline] TTS saved to", outPath);
 }
 
 // утилита запуска ffmpeg
@@ -154,7 +66,7 @@ function runFfmpeg(args, logger = console) {
     );
 
     proc.on("error", (err) => {
-      logger.error("[pipeline][ffmpeg error]", err);
+      logger.error("[pipeline] ffmpeg error", err);
       reject(err);
     });
 
@@ -163,7 +75,7 @@ function runFfmpeg(args, logger = console) {
         logger.log("[pipeline] ffmpeg finished with code 0");
         resolve();
       } else {
-        const err = new Error("ffmpeg exited with code " + code);
+        const err = new Error(`ffmpeg exited with code ${code}`);
         logger.error("[pipeline] ffmpeg failed", err);
         reject(err);
       }
@@ -171,56 +83,161 @@ function runFfmpeg(args, logger = console) {
   });
 }
 
-// сборка вертикального видео 9:16
-async function buildVideo({ bgPath, audioPath, outPath }, logger = console) {
-  ensureDir(outPath);
+// утилита для выбора фоновой картинки
+function pickBackground(lang, logger = console) {
+  // Пытаемся брать из media/backgrounds/<lang>/...
+  const baseDir = path.join(__dirname, "..", "backgrounds");
+  const langDir = path.join(baseDir, lang || "ru");
+  const fallbackDir = path.join(baseDir, "ru");
 
-  const args = [
-    "-y",                // перезаписывать выходной файл
-    "-loop", "1",        // зациклить фон
-    "-i", bgPath,        // вход 0: картинка
-    "-i", audioPath,     // вход 1: аудио
-    "-c:v", "libx264",
-    "-tune", "stillimage",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    "-pix_fmt", "yuv420p",
+  function pickFrom(dir) {
+    if (!fs.existsSync(dir)) {
+      logger.warn("[pipeline] background dir not found", dir);
+      return null;
+    }
+
+    try {
+      const files = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter(
+          (d) =>
+            d.isFile() &&
+            /\.(jpe?g|png)$/i.test(d.name)
+        )
+        .map((d) => path.join(dir, d.name));
+
+      if (files.length > 0) {
+        const chosen = files[Math.floor(Math.random() * files.length)];
+        logger.log("[pipeline] using background", chosen);
+        return chosen;
+      }
+
+      logger.warn("[pipeline] no image files in dir", dir);
+      return null;
+    } catch (e) {
+      logger.error("[pipeline] error reading dir", dir, e);
+      return null;
+    }
+  }
+
+  return pickFrom(langDir) || pickFrom(fallbackDir);
+}
+
+// простой логгер для OpenAI ошибок
+function logOpenAIError(err, logger) {
+  if (err && err.response) {
+    logger.error(
+      "[pipeline][openai] error response",
+      err.response.status,
+      err.response.data
+    );
+  } else {
+    logger.error("[pipeline][openai] error", err);
+  }
+}
+
+// основной конвейер: принимает текст и язык, выдаёт путь к mp4
+async function runPipeline({
+  script,
+  lang = "ru",
+  logger = console,
+  stamp = Date.now(),
+}) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is not set");
+  }
+
+  const openai = require("openai").OpenAI
+    ? new (require("openai").OpenAI)({ apiKey: OPENAI_API_KEY })
+    : new (require("openai"))({ apiKey: OPENAI_API_KEY });
+
+  // Папка во временной директории
+  const tmpRoot = "/tmp/nova-video";
+  if (!fs.existsSync(tmpRoot)) {
+    fs.mkdirSync(tmpRoot, { recursive: true });
+  }
+
+  const safeLang = (lang || "ru").toLowerCase();
+  const voice = getVoiceForLang(safeLang);
+
+  const backgroundPath = pickBackground(safeLang, logger);
+  if (!backgroundPath) {
+    throw new Error("No background image found");
+  }
+
+  const text =
+    (script && script.trim().length > 0 && script.trim()) ||
+    FALLBACK_SCRIPTS[safeLang] ||
+    FALLBACK_SCRIPTS["en"];
+
+  const audioPath = path.join(tmpRoot, `nv-${stamp}-${safeLang}.mp3`);
+  const outPath = path.join(tmpRoot, `nv-${stamp}-${safeLang}.mp4`);
+
+  logger.log("[pipeline] runPipeline start", {
+    lang: safeLang,
+    voice,
+    audioPath,
+    outPath,
+  });
+
+  // 1) генерируем озвучку через OpenAI TTS
+  logger.log("[pipeline] generating TTS, lang:", safeLang);
+
+  try {
+    const response = await openai.audio.speech.create({
+      model: OPENAI_TTS_MODEL,
+      voice,
+      input: text,
+      format: "mp3",
+    });
+
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    fs.writeFileSync(audioPath, audioBuffer);
+    logger.log("[pipeline] TTS saved to", audioPath);
+  } catch (err) {
+    logOpenAIError(err, logger);
+    throw new Error("TTS generation failed");
+  }
+
+  // 2) собираем видео из картинки + аудио
+  const ffmpegArgs = [
+    "-y",
+    "-loop",
+    "1",
+    "-i",
+    backgroundPath,
+    "-i",
+    audioPath,
+    "-c:v",
+    "libx264",
+    "-tune",
+    "stillimage",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-pix_fmt",
+    "yuv420p",
     "-shortest",
-    "-vf", "scale=1080:1920,format=yuv420p",
+    "-vf",
+    "scale=1080:1920,format=yuv420p",
     outPath,
   ];
 
-  await runFfmpeg(args, logger);
+  await runFfmpeg(ffmpegArgs, logger);
+
+  if (!fs.existsSync(outPath)) {
+    throw new Error("ffmpeg finished but output video not found");
+  }
+
   logger.log("[pipeline] video saved to", outPath);
-}
-
-// основной конвейер
-async function runPipeline(logger = console, options = {}) {
-  const lang = options.lang || "ru";
-  const script = options.script || "";
-
-  logger.log("[pipeline] runPipeline start", { lang });
-
-  // 1. Выбираем фон
-  const bgPath = pickBackground(lang, logger);
-
-  // 2. Путь для аудио/видео во временной директории (пишем в /tmp — единственное
-  // доступное на Netlify/Lambda место для записи во время выполнения)
-  const tmpRoot = path.join(os.tmpdir(), "novaciv-shorts");
-  const timestamp = Date.now();
-  const audioPath = path.join(tmpRoot, `${timestamp}_${lang}.mp3`);
-  const videoPath = path.join(tmpRoot, `${timestamp}_${lang}.mp4`);
-
-  // 3. Генерируем озвучку
-  await generateTTS({ lang, script, outPath: audioPath }, logger);
-
-  // 4. Собираем видео
-  await buildVideo({ bgPath, audioPath, outPath: videoPath }, logger);
 
   return {
-    videoPath,
     audioPath,
-    backgroundPath: bgPath,
+    videoPath: outPath,
+    backgroundPath,
+    lang: safeLang,
+    text,
   };
 }
 

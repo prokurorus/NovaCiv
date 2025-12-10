@@ -54,16 +54,20 @@ function getVoiceForLang(lang) {
 // утилита запуска ffmpeg
 function runFfmpeg(args, logger = console) {
   return new Promise((resolve, reject) => {
-    logger.log("[pipeline] ffmpeg", ffmpegPath, args.join(" "));
+    logger.log("[pipeline] ffmpeg start", ffmpegPath, args.join(" "));
 
     const proc = spawn(ffmpegPath, args);
 
+    // Чтобы логи Netlify не задыхались, не льем весь вывод ffmpeg
+    // Если что-то пойдет не так — будет код завершения != 0
+    /*
     proc.stdout.on("data", (d) =>
       logger.log("[pipeline][ffmpeg stdout]", d.toString())
     );
     proc.stderr.on("data", (d) =>
       logger.log("[pipeline][ffmpeg stderr]", d.toString())
     );
+    */
 
     proc.on("error", (err) => {
       logger.error("[pipeline] ffmpeg error", err);

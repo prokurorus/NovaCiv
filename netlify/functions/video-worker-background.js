@@ -1,4 +1,4 @@
-// netlify/functions/video-worker.js
+// netlify/functions/video-worker-background.js
 //
 // Видео-воркер NovaCiv:
 //
@@ -115,6 +115,7 @@ async function sendTelegramVideo({ lang, videoPath, caption, logger = console })
 async function handler(event, context) {
   const logger = console;
 
+  // 1. Firebase
   try {
     initFirebase(logger);
   } catch (e) {
@@ -130,6 +131,7 @@ async function handler(event, context) {
   let pickedId = null;
   let picked = null;
 
+  // 2. Берём первую pending-задачу
   try {
     const snapshot = await ref
       .orderByChild("status")
@@ -180,6 +182,7 @@ async function handler(event, context) {
     logger.error("[video-worker] error updating job to processing", e);
   }
 
+  // 3. Генерация видео через pipeline
   const { runPipeline } = require("../../media/scripts/pipeline");
 
   let pipelineResult = null;
@@ -207,13 +210,25 @@ async function handler(event, context) {
     };
   }
 
-  logger.log("[video-worker] pipeline finished", pipelineResult);
+  logger.log("[video-worker] pipeline finished", {
+    lang: safeLang,
+    videoPath: pipelineResult && pipelineResult.videoPath,
+  });
 
   const caption =
     picked.caption ||
     picked.topic ||
     "NovaCiv — novaciv.space. Цифровая цивилизация без правителей.";
 
+  // ✳️ МАРКЕР ПЕРЕД ТЕЛЕГРАМОЙ
+  const chatIdForLog = getTelegramChatIdForLang(safeLang);
+  logger.log("[video-worker] BEFORE TELEGRAM", {
+    lang: safeLang,
+    chatId: chatIdForLog,
+    videoPath: pipelineResult && pipelineResult.videoPath,
+  });
+
+  // 4. Отправка в Telegram
   try {
     await sendTelegramVideo({
       lang: safeLang,
@@ -221,8 +236,13 @@ async function handler(event, context) {
       caption,
       logger,
     });
+
+    // ✳️ МАРКЕР УСПЕХА
+    logger.log("[video-worker] AFTER TELEGRAM success");
   } catch (e) {
-    logger.error("[video-worker] telegram send error", e);
+    // ✳️ МАРКЕР ОШИБКИ
+    logger.error("[video-worker] AFTER TELEGRAM error", e);
+
     // не падаем из-за телеги: помечаем job как error, но возвращаем 200
     try {
       await jobRef.update({
@@ -242,6 +262,7 @@ async function handler(event, context) {
     };
   }
 
+  // 5. Обновляем статус job
   try {
     await jobRef.update({
       status: "done",

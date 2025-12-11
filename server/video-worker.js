@@ -148,6 +148,15 @@ async function processOneJob() {
     });
 
     console.log("[worker] pipeline finished", {
+      // --- YOUTUBE UPLOAD ---
+      try {
+        const uploadToYouTube = require("./youtube");
+        const ytId = await uploadToYouTube(result.videoPath, job.title);
+        console.log("[youtube] uploaded:", ytId);
+      } catch (err) {
+        console.error("[youtube] error:", err);
+      }
+
       lang: safeLang,
       videoPath: pipelineResult && pipelineResult.videoPath,
     });

@@ -58,16 +58,14 @@ function runFfmpeg(args, logger = console) {
 
     const proc = spawn(ffmpegPath, args);
 
-    // Чтобы логи Netlify не задыхались, не льем весь вывод ffmpeg
-    // Если что-то пойдет не так — будет код завершения != 0
-    /*
-    proc.stdout.on("data", (d) =>
-      logger.log("[pipeline][ffmpeg stdout]", d.toString())
-    );
-    proc.stderr.on("data", (d) =>
-      logger.log("[pipeline][ffmpeg stderr]", d.toString())
-    );
-    */
+    // ВАЖНО: читаем вывод, но не логируем — чтобы не переполнялся буфер
+    proc.stdout.on("data", () => {
+      // можно ничего не делать, просто читаем чтобы не блокировать ffmpeg
+    });
+
+    proc.stderr.on("data", () => {
+      // сюда ffmpeg пишет прогресс и предупреждения — мы их глотаем молча
+    });
 
     proc.on("error", (err) => {
       logger.error("[pipeline] ffmpeg error", err);

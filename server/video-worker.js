@@ -148,18 +148,41 @@ async function processOneJob() {
     });
 
     console.log("[worker] pipeline finished", {
-      // --- YOUTUBE UPLOAD ---
-      try {
-        const uploadToYouTube = require("./youtube");
-        const ytId = await uploadToYouTube(result.videoPath, job.title);
-        console.log("[youtube] uploaded:", ytId);
-      } catch (err) {
-        console.error("[youtube] error:", err);
-      }
-
       lang: safeLang,
       videoPath: pipelineResult && pipelineResult.videoPath,
     });
+
+    // --- Загрузка на YouTube (если включено в .env) ---
+    if (process.env.YOUTUBE_UPLOAD_ENABLED === "true") {
+      try {
+        const uploadToYouTube = require("./youtube");
+
+        const ytTitle =
+          job.title ||
+          job.topic ||
+          (safeLang === "de"
+            ? "Erste Begegnung mit NovaCiv"
+            : safeLang === "en"
+            ? "First contact with NovaCiv"
+            : "Первое знакомство с NovaCiv");
+
+        const ytId = await uploadToYouTube(
+          pipelineResult.videoPath,
+          ytTitle
+        );
+
+        console.log("[youtube] uploaded:", ytId);
+
+        await jobRef.update({
+          youtubeId: ytId,
+        });
+      } catch (err) {
+        console.error("[youtube] error:", err);
+        await jobRef.update({
+          youtubeError: String(err && err.message ? err.message : err),
+        });
+      }
+    }
 
     const caption =
       job.caption ||

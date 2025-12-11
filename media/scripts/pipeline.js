@@ -90,7 +90,7 @@ function runFfmpeg(args, logger = console) {
 // утилита для выбора фоновой картинки
 function pickBackground(lang, logger = console) {
   // Пытаемся брать из media/backgrounds/<lang>/...
-  const baseDir = path.join(__dirname, "..", "backgrounds");
+  const baseDir = path.join(process.cwd(), "media", "backgrounds");
   const langDir = path.join(baseDir, lang || "ru");
   const fallbackDir = path.join(baseDir, "ru");
 

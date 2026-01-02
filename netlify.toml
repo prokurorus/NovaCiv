@@ -19,5 +19,8 @@
 [functions."news-cron"]
   schedule = "0 * * * *"
 
+[functions."fetch-news"]
+  schedule = "0 */3 * * *"
+
 [functions."video-worker"]
   schedule = "*/15 * * * *"

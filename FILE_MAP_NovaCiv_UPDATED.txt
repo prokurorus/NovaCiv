@@ -135,10 +135,7 @@ create-video-job.js
   Добавляет задачу в Firebase videoJobs/{jobId} со статусом pending;
   Защищён секретом DOMOVOY_CRON_SECRET (если вызывается по крону / из домового).
 
-auto-create-video-job.js
-  Автоматическое создание видео-задач (вероятно, по расписанию или триггеру).
-
-video-worker-background.js
+video-worker.js (ранее video-worker-background.js)
   Читает очередную pending-задачу из videoJobs;
   С помощью OpenAI генерирует голос (TTS), вызывает FFmpeg для сборки видео;
   Берёт фон из media/backgrounds/<lang>/...;
@@ -148,18 +145,25 @@ video-worker-background.js
   Обновляет статус задачи (done / error) в videoJobs.
   Запускается по расписанию (каждые 15 минут) через netlify.toml.
 
-generate-video.js, generate-video-background.js, test-video.js
-  Вспомогательные функции для генерации видео и тестирования.
+generate-video.js, generate-video-background.js
+  Вспомогательные функции для генерации видео.
+  generate-video-background.js вызывается из generate-video.js.
 
 fetch-news.js
   Подбор новостей из внешних RSS / API;
-  Запись очереди в Firebase newsQueue, кэш в newsMeta;
-  Использует NEWS_CRON_SECRET, OPENAI_API_KEY.
+  Обработка через OpenAI (анализ и перевод);
+  Сохранение в Firebase forum/topics (section: "news");
+  Использует NEWS_CRON_SECRET, OPENAI_API_KEY, FIREBASE_DB_URL.
+  Запускается по расписанию (каждые 3 часа: 0 */3 * * *) через netlify.toml.
 
 news-cron.js
-  Крон-функция для автоматического запуска fetch-news (каждый час через netlify.toml).
+  Читает новые темы из Firebase (forum/topics, section: "news");
+  Отправляет их в Telegram-каналы по языкам (RU/EN/DE);
+  Помечает темы как отправленные (telegramPostedAt).
+  Запускается по расписанию (каждый час: 0 * * * *) через netlify.toml.
 
-post-news-to-telegram.js
+post-news-to-telegram.js [DEPRECATED]
+  ⚠️ DEPRECATED: Используйте news-cron.js вместо этой функции.
   Автоматический постинг переработанных новостей в Telegram-каналы NovaCiv;
   Использует TELEGRAM_BOT_TOKEN, TELEGRAM_NEWS_CHAT_ID*, OPENAI_API_KEY (переписывание новости через призму NovaCiv).
 
@@ -167,16 +171,17 @@ post-to-telegram.js
   Базовая отправка сообщений / медиа в Telegram-каналы;
   Общий вспомогательный endpoint для остальных функций.
 
-domovoy-auto-post.js, domovoy-auto-reply.js, domovoy-reply.js
-  Периодически «будят» Домового и создают авто-ответы через секреты DOMOVOY_CRON_SECRET, DOMOVOY_REPLY_CRON_SECRET.
+domovoy-auto-post.js, domovoy-auto-reply.js
+  Периодически «будят» Домового и создают авто-ответы через секрет DOMOVOY_CRON_SECRET.
+
+domovoy-reply.js [DEPRECATED]
+  ⚠️ DEPRECATED: Используйте domovoy-auto-reply.js вместо этой функции.
+  Периодически создаёт авто-ответы через секрет DOMOVOY_REPLY_CRON_SECRET.
 
 send-email.js
   Обработка формы с сайта («Присоединиться»);
   Отправка письма на почту через SENDGRID_API_KEY;
   Дополнительно может писать заявку в Firebase (contactRequests).
-
-hello.js
-  Тестовая функция.
 
 Все функции используют Firebase Admin через FIREBASE_SERVICE_ACCOUNT_JSON и FIREBASE_DATABASE_URL / FIREBASE_DB_URL.
 
@@ -207,7 +212,7 @@ media/scripts/pipeline.js
     - TTS через OpenAI (OPENAI_TTS_MODEL)
     - FFmpeg для сборки видео из фона + аудио
     - Выбор случайного фона из media/backgrounds/<lang>/
-  Используется netlify/functions/video-worker-background.js и server/video-worker.js.
+  Используется netlify/functions/video-worker.js и server/video-worker.js.
 
 media/voices/openai/
   Конфигурации голосов OpenAI:
@@ -293,14 +298,14 @@ OPENAI_API_KEY
   Ключ доступа к OpenAI. Используется:
     netlify/functions/ai-domovoy.js
     netlify/functions/ai-voice.js
-    netlify/functions/video-worker-background.js
+    netlify/functions/video-worker.js
     netlify/functions/post-news-to-telegram.js (переписывание новостей)
 
 OPENAI_MODEL
   Основная текстовая модель (например, gpt-4o-mini). Используется в ai-domovoy.js, post-news-to-telegram.js.
 
 OPENAI_TTS_MODEL
-  Модель для синтеза речи (TTS). Используется в ai-voice.js и video-worker-background.js.
+  Модель для синтеза речи (TTS). Используется в ai-voice.js и video-worker.js.
 
 DOMOVOY_API_URL
   URL до функции Домового (обычно /.netlify/functions/ai-domovoy).
@@ -347,7 +352,7 @@ TELEGRAM_NEWS_CHAT_ID_ES
 Используются в:
   netlify/functions/post-to-telegram.js
   netlify/functions/post-news-to-telegram.js
-  netlify/functions/video-worker-background.js (постинг видео)
+  netlify/functions/video-worker.js (постинг видео)
 
 7.4. Новости и крон-ключи
 
@@ -372,11 +377,11 @@ YOUTUBE_REFRESH_TOKEN
 
 YOUTUBE_UPLOAD_ENABLED
   Флаг true/false.
-  Если true, video-worker-background.js после сборки видео:
+  Если true, video-worker.js после сборки видео:
     использует YouTube Data API v3 для загрузки ролика в канал.
 
 Используются в:
-  netlify/functions/video-worker-background.js
+  netlify/functions/video-worker.js
   server/video-worker.js (если запускается отдельно)
 
 8. Как это работает (How it runs)
@@ -399,8 +404,9 @@ npm run dev
   Media: Включается в функции через included_files = ["media/**"] в netlify.toml
 
 Расписание (Scheduled Functions):
-  news-cron: каждый час (0 * * * *) → запускает fetch-news.js
-  video-worker: каждые 15 минут (*/15 * * * *) → запускает video-worker-background.js
+  fetch-news: каждые 3 часа (0 */3 * * *) → получает новости из RSS, обрабатывает через OpenAI, сохраняет в Firebase
+  news-cron: каждый час (0 * * * *) → читает новые темы из Firebase и отправляет в Telegram
+  video-worker: каждые 15 минут (*/15 * * * *) → обрабатывает pending задачи из videoJobs, генерирует видео
 
 Роутинг:
   Все запросы перенаправляются на /index.html (SPA routing) через netlify.toml redirects
@@ -412,7 +418,7 @@ server/video-worker.js
   Требует .env файл с переменными окружения
   Работает в бесконечном цикле, проверяет Firebase videoJobs каждые 15 секунд
   Использует media/scripts/pipeline.js для генерации видео
-  Альтернатива Netlify scheduled function video-worker-background.js
+  Альтернатива Netlify scheduled function video-worker.js
 
 9. Как этим пользоваться дальше
 

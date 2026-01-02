@@ -1,3 +1,7 @@
+// ⚠️ DEPRECATED: This function is deprecated. Use news-cron.js instead.
+// news-cron.js is scheduled and provides the same functionality.
+// This file is kept for reference but should not be used in production.
+//
 // netlify/functions/post-news-to-telegram.js
 //
 // Берёт ГОТОВЫЕ новости из Firebase (forum/topics, section: "news")

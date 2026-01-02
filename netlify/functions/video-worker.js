@@ -1,4 +1,4 @@
-// netlify/functions/video-worker-background.js
+// netlify/functions/video-worker.js
 //
 // Видео-воркер NovaCiv:
 //

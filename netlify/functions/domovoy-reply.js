@@ -1,3 +1,7 @@
+// ⚠️ DEPRECATED: This function is deprecated. Use domovoy-auto-reply.js instead.
+// domovoy-auto-reply.js provides similar functionality with better logic.
+// This file is kept for reference but should not be used in production.
+//
 // netlify/functions/domovoy-reply.js
 //
 // Домовой-ответчик:

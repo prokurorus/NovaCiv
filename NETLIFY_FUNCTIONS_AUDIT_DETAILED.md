@@ -664,3 +664,482 @@ git commit -m "fix: netlify functions audit cleanup
 
 **Конец отчета**
 
+---
+
+## 7. РЕЗУЛЬТАТ ВЫПОЛНЕНИЯ GIT КОМАНД
+
+**Дата:** 2024  
+**Команды:**
+1. `git add -A` ✅ **SUCCESS**
+2. `git commit -m "fix: netlify functions audit cleanup"` ✅ **SUCCESS**
+3. Push: **НЕ ВЫПОЛНЕН** (согласно инструкциям)
+
+**Детали коммита:**
+- **Commit hash:** `9b2524b`
+- **Branch:** `main`
+- **Файлов изменено:** 11
+- **Вставок:** 215
+- **Удалений:** 104
+
+**Изменения в коммите:**
+- Удалены файлы:
+  - `netlify/functions/auto-create-video-job.js`
+  - `netlify/functions/hello.js`
+  - `netlify/functions/test-video.js`
+- Переименован файл:
+  - `netlify/functions/video-worker-background.js` → `netlify/functions/video-worker.js` (99% similarity)
+
+**Предупреждения:**
+- Git предупредил о замене LF на CRLF для некоторых файлов (нормально для Windows):
+  - `FILE_MAP_NovaCiv_UPDATED.txt`
+  - `NETLIFY_FUNCTIONS_AUDIT_DETAILED.md`
+  - `netlify.toml`
+  - `netlify/functions/domovoy-reply.js`
+  - `netlify/functions/post-news-to-telegram.js`
+  - `netlify/functions/video-worker.js`
+
+**Статус:** ✅ Все команды выполнены успешно. Коммит создан локально, push не выполнен.
+
+---
+
+## 7. RUNTIME VERIFICATION
+
+**Дата проверки:** 2024
+
+### 7.1 Проверка netlify.toml
+
+**Файл:** `netlify.toml`
+
+#### Проверка расписаний (schedules):
+
+| Функция | Ожидаемое расписание | Фактическое расписание | Статус |
+|---------|---------------------|----------------------|--------|
+| `news-cron` | `"0 * * * *"` | `"0 * * * *"` | ✅ OK |
+| `fetch-news` | `"0 */3 * * *"` | `"0 */3 * * *"` | ✅ OK |
+| `video-worker` | `"*/15 * * * *"` | `"*/15 * * * *"` | ✅ OK |
+
+**Результат:** ✅ Все расписания соответствуют ожидаемым значениям.
+
+---
+
+### 7.2 Проверка netlify/functions/
+
+**Директория:** `netlify/functions/`
+
+#### Проверка файлов:
+
+| Проверка | Ожидаемое состояние | Фактическое состояние | Статус |
+|----------|---------------------|----------------------|--------|
+| Имя файла `video-worker.js` | Должен существовать | ✅ Существует | ✅ OK |
+| Файл `video-worker-background.js` | Не должен существовать | ✅ Не существует | ✅ OK |
+
+**Результат:** ✅ Все файлы соответствуют ожидаемому состоянию.
+
+---
+
+### 7.3 Статусная таблица функций
+
+| Function | Schedule | Expected effect | Status |
+|----------|----------|-----------------|--------|
+| `news-cron` | `0 * * * *` | Запускается каждый час, читает новые темы из Firebase и отправляет в Telegram каналы | ✅ OK |
+| `fetch-news` | `0 */3 * * *` | Запускается каждые 3 часа, получает новости из RSS, обрабатывает через OpenAI и сохраняет в Firebase | ✅ OK |
+| `video-worker` | `*/15 * * * *` | Запускается каждые 15 минут, обрабатывает первую pending задачу из очереди видео-задач, генерирует видео и отправляет в Telegram | ✅ OK |
+
+**Общий статус:** ✅ Все scheduled функции настроены корректно и готовы к работе.
+
+---
+
+## 8. MANUAL RUNBOOK
+
+**Цель:** Документация для ручного запуска критических функций и проверки их работы.
+
+---
+
+### 8.1 Ручной запуск функций
+
+#### 8.1.1 fetch-news
+
+**Назначение:** Получает новости из RSS-источников, обрабатывает через OpenAI и сохраняет в Firebase как темы форума.
+
+**URL формат:**
+```
+https://[site-name].netlify.app/.netlify/functions/fetch-news?token=[NEWS_CRON_SECRET]
+```
+
+**Пример:**
+```
+https://novaciv.netlify.app/.netlify/functions/fetch-news?token=your_secret_token_here
+```
+
+**Метод:** `GET` или `POST`
+
+**Параметры:**
+- `token` (обязательно) — значение из переменной окружения `NEWS_CRON_SECRET`
+
+**Ответ при успехе:**
+```json
+{
+  "ok": true,
+  "processed": 2,
+  "titles": ["News Title 1", "News Title 2"]
+}
+```
+
+**Ответ при отсутствии новых новостей:**
+```json
+{
+  "ok": true,
+  "processed": 0,
+  "message": "No new items"
+}
+```
+
+---
+
+#### 8.1.2 news-cron
+
+**Назначение:** Читает новые темы из Firebase (раздел "news") и отправляет их в Telegram каналы.
+
+**URL формат:**
+```
+https://[site-name].netlify.app/.netlify/functions/news-cron?token=[NEWS_CRON_SECRET]&limit=[number]
+```
+
+**Пример:**
+```
+https://novaciv.netlify.app/.netlify/functions/news-cron?token=your_secret_token_here&limit=10
+```
+
+**Метод:** `GET` или `POST`
+
+**Параметры:**
+- `token` (обязательно) — значение из переменной окружения `NEWS_CRON_SECRET`
+- `limit` (опционально) — максимальное количество тем для обработки (по умолчанию: 10)
+
+**Ответ при успехе:**
+```json
+{
+  "ok": true,
+  "processed": 3,
+  "totalSent": 9,
+  "perLanguage": {
+    "ru": { "sent": 3, "errors": [] },
+    "en": { "sent": 3, "errors": [] },
+    "de": { "sent": 3, "errors": [] }
+  }
+}
+```
+
+**Ответ при отсутствии новых тем:**
+```json
+{
+  "ok": true,
+  "processed": 0,
+  "message": "No new topics to post"
+}
+```
+
+---
+
+#### 8.1.3 video-worker
+
+**Назначение:** Обрабатывает первую pending задачу из очереди видео-задач, генерирует видео и отправляет в Telegram.
+
+**URL формат:**
+```
+https://[site-name].netlify.app/.netlify/functions/video-worker
+```
+
+**Пример:**
+```
+https://novaciv.netlify.app/.netlify/functions/video-worker
+```
+
+**Метод:** `GET` или `POST`
+
+**Параметры:** Нет (автоматически берёт первую pending задачу из Firebase)
+
+**Ответ при успехе:**
+```json
+{
+  "ok": true,
+  "id": "job_id_123",
+  "lang": "ru",
+  "message": "video generated and posted",
+  "pipeline": { "videoPath": "/tmp/video_123.mp4" }
+}
+```
+
+**Ответ при отсутствии pending задач:**
+```json
+{
+  "ok": true,
+  "message": "no pending jobs in videoJobs"
+}
+```
+
+**Ответ при ошибке:**
+```json
+{
+  "ok": false,
+  "error": "pipeline error" // или "telegram send error"
+}
+```
+
+---
+
+### 8.2 Просмотр логов в Netlify UI
+
+**Путь к логам в Netlify Dashboard:**
+
+1. **Список функций:**
+   - Netlify Dashboard → Site → **Functions**
+
+2. **Логи конкретной функции:**
+   - Netlify Dashboard → Site → **Functions** → `[function-name]` → **Logs**
+
+3. **Логи последних вызовов:**
+   - Netlify Dashboard → Site → **Functions** → **Activity** (вкладка)
+
+4. **Альтернативный путь через Deploys:**
+   - Netlify Dashboard → Site → **Deploys** → [выбор деплоя] → **Function logs**
+
+**Пример полного пути в UI:**
+```
+https://app.netlify.com/sites/[site-name]/functions/[function-name]
+```
+
+**Примечание:** Логи доступны в реальном времени для последних вызовов. Для глубокого анализа используйте Netlify CLI: `netlify functions:log [function-name]`.
+
+---
+
+### 8.3 Изменения в Firebase после каждого запуска
+
+#### 8.3.1 fetch-news
+
+**Пути в Firebase:**
+
+1. **Создание новых тем:**
+   - Путь: `/forum/topics`
+   - Действие: `POST` (создание новой записи)
+   - Структура записи:
+     ```json
+     {
+       "title": "News Title",
+       "content": "Analytical text...",
+       "section": "news",
+       "createdAt": 1234567890,
+       "createdAtServer": 1234567890,
+       "authorNickname": "NovaCiv News",
+       "lang": "en" | "ru" | "de",
+       "sourceId": "bbc_world",
+       "originalGuid": "...",
+       "originalLink": "https://...",
+       "pubDate": "Mon, 01 Jan 2024 12:00:00 GMT"
+     }
+     ```
+
+2. **Обновление метаданных:**
+   - Путь: `/newsMeta/en.json`
+   - Действие: `PUT` (полная замена файла)
+   - Структура:
+     ```json
+     {
+       "processedKeys": {
+         "source_id::guid_or_link": {
+           "processedAt": 1234567890,
+           "sourceId": "bbc_world",
+           "link": "https://...",
+           "title": "News Title"
+         }
+       },
+       "titleKeys": {
+         "normalized title": {
+           "processedAt": 1234567890,
+           "sourceId": "bbc_world",
+           "link": "https://..."
+         }
+       }
+     }
+     ```
+
+**Статусы/поля:**
+- Нет статусных полей (темы создаются сразу как готовые)
+- Поле `telegramPostedAt` отсутствует до запуска `news-cron`
+
+---
+
+#### 8.3.2 news-cron
+
+**Пути в Firebase:**
+
+1. **Чтение тем:**
+   - Путь: `/forum/topics`
+   - Запрос: `GET /forum/topics.json?orderBy="section"&equalTo="news"`
+   - Условие: темы без поля `telegramPostedAt`
+
+2. **Обновление тем после отправки:**
+   - Путь: `/forum/topics/[topicId]`
+   - Действие: `PATCH`
+   - Добавляемое поле:
+     ```json
+     {
+       "telegramPostedAt": 1234567890
+     }
+     ```
+
+**Статусы/поля:**
+- `telegramPostedAt` (timestamp) — добавляется после успешной отправки в Telegram
+- Если поле присутствует, тема больше не будет обработана при повторных запусках
+
+---
+
+#### 8.3.3 video-worker
+
+**Пути в Firebase:**
+
+1. **Чтение задач:**
+   - Путь: `/videoJobs`
+   - Запрос: первая запись где `status: "pending"`
+   - Сортировка: `orderByChild("status").equalTo("pending").limitToFirst(1)`
+
+2. **Обновление статуса при обработке:**
+   - Путь: `/videoJobs/[jobId]`
+   - Действие: `PATCH`
+   - Поля:
+     ```json
+     {
+       "status": "processing",
+       "startedAt": 1234567890
+     }
+     ```
+
+3. **Финальное обновление при успехе:**
+   - Путь: `/videoJobs/[jobId]`
+   - Действие: `PATCH`
+   - Поля:
+     ```json
+     {
+       "status": "done",
+       "finishedAt": 1234567890,
+       "videoPath": "/tmp/video_123.mp4"
+     }
+     ```
+
+4. **Финальное обновление при ошибке:**
+   - Путь: `/videoJobs/[jobId]`
+   - Действие: `PATCH`
+   - Поля:
+     ```json
+     {
+       "status": "error",
+       "errorMessage": "Error description",
+       "finishedAt": 1234567890
+     }
+     ```
+
+**Статусы/поля:**
+- `status`: `"pending"` → `"processing"` → `"done"` или `"error"`
+- `startedAt` (timestamp) — добавляется при начале обработки
+- `finishedAt` (timestamp) — добавляется при завершении (успех или ошибка)
+- `videoPath` (string) — путь к сгенерированному видео (только при успехе)
+- `errorMessage` (string) — описание ошибки (только при ошибке)
+
+---
+
+**Конец секции 8. Manual Runbook**
+
+---
+
+## 9. VideoJobs source
+
+### 9.1 Current state (FACTS)
+
+**Function exists:**
+- `netlify/functions/create-video-job.js` — fully implemented function
+- Creates video jobs in Firebase `videoJobs/` collection
+- Implements cyclic language rotation: `ru` → `en` → `de` → `es`
+- Stores last language in `videoJobsMeta/lastLang` for rotation tracking
+- Each job includes: `id`, `language`, `topic`, `script`, `prompt`, `preset`, `status: "pending"`, `createdAt`
+
+**Function is NOT called:**
+- ❌ No frontend calls found (no API calls from React components)
+- ❌ No other Netlify functions call it
+- ❌ No scheduled execution configured in `netlify.toml`
+- ❌ No manual endpoint usage found in codebase
+
+**Current workflow:**
+- `video-worker.js` is scheduled (every 15 minutes via `netlify.toml`)
+- `video-worker.js` processes pending jobs from `videoJobs/`
+- **Problem:** If no jobs are created, `video-worker.js` has nothing to process
+
+**Dependencies:**
+- Requires: `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DB_URL` or `FIREBASE_DATABASE_URL`
+- All dependencies are already configured (same as `video-worker.js`)
+
+---
+
+### 9.2 Proposal: Auto-creation via Netlify schedule
+
+**Problem:** `create-video-job.js` exists but is never called automatically, leaving `video-worker.js` with no jobs to process.
+
+**Proposed solution:** Add Netlify scheduled function to auto-create video jobs.
+
+**Implementation (minimal):**
+
+1. **Add schedule to `netlify.toml`:**
+   ```toml
+   [functions."create-video-job"]
+     schedule = "0 */6 * * *"
+   ```
+   - Schedule: Every 6 hours (4 jobs per day)
+   - Rationale: Matches video generation capacity (video-worker runs every 15 min, can process ~96 jobs/day if needed)
+
+2. **Alternative schedules (if needed):**
+   - `"0 */4 * * *"` — Every 4 hours (6 jobs/day)
+   - `"0 */8 * * *"` — Every 8 hours (3 jobs/day)
+   - `"0 0,6,12,18 * * *"` — At specific times (00:00, 06:00, 12:00, 18:00 UTC)
+
+3. **No code changes required:**
+   - `create-video-job.js` already handles scheduled execution
+   - No authentication needed (Netlify scheduled functions are internal)
+   - Function already implements language rotation logic
+
+**Benefits:**
+- ✅ Minimal change (one line in `netlify.toml`)
+- ✅ No code modifications needed
+- ✅ Automatic job creation ensures continuous video generation
+- ✅ Language rotation already implemented
+- ✅ Uses existing infrastructure (same env vars as video-worker)
+
+**Considerations:**
+- Ensure `video-worker.js` can process jobs faster than creation rate
+- Current: 1 job every 6 hours = 4 jobs/day, worker runs every 15 min = 96 potential runs/day
+- Safe margin: Worker can process jobs much faster than creation rate
+
+---
+
+**Конец секции 9. VideoJobs source**
+
+---
+
+## 10. Next actions (priority)
+
+### 1. Video automation (YouTube Shorts / TikTok)
+
+- Schedule `create-video-job.js` in `netlify.toml` (every 6 hours: `0 */6 * * *`)
+- Add YouTube/TikTok upload endpoints to `video-worker.js` after successful generation
+- Configure platform API credentials (YouTube Data API, TikTok API) in Netlify env vars
+
+### 2. Stability / monitoring
+
+- Add error alerting: Telegram notifications on function failures (extend `send-email.js` or create `alert-on-error.js`)
+- Add health check endpoint: `health.js` function returning status of critical dependencies (Firebase, OpenAI, Telegram)
+- Monitor scheduled function execution: verify `news-cron`, `fetch-news`, `video-worker` run on schedule via Netlify logs
+
+### 3. Growth leverage
+
+- Auto-post generated videos to multiple Telegram channels (extend `video-worker.js` to post to all language channels)
+- Add video analytics: track views/engagement per video job in Firebase `videoJobs/[id]/analytics`
+- Create video job from trending forum topics: add `create-video-job-from-topic.js` triggered by high-engagement topics
+

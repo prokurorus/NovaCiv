@@ -125,12 +125,33 @@ async function uploadToYouTube(videoPath, title, options = {}) {
     console.log("[youtube] uploaded OK, videoId:", videoId);
     return videoId;
   } catch (err) {
-    // Try to show useful details
+    // Detect and log invalid_grant errors with actionable hints
     const apiData = err?.response?.data;
-    if (apiData) {
-      console.error("[youtube] API error data:", JSON.stringify(apiData, null, 2));
+    const errorMessage = err?.message || String(err);
+    const errorCode = apiData?.error?.errors?.[0]?.reason || apiData?.error?.code;
+    
+    if (errorMessage.includes("invalid_grant") || errorCode === "invalid_grant") {
+      console.error("[youtube] ❌ INVALID_GRANT ERROR DETECTED");
+      console.error("[youtube] This usually means:");
+      console.error("[youtube]   1. Refresh token was revoked (user removed app access)");
+      console.error("[youtube]   2. Client ID/Secret mismatch (wrong OAuth app)");
+      console.error("[youtube]   3. Clock skew (server time is incorrect)");
+      console.error("[youtube]   4. Token expired and cannot be refreshed");
+      console.error("[youtube]");
+      console.error("[youtube] ACTION REQUIRED: Regenerate refresh token");
+      console.error("[youtube] Run: node scripts/youtube-auth-cli.js");
+      console.error("[youtube] Then update YOUTUBE_REFRESH_TOKEN in .env");
+      console.error("[youtube]");
+      if (apiData) {
+        console.error("[youtube] API error details:", JSON.stringify(apiData, null, 2));
+      }
+    } else {
+      // Try to show useful details for other errors
+      if (apiData) {
+        console.error("[youtube] API error data:", JSON.stringify(apiData, null, 2));
+      }
     }
-    console.error("[youtube] upload failed:", err?.message || err);
+    console.error("[youtube] upload failed:", errorMessage);
     throw err;
   }
 }

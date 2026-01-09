@@ -115,6 +115,22 @@ async function sendTelegramVideo({ lang, videoPath, caption, logger = console })
 async function handler(event, context) {
   const logger = console;
 
+  // ⚠️ DISABLED: Job processing is handled by PM2 server/video-worker.js only
+  // This function is kept for backward compatibility but does not process jobs.
+  // Jobs are created by create-video-job.js and processed by server/video-worker.js
+  logger.log("[video-worker] This function is disabled. Jobs are processed by PM2 server/video-worker.js");
+  
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ 
+      ok: true, 
+      message: "Job processing is handled by PM2 server/video-worker.js. This function is disabled.",
+      note: "Use create-video-job.js to enqueue jobs, server/video-worker.js processes them"
+    }),
+  };
+
+  // OLD CODE BELOW (disabled):
+  /*
   // 1. Firebase
   try {
     initFirebase(logger);
@@ -283,6 +299,7 @@ async function handler(event, context) {
       pipeline: pipelineResult,
     }),
   };
+  */
 }
 
 module.exports = { handler };

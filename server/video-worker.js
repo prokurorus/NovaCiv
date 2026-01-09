@@ -1,47 +1,50 @@
 // server/video-worker.js
 //
-// Фоновый видео-воркер для отдельного сервера.
-// Берёт задачи из Firebase (videoJobs), рендерит видео через pipeline,
-// отправляет в Telegram, отмечает задачу как done/error.
+// Фоновый видео-воркер для отдельного сервера (PM2).
+// Архитектура v2: feature flags управляются через Firebase, env только для секретов.
+//
+// Что делает:
+// 1) Берёт задачи из Firebase (videoJobs) со статусом "pending"
+// 2) Генерирует видео через media/scripts/pipeline.js
+// 3) Загружает на YouTube (если включено в Firebase config/features/youtubeUploadEnabled)
+// 4) Отправляет в Telegram (если включено в Firebase config/features/telegramEnabled)
+// 5) Помечает задачу как "done" или "error"
 
-require("dotenv").config();
+// Load .env with absolute path (no CWD dependence)
+require("dotenv").config({ path: "/root/NovaCiv/.env" });
 
 const fs = require("fs");
-const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
-const admin = require("firebase-admin");
 
-// Подтягиваем наш же pipeline
+// Модули конфигурации
+const { getDatabase } = require("./config/firebase-config");
+
+// Pipeline для генерации видео
 const { runPipeline } = require("../media/scripts/pipeline");
 
 // --- Инициализация Firebase --- //
 
-if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-  throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not set");
+const logger = console;
+
+try {
+  getDatabase(logger);
+  logger.log("[worker] Firebase initialized");
+} catch (error) {
+  logger.error("[worker] Failed to initialize Firebase:", error);
+  process.exit(1);
 }
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-
-const dbUrl =
-  process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
-
-if (!dbUrl) {
-  throw new Error("FIREBASE_DB_URL / FIREBASE_DATABASE_URL is not set");
-}
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: dbUrl,
-});
-
-const db = admin.database();
+const db = getDatabase(logger);
 const jobsRef = db.ref("videoJobs");
 
-console.log("[worker] Firebase initialized with", dbUrl);
+// --- Telegram --- //
 
-// --- Телега --- //
-
+/**
+ * Получает chat ID для языка
+ * @param {string} lang - Язык (ru, en, de, es)
+ * @returns {string|null} Chat ID или null
+ */
 function getTelegramChatIdForLang(lang) {
   const base = process.env.TELEGRAM_NEWS_CHAT_ID;
   const map = {
@@ -55,12 +58,20 @@ function getTelegramChatIdForLang(lang) {
   return map[safeLang] || base || null;
 }
 
+/**
+ * Отправляет видео в Telegram
+ * @param {Object} params - Параметры
+ * @param {string} params.lang - Язык
+ * @param {string} params.videoPath - Путь к видео файлу
+ * @param {string} params.caption - Подпись к видео
+ * @returns {Promise<void>}
+ */
 async function sendTelegramVideo({ lang, videoPath, caption }) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = getTelegramChatIdForLang(lang);
 
   if (!token || !chatId) {
-    console.log(
+    logger.log(
       "[telegram] missing TELEGRAM_BOT_TOKEN or chat id, skipping send",
       { lang, chatId: !!chatId, token: !!token }
     );
@@ -68,7 +79,7 @@ async function sendTelegramVideo({ lang, videoPath, caption }) {
   }
 
   if (!fs.existsSync(videoPath)) {
-    console.log("[telegram] video file not found", videoPath);
+    logger.log("[telegram] video file not found", videoPath);
     return;
   }
 
@@ -80,7 +91,7 @@ async function sendTelegramVideo({ lang, videoPath, caption }) {
 
   const url = `https://api.telegram.org/bot${token}/sendVideo`;
 
-  console.log("[telegram] sending video to", chatId);
+  logger.log("[telegram] sending video to", chatId);
 
   try {
     const resp = await axios.post(url, form, {
@@ -89,16 +100,16 @@ async function sendTelegramVideo({ lang, videoPath, caption }) {
       maxBodyLength: Infinity,
     });
 
-    console.log("[telegram] sent, ok =", resp.data && resp.data.ok);
+    logger.log("[telegram] sent, ok =", resp.data && resp.data.ok);
   } catch (err) {
     if (err.response) {
-      console.error(
+      logger.error(
         "[telegram] send error",
         err.response.status,
         err.response.data
       );
     } else {
-      console.error("[telegram] send error", err);
+      logger.error("[telegram] send error", err);
     }
     throw err;
   }
@@ -106,9 +117,25 @@ async function sendTelegramVideo({ lang, videoPath, caption }) {
 
 // --- Обработка одной задачи --- //
 
+/**
+ * Обрабатывает одну задачу из очереди
+ * @returns {Promise<void>}
+ */
 async function processOneJob() {
-  console.log("[worker] checking for pending jobs...");
+  logger.log("[worker] checking for pending jobs...");
 
+  // Загружаем feature flags из Firebase (одним вызовом)
+  const { getFeatureFlags } = require("./config/feature-flags");
+  const flags = await getFeatureFlags(logger, false);
+  const youtubeEnabled = flags.youtubeUploadEnabled === true;
+  const telegramEnabled = flags.telegramEnabled === true;
+
+  logger.log("[worker] feature flags:", {
+    youtubeUploadEnabled: youtubeEnabled,
+    telegramEnabled: telegramEnabled,
+  });
+
+  // Ищем pending задачу
   const snapshot = await jobsRef
     .orderByChild("status")
     .equalTo("pending")
@@ -117,15 +144,15 @@ async function processOneJob() {
 
   const jobs = snapshot.val() || null;
   if (!jobs) {
-    console.log("[worker] no pending jobs");
+    logger.log("[worker] no pending jobs");
     return;
   }
 
   const [id, job] = Object.entries(jobs)[0];
   const safeLang = (job.language || "ru").toLowerCase();
 
-  console.log(
-    "[worker] picked job",
+  logger.log(
+    "[worker] attempting to claim job",
     id,
     safeLang,
     job.topic ? job.topic : ""
@@ -133,27 +160,70 @@ async function processOneJob() {
 
   const jobRef = jobsRef.child(id);
 
-  await jobRef.update({
-    status: "processing",
-    startedAt: Date.now(),
-  });
+  // Атомически захватываем задачу (транзакция предотвращает дубликаты)
+  const workerId = `pm2-${process.pid}-${Date.now()}`;
+  const now = Date.now();
+  const STALE_THRESHOLD = 30 * 60 * 1000; // 30 минут
 
   try {
-    // запускаем наш общий pipeline
+    const transactionResult = await jobRef.transaction((current) => {
+      if (!current) {
+        // Job was deleted
+        return null;
+      }
+
+      // Если задача уже обработана или обрабатывается другим воркером
+      if (current.status === "done" || current.status === "error") {
+        return undefined; // Abort transaction
+      }
+
+      // Если задача в статусе processing, проверяем на "зависшие" задачи
+      if (current.status === "processing") {
+        const startedAt = current.startedAt || 0;
+        const isStale = now - startedAt > STALE_THRESHOLD;
+        if (!isStale) {
+          return undefined; // Job is being processed, abort
+        }
+        logger.log("[worker] detected stale job, taking over", id);
+      }
+
+      // Атомически меняем статус на processing
+      return {
+        ...current,
+        status: "processing",
+        startedAt: now,
+        lockedAt: now,
+        lockedBy: workerId,
+      };
+    });
+
+    if (!transactionResult.committed) {
+      logger.log("[worker] failed to claim job (already claimed or deleted)", id);
+      return;
+    }
+
+    logger.log("[worker] successfully claimed job", id, "worker:", workerId);
+  } catch (error) {
+    logger.error("[worker] transaction error claiming job", id, error);
+    return;
+  }
+
+  try {
+    // Генерируем видео через pipeline
     const pipelineResult = await runPipeline({
       script: job.script,
       lang: safeLang,
-      logger: console,
+      logger,
       stamp: Date.now(),
     });
 
-    console.log("[worker] pipeline finished", {
+    logger.log("[worker] pipeline finished", {
       lang: safeLang,
       videoPath: pipelineResult && pipelineResult.videoPath,
     });
 
-    // --- Загрузка на YouTube (если включено в .env) ---
-    if (process.env.YOUTUBE_UPLOAD_ENABLED === "true") {
+    // --- Загрузка на YouTube (если включено в Firebase) ---
+    if (youtubeEnabled) {
       try {
         const uploadToYouTube = require("./youtube");
 
@@ -171,39 +241,53 @@ async function processOneJob() {
           ytTitle
         );
 
-        console.log("[youtube] uploaded:", ytId);
+        logger.log("[youtube] uploaded:", ytId);
 
         await jobRef.update({
           youtubeId: ytId,
         });
       } catch (err) {
-        console.error("[youtube] error:", err);
+        logger.error("[youtube] error:", err);
         await jobRef.update({
           youtubeError: String(err && err.message ? err.message : err),
         });
+        // Не прерываем выполнение из-за ошибки YouTube
       }
+    } else {
+      logger.log("[youtube] disabled via feature flag, skipping");
     }
 
-    const caption =
-      job.caption ||
-      job.topic ||
-      "NovaCiv — novaciv.space. Цифровая цивилизация без правителей.";
+    // --- Отправка в Telegram (если включено в Firebase) ---
+    if (telegramEnabled) {
+      const caption =
+        job.caption ||
+        job.topic ||
+        "NovaCiv — novaciv.space. Цифровая цивилизация без правителей.";
 
-    await sendTelegramVideo({
-      lang: safeLang,
-      videoPath: pipelineResult.videoPath,
-      caption,
-    });
+      try {
+        await sendTelegramVideo({
+          lang: safeLang,
+          videoPath: pipelineResult.videoPath,
+          caption,
+        });
+      } catch (err) {
+        logger.error("[telegram] send error:", err);
+        // Не прерываем выполнение из-за ошибки Telegram
+      }
+    } else {
+      logger.log("[telegram] disabled via feature flag, skipping");
+    }
 
+    // Помечаем задачу как выполненную
     await jobRef.update({
       status: "done",
       finishedAt: Date.now(),
       videoPath: pipelineResult.videoPath,
     });
 
-    console.log("[worker] job done", id);
+    logger.log("[worker] job done", id);
   } catch (e) {
-    console.error("[worker] error processing job", id, e);
+    logger.error("[worker] error processing job", id, e);
     await jobRef.update({
       status: "error",
       errorMessage: String(e && e.message ? e.message : e),
@@ -212,24 +296,28 @@ async function processOneJob() {
   }
 }
 
-// --- Бесконечный цикл --- //
+// --- Основной цикл --- //
 
+/**
+ * Основной цикл воркера
+ */
 async function loop() {
-  console.log("[worker] loop started");
+  logger.log("[worker] loop started");
 
   while (true) {
     try {
       await processOneJob();
     } catch (e) {
-      console.error("[worker] loop error", e);
+      logger.error("[worker] loop error", e);
     }
 
-    // пауза между проверками очереди
+    // Пауза между проверками очереди (15 секунд)
     await new Promise((resolve) => setTimeout(resolve, 15000));
   }
 }
 
+// Запуск воркера
 loop().catch((err) => {
-  console.error("[worker] fatal error", err);
+  logger.error("[worker] fatal error", err);
   process.exit(1);
 });

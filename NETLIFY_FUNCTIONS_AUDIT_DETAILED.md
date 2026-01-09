@@ -1142,4 +1142,3 @@ https://app.netlify.com/sites/[site-name]/functions/[function-name]
 - Auto-post generated videos to multiple Telegram channels (extend `video-worker.js` to post to all language channels)
 - Add video analytics: track views/engagement per video job in Firebase `videoJobs/[id]/analytics`
 - Create video job from trending forum topics: add `create-video-job-from-topic.js` triggered by high-engagement topics
-

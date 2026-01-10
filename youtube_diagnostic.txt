@@ -1,0 +1,200 @@
+=== ENV ===
+
+АНАЛИЗ КОДА (без доступа к серверу):
+
+1) Путь к .env файлу:
+   - video-worker.js (строка 16-17): 
+     const envPath = process.env.ENV_PATH || 
+       (process.platform === 'win32' ? path.join(__dirname, '..', '.env') : '/root/NovaCiv/.env');
+   - Ожидаемый путь на Linux: /root/NovaCiv/.env
+
+2) Как загружается .env:
+   - Используется dotenv.config({ path: envPath })
+   - Загружается ДО инициализации Firebase
+   - Загружается ДО использования YouTube модуля
+
+3) Где используется YOUTUBE_CLIENT_ID:
+   - server/youtube.js:56: const clientId = requiredEnv("YOUTUBE_CLIENT_ID");
+   - requiredEnv() бросает ошибку, если переменная не установлена
+   - НЕТ хардкода, НЕТ fallback значений
+   - Используется строго process.env.YOUTUBE_CLIENT_ID
+
+4) Где используется YOUTUBE_REFRESH_TOKEN:
+   - server/youtube.js:58: const refreshToken = requiredEnv("YOUTUBE_REFRESH_TOKEN");
+   - Берется из process.env через requiredEnv()
+   - НЕТ хардкода, НЕТ fallback значений
+
+5) YOUTUBE_UPLOAD_ENABLED:
+   - ❌ НЕ ИСПОЛЬЗУЕТСЯ в коде (архитектура v2)
+   - Управление через Firebase: config/features/youtubeUploadEnabled
+   - server/video-worker.js:134: const youtubeEnabled = flags.youtubeUploadEnabled === true;
+
+6) Другие .env файлы, которые могут переопределять:
+   - scripts/setup-firebase-config.js использует: '/root/NovaCiv/.env'
+   - scripts/disable-youtube.js использует: process.env.ENV_PATH || '/root/NovaCiv/.env'
+   - Консистентность: все скрипты указывают на /root/NovaCiv/.env
+
+КОМАНДЫ ДЛЯ ВЫПОЛНЕНИЯ НА СЕРВЕРЕ:
+- Проверить существование: ls -la /root/NovaCiv/.env
+- Проверить переменные: grep "YOUTUBE" /root/NovaCiv/.env
+- Проверить что видит Node: node -e "require('dotenv').config({path:'/root/NovaCiv/.env'}); console.log('CLIENT_ID:', process.env.YOUTUBE_CLIENT_ID ? 'SET' : 'MISSING');"
+
+
+=== PM2 ===
+
+АНАЛИЗ КОДА:
+
+1) Запуск процесса:
+   - restart-pm2-video-worker.sh запускает: pm2 start "$APP_SCRIPT" --name "$APP_NAME"
+   - APP_SCRIPT="/root/NovaCiv/server/video-worker.js"
+   - APP_DIR="/root/NovaCiv"
+   - Процесс запускается из /root/NovaCiv
+
+2) PM2 и переменные окружения:
+   - PM2 читает .env только при запуске процесса
+   - Если .env изменился после запуска PM2, изменения НЕ применятся автоматически
+   - Нужен перезапуск: pm2 restart nova-video
+   - PM2 может кешировать переменные окружения из момента запуска
+
+3) Ecosystem конфигурации:
+   - НЕ НАЙДЕНО файлов ecosystem.config.js в проекте
+   - Используется прямой запуск через pm2 start с параметрами
+
+КОМАНДЫ ДЛЯ ВЫПОЛНЕНИЯ НА СЕРВЕРЕ:
+- pm2 list (проверить процесс nova-video)
+- pm2 describe nova-video (детали процесса)
+- pm2 env 0 (переменные окружения процесса, если процесс найден)
+- Проверить логи: ~/.pm2/logs/nova-video-error.log и ~/.pm2/logs/nova-video-out.log
+
+
+=== CODE ===
+
+АНАЛИЗ ФАЙЛОВ:
+
+1) server/youtube.js:
+   - Строка 56: const clientId = requiredEnv("YOUTUBE_CLIENT_ID");
+   - Строка 57: const clientSecret = requiredEnv("YOUTUBE_CLIENT_SECRET");
+   - Строка 58: const refreshToken = requiredEnv("YOUTUBE_REFRESH_TOKEN");
+   - ✅ НЕТ хардкода значений
+   - ✅ НЕТ fallback на старые значения
+   - ✅ Используется строго process.env.YOUTUBE_*
+   - Строка 76: oauth2Client.setCredentials({ refresh_token: refreshToken });
+   - Ошибки обрабатываются в try-catch (строки 127-156)
+   - При invalid_grant выводится детальное сообщение (строки 133-147)
+
+2) server/video-worker.js:
+   - Строка 13-18: Загрузка .env с абсолютным путем
+   - Строка 232: require("./youtube") - динамическая загрузка модуля
+   - Строка 134: youtubeEnabled берется из Firebase, НЕ из env
+   - Строка 230: if (youtubeEnabled) { ... } - проверка флага из Firebase
+   - ✅ НЕТ зависимости от YOUTUBE_UPLOAD_ENABLED из env
+
+3) server/config/feature-flags.js:
+   - Строка 33: db.ref("config/features") - путь в Firebase
+   - Строка 134 в video-worker.js: flags.youtubeUploadEnabled === true
+   - Кэш обновляется каждые 30 секунд (CACHE_TTL = 30000)
+
+ВЫВОДЫ:
+- Код корректен: использует только process.env, нет хардкода
+- Загрузка YouTube зависит от Firebase флага, а не от env переменной
+- Если youtubeUploadEnabled = true в Firebase, код попытается загрузить видео
+
+
+=== FIREBASE ===
+
+АНАЛИЗ КОДА:
+
+1) Путь к videoJobs:
+   - server/video-worker.js:43: const jobsRef = db.ref("videoJobs");
+   - Запрос: jobsRef.orderByChild("status").equalTo("pending").limitToFirst(1)
+   - НЕТ фильтрации по youtubeUploadEnabled при запросе jobs
+   - Все pending задачи обрабатываются, а затем проверяется флаг для YouTube
+
+2) Фильтрация по youtubeUploadEnabled:
+   - server/video-worker.js:131-134:
+     const { getFeatureFlags } = require("./config/feature-flags");
+     const flags = await getFeatureFlags(logger, false);
+     const youtubeEnabled = flags.youtubeUploadEnabled === true;
+   - Флаг проверяется ПОСЛЕ получения задачи
+   - Если youtubeEnabled = false, YouTube загрузка пропускается (строка 260-261)
+   - Если youtubeEnabled = true, вызывается uploadToYouTube (строка 243)
+
+3) Путь к feature flags:
+   - server/config/feature-flags.js:33: db.ref("config/features")
+   - Значения по умолчанию (если нет в Firebase):
+     - youtubeUploadEnabled: false
+     - telegramEnabled: true
+
+КОМАНДЫ ДЛЯ ВЫПОЛНЕНИЯ НА СЕРВЕРЕ:
+- Проверить значение: node -e "require('dotenv').config({path:'/root/NovaCiv/.env'}); const {getDatabase}=require('./server/config/firebase-config'); const db=getDatabase(); db.ref('config/features/youtubeUploadEnabled').once('value').then(s=>console.log('Value:',s.val()));"
+
+
+=== LOGS ===
+
+АНАЛИЗ КОДА:
+
+1) Где логируются ошибки YouTube:
+   - server/youtube.js:154: console.error("[youtube] upload failed:", errorMessage);
+   - server/youtube.js:133-147: специальная обработка invalid_grant
+   - server/video-worker.js:254: logger.error("[youtube] error:", err);
+
+2) Что логируется при запросе к OAuth:
+   - server/youtube.js НЕ логирует client_id перед запросом
+   - Логируется только результат: успех (videoId) или ошибка
+   - В ошибке может быть видно client_id через API response (err.response.data)
+
+КОМАНДЫ ДЛЯ ВЫПОЛНЕНИЯ НА СЕРВЕРЕ:
+- tail -200 ~/.pm2/logs/nova-video-error.log | grep -i "youtube\|oauth\|invalid_grant\|deleted_client"
+- tail -200 ~/.pm2/logs/nova-video-out.log | grep -i "youtube\|oauth\|invalid_grant\|deleted_client\|client_id"
+- Поиск запросов к oauth2.googleapis.com/token в логах
+
+
+=== CONCLUSION (Cursor opinion) ===
+
+ГДЕ ПРОБЛЕМА:
+
+Основываясь на анализе кода, наиболее вероятные причины ошибок invalid_grant / deleted_client:
+
+1) **DELETED_CLIENT (наиболее вероятно)**:
+   - OAuth Client ID был удален в Google Cloud Console
+   - Клиент был создан заново с ДРУГИМ Client ID
+   - В .env остался СТАРЫЙ Client ID
+   - Refresh Token привязан к СТАРОМУ Client ID (который удален)
+   - Решение: создать новый Client ID в Google Console и сгенерировать новый Refresh Token
+
+2) **INVALID_GRANT (вторичная проблема)**:
+   - Refresh Token был отозван или истек
+   - Refresh Token не соответствует текущему Client ID/Secret
+   - Возможна проблема с синхронизацией времени сервера (маловероятно, но возможно)
+
+3) **PM2 КЕШИРУЕТ СТАРЫЕ ENV**:
+   - Если .env был изменен ПОСЛЕ запуска PM2, процесс не видит новые значения
+   - PM2 запущен со старыми переменными окружения
+   - Решение: pm2 restart nova-video ПОСЛЕ изменения .env
+
+ПОЧЕМУ:
+
+1) Код корректен - он читает из process.env, нет хардкода
+2) Проблема НЕ в коде, а в данных:
+   - Либо Client ID удален/изменен в Google Console
+   - Либо Refresh Token недействителен
+   - Либо PM2 использует старые значения из момента запуска
+
+РЕКОМЕНДАЦИИ ДЛЯ ДИАГНОСТИКИ:
+
+1) Выполнить скрипт youtube_diagnostic.sh на сервере для сбора полной информации
+2) Проверить в Google Cloud Console:
+   - Существует ли Client ID из .env?
+   - Соответствует ли Client Secret?
+   - К какому Client ID привязан Refresh Token?
+3) Проверить логи PM2 на наличие конкретных ошибок с client_id
+4) Если Client ID существует, проверить соответствие всех трех значений:
+   - YOUTUBE_CLIENT_ID
+   - YOUTUBE_CLIENT_SECRET  
+   - YOUTUBE_REFRESH_TOKEN
+5) Если Client ID удален, создать новый OAuth Client и сгенерировать новый Refresh Token через scripts/youtube-auth-cli.js
+
+КРИТИЧЕСКИ ВАЖНО:
+- После изменения .env файла ОБЯЗАТЕЛЬНО выполнить: pm2 restart nova-video
+- PM2 не перечитывает .env автоматически при изменениях
+- Проверить, что процесс запущен из правильной директории (/root/NovaCiv)

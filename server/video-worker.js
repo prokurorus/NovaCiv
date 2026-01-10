@@ -11,7 +11,11 @@
 // 5) Помечает задачу как "done" или "error"
 
 // Load .env with absolute path (no CWD dependence)
-require("dotenv").config({ path: "/root/NovaCiv/.env" });
+// For Windows local testing: set ENV_PATH env var or use .env in project root
+const path = require("path");
+const envPath = process.env.ENV_PATH || 
+  (process.platform === 'win32' ? path.join(__dirname, '..', '.env') : '/root/NovaCiv/.env');
+require("dotenv").config({ path: envPath });
 
 const fs = require("fs");
 const axios = require("axios");

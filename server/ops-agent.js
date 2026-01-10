@@ -22,12 +22,39 @@ const fs = require("fs");
 // --- Конфигурация --- //
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_OWNER = process.env.GITHUB_OWNER || "NovaCiv"; // Изменить на реальный owner
-const GITHUB_REPO = process.env.GITHUB_REPO || "NovaCiv"; // Изменить на реальный repo
 const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
 const CHECK_INTERVAL = 60000; // 60 секунд
 
 const GITHUB_API_BASE = "https://api.github.com";
+
+// Автоматическое определение owner/repo из git remote
+function getGitHubRepo() {
+  try {
+    const remoteUrl = execSync("git remote get-url origin", {
+      cwd: PROJECT_DIR,
+      encoding: "utf8",
+    }).trim();
+    
+    // Поддерживаем разные форматы:
+    // - https://github.com/owner/repo.git
+    // - git@github.com:owner/repo.git
+    // - https://github.com/owner/repo
+    const match = remoteUrl.match(/(?:github\.com[/:]|@github\.com:)([^/]+)\/([^/]+?)(?:\.git)?$/);
+    if (match) {
+      return { owner: match[1], repo: match[2] };
+    }
+  } catch (error) {
+    // Ignore
+  }
+  
+  // Fallback на переменные окружения или дефолты
+  return {
+    owner: process.env.GITHUB_OWNER || "NovaCiv",
+    repo: process.env.GITHUB_REPO || "NovaCiv"
+  };
+}
+
+const { owner: GITHUB_OWNER, repo: GITHUB_REPO } = getGitHubRepo();
 
 // Whitelist безопасных команд
 const COMMAND_WHITELIST = {

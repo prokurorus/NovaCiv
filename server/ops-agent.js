@@ -19,11 +19,30 @@ const axios = require("axios");
 const { execSync } = require("child_process");
 const fs = require("fs");
 
+// --- Парсинг аргументов командной строки --- //
+
+const args = process.argv.slice(2);
+let MODE = "daemon"; // daemon | ci
+let ISSUE_NUMBER = null;
+
+for (const arg of args) {
+  if (arg.startsWith("--mode=")) {
+    MODE = arg.split("=")[1];
+  } else if (arg.startsWith("--issue=")) {
+    ISSUE_NUMBER = parseInt(arg.split("=")[1], 10);
+  }
+}
+
+if (MODE === "ci" && !ISSUE_NUMBER) {
+  console.error("[ops-agent] ERROR: In CI mode, --issue=N is required");
+  process.exit(1);
+}
+
 // --- Конфигурация --- //
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
-const CHECK_INTERVAL = 60000; // 60 секунд
+const PROJECT_DIR = process.env.PROJECT_DIR || process.cwd();
+const CHECK_INTERVAL = 60000; // 60 секунд (для daemon режима)
 
 const GITHUB_API_BASE = "https://api.github.com";
 
@@ -62,33 +81,49 @@ const COMMAND_WHITELIST = {
     description: "Показать статус системы (PM2, процессы, git)",
     handler: handleReportStatus,
     needsGit: false,
-    needsPr: false
+    needsPr: false,
+    aliases: ["status", "report", "pm2", "health"]
   },
   "video:validate": {
     description: "Валидировать конфигурацию видео-пайплайна",
     handler: handleVideoValidate,
     needsGit: false,
-    needsPr: false
+    needsPr: false,
+    aliases: ["validate video", "video validate", "validate"]
   },
   "youtube:refresh-test": {
     description: "Проверить обновление YouTube токена",
     handler: handleYoutubeRefreshTest,
     needsGit: false,
-    needsPr: false
+    needsPr: false,
+    aliases: ["youtube:refresh", "yt:refresh", "yt refresh", "youtube refresh", "youtube test"]
   },
   "worker:restart": {
     description: "Перезапустить PM2 worker",
     handler: handleWorkerRestart,
     needsGit: false,
-    needsPr: false
+    needsPr: false,
+    aliases: ["restart", "worker restart", "restart worker", "pm2 restart"]
   },
   "pipeline:run-test-job": {
     description: "Создать тестовую задачу для пайплайна",
     handler: handlePipelineTestJob,
     needsGit: false,
-    needsPr: false
+    needsPr: false,
+    aliases: ["test job", "run test", "pipeline test", "test pipeline"]
   }
 };
+
+// Карта алиасов -> команды (для быстрого поиска)
+const ALIAS_MAP = {};
+Object.keys(COMMAND_WHITELIST).forEach(cmd => {
+  ALIAS_MAP[cmd] = cmd; // Сама команда тоже в карте
+  if (COMMAND_WHITELIST[cmd].aliases) {
+    COMMAND_WHITELIST[cmd].aliases.forEach(alias => {
+      ALIAS_MAP[alias.toLowerCase().trim()] = cmd;
+    });
+  }
+});
 
 // Кэш обработанных Issues (чтобы не обрабатывать повторно)
 const processedIssues = new Set();
@@ -177,28 +212,311 @@ async function addLabel(issueNumber, label) {
   }
 }
 
+/**
+ * Получает комментарии Issue
+ */
+async function getIssueComments(issueNumber) {
+  if (!GITHUB_TOKEN) {
+    logger.error("[ops-agent] GITHUB_TOKEN not set");
+    return [];
+  }
+
+  try {
+    const response = await axios.get(
+      `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}/comments`,
+      {
+        params: {
+          sort: "created",
+          direction: "asc",
+        },
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      }
+    );
+    return response.data || [];
+  } catch (error) {
+    logger.error(`[ops-agent] Failed to fetch comments for issue #${issueNumber}:`, error.response?.data || error.message);
+    return [];
+  }
+}
+
+/**
+ * Вычисляет расстояние Левенштейна между двумя строками
+ */
+function levenshteinDistance(str1, str2) {
+  const len1 = str1.length;
+  const len2 = str2.length;
+  const matrix = [];
+
+  // Инициализация матрицы
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+
+  // Заполнение матрицы
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      if (str1[i - 1] === str2[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,     // удаление
+          matrix[i][j - 1] + 1,     // вставка
+          matrix[i - 1][j - 1] + 1  // замена
+        );
+      }
+    }
+  }
+
+  return matrix[len1][len2];
+}
+
+/**
+ * Находит ближайшие команды по расстоянию Левенштейна
+ */
+function findClosestCommands(input, limit = 3) {
+  const normalizedInput = input.toLowerCase().trim();
+  const candidates = [];
+
+  // Проверяем все команды и их алиасы
+  Object.keys(COMMAND_WHITELIST).forEach(cmd => {
+    const distance = levenshteinDistance(normalizedInput, cmd.toLowerCase());
+    candidates.push({ command: cmd, distance, type: 'command' });
+
+    if (COMMAND_WHITELIST[cmd].aliases) {
+      COMMAND_WHITELIST[cmd].aliases.forEach(alias => {
+        const aliasDistance = levenshteinDistance(normalizedInput, alias.toLowerCase());
+        candidates.push({ command: cmd, distance: aliasDistance, type: 'alias' });
+      });
+    }
+  });
+
+  // Сортируем по расстоянию и берем первые N
+  candidates.sort((a, b) => a.distance - b.distance);
+  
+  // Фильтруем дубликаты команд и ограничиваем расстояние (максимум 50% от длины входа)
+  const maxDistance = Math.max(3, Math.floor(normalizedInput.length * 0.5));
+  const seen = new Set();
+  const results = [];
+  
+  for (const candidate of candidates) {
+    if (candidate.distance <= maxDistance && !seen.has(candidate.command)) {
+      seen.add(candidate.command);
+      results.push(candidate.command);
+      if (results.length >= limit) break;
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Резолвит команду через алиасы и автокоррекцию
+ */
+function resolveCommand(input) {
+  if (!input) return null;
+
+  const normalized = input.toLowerCase().trim();
+
+  // 1. Прямое совпадение в whitelist
+  if (COMMAND_WHITELIST[normalized]) {
+    return normalized;
+  }
+
+  // 2. Проверка алиасов
+  if (ALIAS_MAP[normalized]) {
+    return ALIAS_MAP[normalized];
+  }
+
+  // 3. Попытка найти команду через паттерн "команда:опция"
+  const patternMatch = normalized.match(/(\w+:\w+)/);
+  if (patternMatch) {
+    const matched = patternMatch[1];
+    if (COMMAND_WHITELIST[matched]) {
+      return matched;
+    }
+    // Проверяем алиасы для паттерна
+    if (ALIAS_MAP[matched]) {
+      return ALIAS_MAP[matched];
+    }
+  }
+
+  // 4. Нормализация пробелов и поиск по алиасам
+  const normalizedSpaces = normalized.replace(/\s+/g, ' ').trim();
+  if (ALIAS_MAP[normalizedSpaces]) {
+    return ALIAS_MAP[normalizedSpaces];
+  }
+
+  // 5. Поиск по частичному совпадению (если команда содержит ввод)
+  for (const [alias, cmd] of Object.entries(ALIAS_MAP)) {
+    if (alias.includes(normalizedSpaces) || normalizedSpaces.includes(alias)) {
+      return cmd;
+    }
+  }
+
+  // 6. Fuzzy matching как последний fallback (для опечаток)
+  // Используем порог: максимум 2 символа разницы или 30% от длины
+  const maxDistance = Math.max(2, Math.floor(normalizedSpaces.length * 0.3));
+  let bestMatch = null;
+  let bestDistance = Infinity;
+
+  for (const [alias, cmd] of Object.entries(ALIAS_MAP)) {
+    const distance = levenshteinDistance(normalizedSpaces, alias);
+    if (distance <= maxDistance && distance < bestDistance) {
+      bestDistance = distance;
+      bestMatch = cmd;
+    }
+  }
+
+  // Также проверяем прямые команды
+  if (!bestMatch || bestDistance > 2) {
+    for (const cmd of Object.keys(COMMAND_WHITELIST)) {
+      const distance = levenshteinDistance(normalizedSpaces, cmd.toLowerCase());
+      if (distance <= maxDistance && distance < bestDistance) {
+        bestDistance = distance;
+        bestMatch = cmd;
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
 // --- Обработчики команд --- //
 
 /**
- * Парсит команду из Issue
+ * Извлекает потенциальную команду из текста
+ * Возвращает объект { input, command } или null
  */
-function parseCommand(issue) {
-  const title = issue.title || "";
-  const body = issue.body || "";
+function extractCommandFromText(text) {
+  if (!text) return null;
 
-  // Ищем команду в формате: "команда:опция" или "/команда"
-  const commandMatch = title.match(/(\w+:\w+|\/\w+)/) || body.match(/(\w+:\w+|\/\w+)/);
-  if (commandMatch) {
-    return commandMatch[1].replace("/", "");
+  const trimmedText = text.trim();
+  if (!trimmedText) return null;
+
+  // Ищем команду в формате: "команда:опция"
+  const patternMatch = trimmedText.match(/(\w+:\w+)/);
+  if (patternMatch) {
+    const matched = patternMatch[1];
+    const resolved = resolveCommand(matched);
+    return { input: matched, command: resolved || null };
   }
 
-  // Ищем в первой строке body
-  const firstLine = body.split("\n")[0]?.trim();
-  if (firstLine && COMMAND_WHITELIST[firstLine]) {
-    return firstLine;
+  // Ищем в первой строке (до переноса строки или точки)
+  const firstLine = trimmedText.split(/[\n.]/)[0]?.trim();
+  if (firstLine) {
+    // Пробуем резолвить первую строку
+    const resolved = resolveCommand(firstLine);
+    return { input: firstLine, command: resolved || null };
   }
 
   return null;
+}
+
+/**
+ * Парсит команду из Issue (title, body, или первый комментарий автора)
+ */
+async function parseCommand(issue, comments = null) {
+  const recognizedInputs = [];
+  let resolvedCommand = null;
+
+  // 1. Ищем команду в title
+  const title = issue.title || "";
+  if (title) {
+    const titleExtracted = extractCommandFromText(title);
+    if (titleExtracted && titleExtracted.command) {
+      recognizedInputs.push(`title: "${title.trim()}"`);
+      resolvedCommand = titleExtracted.command;
+      return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+    }
+    // Если не нашлось через extractCommandFromText, пробуем резолвить весь title
+    if (title) {
+      const titleResolved = resolveCommand(title);
+      if (titleResolved) {
+        recognizedInputs.push(`title: "${title.trim()}"`);
+        resolvedCommand = titleResolved;
+        return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+      }
+      recognizedInputs.push(`title: "${title.trim()}"`);
+    }
+  }
+
+  // 2. Ищем команду в body (первая строка)
+  const body = issue.body || "";
+  if (body && !resolvedCommand) {
+    const firstLine = body.split("\n")[0]?.trim();
+    if (firstLine) {
+      const bodyExtracted = extractCommandFromText(firstLine);
+      if (bodyExtracted && bodyExtracted.command) {
+        recognizedInputs.push(`body first line: "${firstLine}"`);
+        resolvedCommand = bodyExtracted.command;
+        return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+      }
+      
+      // Если не нашлось через extractCommandFromText, пробуем резолвить напрямую
+      const bodyResolved = resolveCommand(firstLine);
+      if (bodyResolved) {
+        recognizedInputs.push(`body first line: "${firstLine}"`);
+        resolvedCommand = bodyResolved;
+        return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+      }
+      
+      recognizedInputs.push(`body first line: "${firstLine}"`);
+    }
+  }
+
+  // 3. Ищем команду в первом комментарии автора Issue (если есть)
+  if (!resolvedCommand && issue.user) {
+    const issueAuthorLogin = issue.user.login;
+    
+    // Если комментарии не переданы, пытаемся их получить (но это async, так что пропускаем если нет)
+    if (comments === null) {
+      // В async контексте будем вызывать отдельно
+      return { recognizedInput: recognizedInputs.join("; ") || "no input found", resolvedCommand: null, needsComments: true };
+    }
+
+    if (Array.isArray(comments)) {
+      const authorComment = comments.find(comment => 
+        comment.user && comment.user.login === issueAuthorLogin
+      );
+      
+      if (authorComment) {
+        const commentBody = authorComment.body || "";
+        if (commentBody) {
+          const firstCommentLine = commentBody.split("\n")[0]?.trim();
+          if (firstCommentLine) {
+            const commentExtracted = extractCommandFromText(firstCommentLine);
+            if (commentExtracted && commentExtracted.command) {
+              recognizedInputs.push(`author comment: "${firstCommentLine}"`);
+              resolvedCommand = commentExtracted.command;
+              return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+            }
+            
+            // Если не нашлось через extractCommandFromText, пробуем резолвить напрямую
+            const commentResolved = resolveCommand(firstCommentLine);
+            if (commentResolved) {
+              recognizedInputs.push(`author comment: "${firstCommentLine}"`);
+              resolvedCommand = commentResolved;
+              return { recognizedInput: recognizedInputs.join("; "), resolvedCommand: resolvedCommand };
+            }
+            
+            recognizedInputs.push(`author comment: "${firstCommentLine}"`);
+          }
+        }
+      }
+    }
+  }
+
+  // Если ничего не нашли
+  return { 
+    recognizedInput: recognizedInputs.join("; ") || (title || body).trim() || "no input found", 
+    resolvedCommand: null 
+  };
 }
 
 /**
@@ -396,6 +714,24 @@ const db = admin.database();
 
 // --- Главный цикл --- //
 
+/**
+ * Форматирует список доступных команд с алиасами
+ */
+function formatAvailableCommands() {
+  const lines = [];
+  Object.keys(COMMAND_WHITELIST).forEach(cmd => {
+    const config = COMMAND_WHITELIST[cmd];
+    lines.push(`- \`${cmd}\`: ${config.description}`);
+    
+    if (config.aliases && config.aliases.length > 0) {
+      const aliasList = config.aliases.slice(0, 5).map(a => `\`${a}\``).join(", ");
+      const moreCount = config.aliases.length > 5 ? ` (+${config.aliases.length - 5} more)` : "";
+      lines.push(`  → Aliases: ${aliasList}${moreCount}`);
+    }
+  });
+  return lines.join("\n");
+}
+
 async function processIssue(issue) {
   const issueNumber = issue.number;
   const issueId = `${GITHUB_OWNER}/${GITHUB_REPO}#${issueNumber}`;
@@ -405,39 +741,88 @@ async function processIssue(issue) {
     return;
   }
 
+  // Получаем комментарии Issue (если нужны)
+  let comments = null;
+  try {
+    comments = await getIssueComments(issueNumber);
+  } catch (error) {
+    logger.warn(`[ops-agent] Could not fetch comments for issue #${issueNumber}:`, error.message);
+  }
+
   // Парсим команду
-  const command = parseCommand(issue);
-  if (!command) {
-    logger.log(`[ops-agent] Issue #${issueNumber} has no valid command, skipping`);
+  const parseResult = await parseCommand(issue, comments);
+  const { recognizedInput, resolvedCommand } = parseResult;
+
+  // Если команда не найдена, показываем подсказки
+  if (!resolvedCommand) {
+    // Пытаемся найти ближайшие команды для подсказки
+    const inputText = recognizedInput.replace(/^(title|body first line|author comment):\s*"/, "").replace(/"$/, "").trim();
+    const closest = findClosestCommands(inputText || issue.title || "", 3);
+    
+    let suggestionText = "";
+    if (closest.length > 0) {
+      suggestionText = `\n\n**Did you mean:**\n${closest.map(cmd => `- \`${cmd}\``).join("\n")}`;
+    }
+
+    await commentIssue(issueNumber, 
+      `❌ **Unknown command**\n\n` +
+      `**Recognized input:** ${recognizedInput || "none"}\n` +
+      `**Resolved command:** (not found)${suggestionText}\n\n` +
+      `**Available commands:**\n${formatAvailableCommands()}`
+    );
+    processedIssues.add(issueId);
     return;
   }
 
-  // Проверяем whitelist
-  const commandConfig = COMMAND_WHITELIST[command];
+  // Проверяем whitelist (должна существовать, но на всякий случай)
+  const commandConfig = COMMAND_WHITELIST[resolvedCommand];
   if (!commandConfig) {
-    await commentIssue(issueNumber, `❌ Unknown command: \`${command}\`\n\nAvailable commands:\n${Object.keys(COMMAND_WHITELIST).map(c => `- \`${c}\`: ${COMMAND_WHITELIST[c].description}`).join("\n")}`);
+    const closest = findClosestCommands(resolvedCommand, 3);
+    const suggestionText = closest.length > 0 
+      ? `\n\n**Did you mean:**\n${closest.map(cmd => `- \`${cmd}\``).join("\n")}`
+      : "";
+
+    await commentIssue(issueNumber, 
+      `❌ **Invalid command**\n\n` +
+      `**Recognized input:** ${recognizedInput}\n` +
+      `**Resolved command:** \`${resolvedCommand}\` (not in whitelist)${suggestionText}\n\n` +
+      `**Available commands:**\n${formatAvailableCommands()}`
+    );
     processedIssues.add(issueId);
     return;
   }
 
   // Помечаем как обрабатываемую
   await addLabel(issueNumber, "ops-agent:processing");
-  await commentIssue(issueNumber, `🔄 Processing command: \`${command}\`...`);
+  await commentIssue(issueNumber, 
+    `🔄 **Processing command...**\n\n` +
+    `**Recognized input:** ${recognizedInput}\n` +
+    `**Resolved command:** \`${resolvedCommand}\``
+  );
 
   try {
     // Выполняем команду
-    logger.log(`[ops-agent] Executing command: ${command}`);
+    logger.log(`[ops-agent] Executing command: ${resolvedCommand} (from input: ${recognizedInput})`);
     const result = await commandConfig.handler();
 
-    // Форматируем результат
-    const comment = `✅ Command \`${command}\` completed successfully\n\n${result}`;
+    // Форматируем результат с информацией о распознавании
+    const comment = 
+      `✅ **Command completed successfully**\n\n` +
+      `**Recognized input:** ${recognizedInput}\n` +
+      `**Resolved command:** \`${resolvedCommand}\`\n\n` +
+      `---\n\n${result}`;
     await commentIssue(issueNumber, comment);
     await addLabel(issueNumber, "ops-agent:done");
     
     logger.log(`[ops-agent] Issue #${issueNumber} processed successfully`);
   } catch (error) {
     const errorMessage = sanitizeOutput(error.message || String(error));
-    await commentIssue(issueNumber, `❌ Command \`${command}\` failed:\n\n\`\`\`\n${errorMessage}\n\`\`\``);
+    await commentIssue(issueNumber, 
+      `❌ **Command failed**\n\n` +
+      `**Recognized input:** ${recognizedInput}\n` +
+      `**Resolved command:** \`${resolvedCommand}\`\n\n` +
+      `**Error:**\n\`\`\`\n${errorMessage}\n\`\`\``
+    );
     await addLabel(issueNumber, "ops-agent:error");
     logger.error(`[ops-agent] Issue #${issueNumber} failed:`, error);
   }
@@ -501,4 +886,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main };
+module.exports = { 
+  main,
+  resolveCommand,
+  findClosestCommands,
+  levenshteinDistance,
+  COMMAND_WHITELIST,
+  ALIAS_MAP
+};

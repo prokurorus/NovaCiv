@@ -485,6 +485,8 @@ ${englishText}
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
+  console.log("fetch-news start");
+
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     return {
       statusCode: 405,
@@ -492,15 +494,19 @@ exports.handler = async (event) => {
     };
   }
 
+  // Проверка токена: только если NEWS_CRON_SECRET задан (для ручных вызовов)
+  // Scheduled вызовы Netlify не передают query параметры, поэтому пропускаем проверку
+  const qs = event.queryStringParameters || {};
   if (NEWS_CRON_SECRET) {
-    const qs = event.queryStringParameters || {};
     if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+      console.log("auth gate blocked");
       return {
         statusCode: 403,
         body: "Forbidden",
       };
     }
   }
+  console.log("auth gate passed");
 
   if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
     return {
@@ -518,6 +524,7 @@ exports.handler = async (event) => {
     const titleKeys = { ...(meta.titleKeys || {}) };
 
     // 1) Тянем все источники
+    console.log(`rss sources count = ${SOURCES.length}`);
     const allItems = [];
     let sourcesOk = 0;
     let sourcesFailed = 0;
@@ -561,6 +568,7 @@ exports.handler = async (event) => {
 
     if (toProcess.length === 0) {
       await saveNewsMeta({ processedKeys, titleKeys });
+      console.log("created topics = 0 (no new items)");
       return {
         statusCode: 200,
         body: JSON.stringify({
@@ -653,6 +661,8 @@ exports.handler = async (event) => {
     }
 
     await saveNewsMeta({ processedKeys, titleKeys });
+
+    console.log(`created topics = ${successCount}`);
 
     return {
       statusCode: 200,

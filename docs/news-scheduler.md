@@ -15,19 +15,84 @@
 
 ```toml
 [functions."fetch-news"]
-  schedule = "0 */3 * * *"  # Каждые 3 часа
+  schedule = "0 * * * *"    # Каждый час в :00
 
 [functions."news-cron"]
-  schedule = "0 * * * *"    # Каждый час
+  schedule = "5 * * * *"    # Каждый час в :05 (5 минут после fetch-news)
 ```
 
 **Расписание:**
-- `fetch-news`: запускается каждые 3 часа (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC)
-- `news-cron`: запускается каждый час (00:00, 01:00, 02:00, ..., 23:00 UTC)
+- `fetch-news`: запускается каждый час в :00 (00:00, 01:00, 02:00, ..., 23:00 UTC)
+- `news-cron`: запускается каждый час в :05 (00:05, 01:05, 02:05, ..., 23:05 UTC)
+
+**Примечание:** Сдвиг в 5 минут между `fetch-news` и `news-cron` предотвращает гонку при обращении к Firebase.
+
+## Health Check (Мониторинг без ручных тестов)
+
+Для проверки статуса планировщика используйте health endpoint:
+
+**URL формат:**
+```
+GET ${NEWS_BASE_URL}/.netlify/functions/health-news?token=${NEWS_CRON_SECRET}
+```
+
+**Пример:**
+```
+GET https://novaciv.netlify.app/.netlify/functions/health-news?token=your_secret_token
+```
+
+**Ответ:**
+```json
+{
+  "ok": true,
+  "timestamp": "2024-01-11T18:00:00.000Z",
+  "fetch": {
+    "lastRun": "2024-01-11T17:00:00.000Z",
+    "lastRunAgeMinutes": 60,
+    "schedulerAlive": true,
+    "processed": 3,
+    "sourcesOk": 13,
+    "sourcesFailed": 0,
+    "fetched": 45,
+    "filtered": 12
+  },
+  "cron": {
+    "lastRun": "2024-01-11T17:05:00.000Z",
+    "lastRunAgeMinutes": 55,
+    "schedulerAlive": true,
+    "processed": 3,
+    "totalSent": 3,
+    "fetchedTopics": 5
+  },
+  "pipeline": {
+    "healthy": true,
+    "fetchAlive": true,
+    "cronAlive": true,
+    "fetchProcessedRecently": true,
+    "cronSentRecently": true
+  }
+}
+```
+
+**Поля:**
+- `fetch.schedulerAlive`: `true` если последний запуск fetch-news был менее 90 минут назад
+- `cron.schedulerAlive`: `true` если последний запуск news-cron был менее 90 минут назад
+- `pipeline.healthy`: `true` если оба scheduler'а живы И (processed>0 ИЛИ totalSent>0) за последние 6 часов
+
+**Автоматическая проверка:**
+
+Используйте скрипт для автоматической проверки:
+```bash
+NEWS_BASE_URL=https://novaciv.netlify.app NEWS_CRON_SECRET=your_token node scripts/check-health-news.mjs
+```
+
+Скрипт выводит статус и возвращает exit code 1, если scheduler не работает.
+
+---
 
 ## URL для ручного вызова
 
-Если планировщик внешний или требуется ручной запуск, используйте следующие URL:
+Если требуется ручной запуск, используйте следующие URL:
 
 ### 1. fetch-news
 

@@ -49,6 +49,12 @@ async function sendToTelegram(chatId, text) {
     }),
   });
 
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    log("Telegram HTTP error:", resp.status, errorText);
+    return { ok: false, httpError: true, status: resp.status };
+  }
+
   const data = await resp.json();
   if (!data.ok) {
     log("Telegram error:", data);
@@ -183,39 +189,62 @@ exports.handler = async (event) => {
     };
 
     for (const topic of freshTopics) {
+      const topicLang = (topic.lang || "en").toLowerCase();
       const text = buildPostText(topic);
 
-      const tasks = [];
+      // Определяем, в какой канал отправлять (только соответствующий языку темы)
+      let targetChatId = null;
+      let targetLangCode = null;
 
-      if (TELEGRAM_NEWS_CHAT_ID_RU) {
-        tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, text).then((res) => {
-            if (res && res.ok) perLanguage.ru.sent += 1;
-            else if (res && !res.skipped) perLanguage.ru.errors.push(res);
-          }),
-        );
+      if (topicLang === "ru" && TELEGRAM_NEWS_CHAT_ID_RU) {
+        targetChatId = TELEGRAM_NEWS_CHAT_ID_RU;
+        targetLangCode = "ru";
+      } else if (topicLang === "en" && TELEGRAM_NEWS_CHAT_ID_EN) {
+        targetChatId = TELEGRAM_NEWS_CHAT_ID_EN;
+        targetLangCode = "en";
+      } else if (topicLang === "de" && TELEGRAM_NEWS_CHAT_ID_DE) {
+        targetChatId = TELEGRAM_NEWS_CHAT_ID_DE;
+        targetLangCode = "de";
       }
 
-      if (TELEGRAM_NEWS_CHAT_ID_EN) {
-        tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, text).then((res) => {
-            if (res && res.ok) perLanguage.en.sent += 1;
-            else if (res && !res.skipped) perLanguage.en.errors.push(res);
-          }),
+      // Если канал для языка не настроен - логируем WARN и пропускаем
+      if (!targetChatId) {
+        log(
+          `WARN: Topic ${topic.id} (lang=${topicLang}) skipped - no chat_id configured for this language`,
         );
+        // НЕ ставим telegramPostedAt, чтобы не потерять пост
+        continue;
       }
 
-      if (TELEGRAM_NEWS_CHAT_ID_DE) {
-        tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, text).then((res) => {
-            if (res && res.ok) perLanguage.de.sent += 1;
-            else if (res && !res.skipped) perLanguage.de.errors.push(res);
-          }),
-        );
+      // Отправляем только в соответствующий канал
+      let sendSuccess = false;
+      try {
+        const res = await sendToTelegram(targetChatId, text);
+        if (res && res.ok) {
+          sendSuccess = true;
+          perLanguage[targetLangCode].sent += 1;
+        } else if (res && !res.skipped) {
+          perLanguage[targetLangCode].errors.push(res);
+          log(
+            `Error sending topic ${topic.id} to ${targetLangCode}:`,
+            res,
+          );
+        }
+      } catch (err) {
+        log(`Exception sending topic ${topic.id} to ${targetLangCode}:`, err);
+        perLanguage[targetLangCode].errors.push({
+          error: String(err && err.message ? err.message : err),
+        });
       }
 
-      await Promise.all(tasks);
-      await markTopicAsPosted(topic.id);
+      // Ставим telegramPostedAt ТОЛЬКО если отправка успешна
+      if (sendSuccess) {
+        await markTopicAsPosted(topic.id);
+      } else {
+        log(
+          `Topic ${topic.id} NOT marked as posted due to send failure - will retry on next run`,
+        );
+      }
     }
 
     const totalSent =

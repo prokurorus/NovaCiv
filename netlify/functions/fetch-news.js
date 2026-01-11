@@ -19,7 +19,15 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
 
 
 // Максимум новых RSS-элементов за один запуск
-const MAX_NEW_ITEMS_PER_RUN = 2;
+// Учитываем, что один item порождает несколько языков (en/ru/de)
+// Рекомендуемое значение: 3-5 для стабильного покрытия
+const MAX_NEW_ITEMS_PER_RUN = 5;
+
+// Фильтр свежести: новости старше этого времени (в часах) отбрасываются
+const MAX_AGE_HOURS = 48;
+
+// Таймаут для RSS fetch (в миллисекундах)
+const RSS_FETCH_TIMEOUT_MS = 15000; // 15 секунд
 
 // Где храним метаданные о уже обработанных новостях
 const NEWS_META_PATH = "/newsMeta/en.json";
@@ -190,16 +198,31 @@ function parseRss(xml, sourceId, languages) {
 }
 
 async function fetchRssSource(source) {
-  const res = await fetch(source.url);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `RSS fetch failed for ${source.id}: HTTP ${res.status} – ${text}`,
-    );
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RSS_FETCH_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(source.url, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(
+        `RSS fetch failed for ${source.id}: HTTP ${res.status} – ${text}`,
+      );
+    }
+    const xml = await res.text();
+    const items = parseRss(xml, source.id, source.languages || []);
+    return items;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`RSS fetch timeout for ${source.id} (${RSS_FETCH_TIMEOUT_MS}ms)`);
+    }
+    throw err;
   }
-  const xml = await res.text();
-  const items = parseRss(xml, source.id, source.languages || []);
-  return items;
 }
 
 function normalizeTitle(title) {
@@ -464,27 +487,80 @@ exports.handler = async (event) => {
     const processedKeys = { ...(meta.processedKeys || {}) };
     const titleKeys = { ...(meta.titleKeys || {}) };
 
-    // 1) Тянем все источники
+    // 1) Тянем все источники с таймаутами
     const allItems = [];
+    const sourceStats = {
+      ok: 0,
+      failed: 0,
+      failedSources: [],
+    };
+
     for (const src of SOURCES) {
       try {
         const items = await fetchRssSource(src);
         allItems.push(...items);
+        sourceStats.ok += 1;
       } catch (err) {
         console.error("RSS fetch error:", src.id, err);
+        sourceStats.failed += 1;
+        sourceStats.failedSources.push({ id: src.id, error: String(err.message || err) });
       }
     }
 
-    // 2) Сортируем по дате (сначала новые)
-    allItems.sort((a, b) => {
+    console.log(
+      `[fetch-news] Sources: ${sourceStats.ok} OK, ${sourceStats.failed} failed. Items fetched: ${allItems.length}`,
+    );
+
+    // 2) Фильтруем по свежести (48 часов) и сортируем по дате (сначала новые)
+    const now = Date.now();
+    const maxAgeMs = MAX_AGE_HOURS * 60 * 60 * 1000;
+    let countNoDate = 0;
+    let countTooOld = 0;
+
+    const freshItems = allItems.filter((item) => {
+      if (!item.pubDate) {
+        countNoDate += 1;
+        // Если pubDate отсутствует - по умолчанию отбрасываем, но логируем
+        return false;
+      }
+
+      try {
+        const pubTime = new Date(item.pubDate).getTime();
+        if (isNaN(pubTime)) {
+          countNoDate += 1;
+          return false;
+        }
+
+        const age = now - pubTime;
+        if (age > maxAgeMs) {
+          countTooOld += 1;
+          return false;
+        }
+
+        return true;
+      } catch (e) {
+        countNoDate += 1;
+        return false;
+      }
+    });
+
+    if (countNoDate > 0) {
+      console.log(`[fetch-news] Filtered out ${countNoDate} items without valid pubDate`);
+    }
+    if (countTooOld > 0) {
+      console.log(`[fetch-news] Filtered out ${countTooOld} items older than ${MAX_AGE_HOURS}h`);
+    }
+
+    // Сортируем по дате (сначала новые)
+    freshItems.sort((a, b) => {
       const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
       const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
       return db - da;
     });
 
-    // 3) Отбираем новые
+    // 3) Отбираем новые (дедупликация)
     const toProcess = [];
-    for (const item of allItems) {
+    for (const item of freshItems) {
       if (toProcess.length >= MAX_NEW_ITEMS_PER_RUN) break;
 
       const key = makeNewsKey(item);

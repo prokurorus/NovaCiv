@@ -31,3 +31,11 @@
 
 [functions."domovoy-daily-video"]
   schedule = "0 3 * * *"
+
+# domovoy-auto-post: создаёт философский пост Домового
+[functions."domovoy-auto-post"]
+  schedule = "0 0 * * *"
+
+# domovoy-auto-reply: авто-ответы Домового на комментарии
+[functions."domovoy-auto-reply"]
+  schedule = "*/10 * * * *"

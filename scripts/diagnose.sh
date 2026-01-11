@@ -20,6 +20,27 @@ OUT="/tmp/novaciv_diag_$(date +%F_%H-%M-%S).txt"
   pm2 describe nova-ops-agent || true
   echo
 
+  echo "=== FIND nova-ops-agent on disk ==="
+  ps aux | grep -E '[n]ova-ops-agent' || true
+  echo
+  pm2 describe nova-ops-agent | sed -n '1,200p' || true
+  echo
+  echo "=== CWD (from pm2 pid) ==="
+  PID=$(pm2 pid nova-ops-agent 2>/dev/null | tail -n 1 || true)
+  echo "PM2 PID: $PID"
+  if [ -n "$PID" ] && [ "$PID" != "0" ]; then
+    readlink -f /proc/$PID/cwd || true
+    echo
+    echo "=== Open files (best effort) ==="
+    lsof -p "$PID" 2>/dev/null | head -n 40 || true
+  fi
+  echo
+  echo "=== Common locations scan (fast) ==="
+  ls -la /root | head -n 200 || true
+  ls -la /root/NovaCiv 2>/dev/null | head -n 200 || true
+  ls -la /root/nova-ops-agent 2>/dev/null | head -n 200 || true
+  echo
+
   echo "== PM2 LOGS (last lines, no stream) =="
   echo "-- nova-video --"
   pm2 logs nova-video --lines 120 --nostream || true

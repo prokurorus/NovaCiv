@@ -28,7 +28,8 @@ function getTagline(lang) {
   return "Digital community without rulers — only citizens.";
 }
 
-async function sendToTelegram(chatId, text) {
+// Отправка текстового сообщения
+async function sendTextToTelegram(chatId, text, replyMarkup) {
   if (!TELEGRAM_BOT_TOKEN) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   }
@@ -38,15 +39,21 @@ async function sendToTelegram(chatId, text) {
 
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: false,
+  };
+  
+  if (replyMarkup) {
+    body.reply_markup = replyMarkup;
+  }
+
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: false,
-    }),
+    body: JSON.stringify(body),
   });
 
   const data = await resp.json();
@@ -56,6 +63,97 @@ async function sendToTelegram(chatId, text) {
   return data;
 }
 
+// Отправка фото с caption (с fallback на текст если картинка не загружается)
+async function sendPhotoToTelegram(chatId, photoUrl, caption, replyMarkup) {
+  if (!TELEGRAM_BOT_TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
+  if (!chatId) {
+    return { ok: false, skipped: true, reason: "chatId not configured" };
+  }
+
+  if (!photoUrl) {
+    // Если нет фото, отправляем как текст
+    return sendTextToTelegram(chatId, caption, replyMarkup);
+  }
+
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
+
+  const body = {
+    chat_id: chatId,
+    photo: photoUrl,
+    caption,
+    parse_mode: "HTML",
+  };
+  
+  if (replyMarkup) {
+    body.reply_markup = replyMarkup;
+  }
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const data = await resp.json();
+    
+    // Если ошибка с фото (404, 400), fallback на текст
+    if (!data.ok && (data.error_code === 400 || data.error_code === 404)) {
+      log("Photo send failed, falling back to text:", data.description);
+      return sendTextToTelegram(chatId, caption, replyMarkup);
+    }
+    
+    if (!data.ok) {
+      log("Telegram error:", data);
+    }
+    return data;
+  } catch (err) {
+    log("Photo send error, falling back to text:", err.message);
+    return sendTextToTelegram(chatId, caption, replyMarkup);
+  }
+}
+
+// Обертка для обратной совместимости
+async function sendToTelegram(chatId, text) {
+  return sendTextToTelegram(chatId, text);
+}
+
+// Создание caption для фото поста (краткий формат)
+function buildPostCaption(topic) {
+  const lines = [];
+  
+  // Заголовок (жирный)
+  if (topic.title) {
+    lines.push(`<b>${escapeHtml(topic.title)}</b>`);
+    lines.push("");
+  }
+  
+  // Краткое содержание (2-4 строки, обрезаем если длиннее)
+  if (topic.content) {
+    const content = String(topic.content).trim();
+    // Берем первые 200 символов или до первого абзаца
+    const shortContent = content.split('\n\n')[0].slice(0, 200);
+    if (shortContent.length < content.length) {
+      lines.push(shortContent + "...");
+    } else {
+      lines.push(shortContent);
+    }
+    lines.push("");
+  }
+  
+  // Источник и сайт (кликабельные ссылки)
+  if (topic.originalLink) {
+    lines.push(`<a href="${escapeHtml(topic.originalLink)}">Источник</a> • <a href="https://novaciv.space">NovaCiv</a>`);
+  } else {
+    lines.push(`<a href="https://novaciv.space">NovaCiv</a>`);
+  }
+  
+  return lines.join("\n");
+}
+
+// Создание текста для текстового поста (полный формат)
 function buildPostText(topic) {
   const lines = [];
 
@@ -72,14 +170,57 @@ function buildPostText(topic) {
 
   const tagline = getTagline(topic.lang);
   lines.push(tagline);
+  
+  if (topic.originalLink) {
+    lines.push(`Источник: ${topic.originalLink}`);
+  }
   lines.push("https://novaciv.space/news");
 
-  const now = new Date();
-  const stamp = now.toISOString().slice(0, 16).replace("T", " ");
-  lines.push("");
-  lines.push(`Posted via NovaCiv • ${stamp} UTC`);
-
   return lines.join("\n");
+}
+
+// Экранирование HTML
+function escapeHtml(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Создание inline keyboard для поста новости
+function buildNewsKeyboard(topic) {
+  const buttons = [];
+  
+  if (topic.originalLink) {
+    buttons.push([{ text: "Источник", url: topic.originalLink }]);
+  }
+  
+  buttons.push([{ text: "NovaCiv", url: "https://novaciv.space" }]);
+  
+  return {
+    inline_keyboard: buttons,
+  };
+}
+
+// Создание inline keyboard для бренд-вставки
+function buildBrandKeyboard(lang) {
+  return {
+    inline_keyboard: [[{ text: lang === "ru" ? "Перейти на сайт" : lang === "de" ? "Zur Website" : "Visit Website", url: "https://novaciv.space" }]],
+  };
+}
+
+// Тексты для бренд-вставок по языкам
+function getBrandCaption(lang) {
+  if (lang === "ru") {
+    return "Цифровое сообщество без правителей — только граждане.\n\nNovaCiv";
+  }
+  if (lang === "de") {
+    return "Digitale Gemeinschaft ohne Herrscher – nur Bürger.\n\nNovaCiv";
+  }
+  return "Digital community without rulers — only citizens.\n\nNovaCiv";
 }
 
 async function fetchNewsTopics() {
@@ -196,14 +337,80 @@ exports.handler = async (event) => {
       de: { sent: 0, errors: [] },
     };
 
+    // Бренд-вставка каждые 3 поста (максимум 1 за запуск)
+    const BRAND_INSERT_INTERVAL = 3;
+    const BRAND_IMAGE_URL = "https://novaciv.space/og-image.png";
+
+    let postCount = 0;
+    let brandInsertSent = false; // Флаг для максимум 1 вставки за запуск
+
     for (const topic of freshTopics) {
+      postCount++;
+      
+      // Определяем, нужно ли отправлять бренд-вставку перед этим постом
+      // После каждых 3 постов, но максимум 1 раз за запуск
+      const shouldSendBrandInsert = !brandInsertSent && postCount > 1 && (postCount - 1) % BRAND_INSERT_INTERVAL === 0;
+      
+      if (shouldSendBrandInsert) {
+        brandInsertSent = true; // Помечаем, что вставка уже отправлена
+        // Отправляем бренд-вставку во все каналы
+        const brandTasks = [];
+        
+        if (TELEGRAM_NEWS_CHAT_ID_RU) {
+          brandTasks.push(
+            sendPhotoToTelegram(
+              TELEGRAM_NEWS_CHAT_ID_RU,
+              BRAND_IMAGE_URL,
+              getBrandCaption("ru"),
+              buildBrandKeyboard("ru")
+            ).catch((err) => {
+              log("Brand insert error (RU):", err.message);
+            })
+          );
+        }
+        
+        if (TELEGRAM_NEWS_CHAT_ID_EN) {
+          brandTasks.push(
+            sendPhotoToTelegram(
+              TELEGRAM_NEWS_CHAT_ID_EN,
+              BRAND_IMAGE_URL,
+              getBrandCaption("en"),
+              buildBrandKeyboard("en")
+            ).catch((err) => {
+              log("Brand insert error (EN):", err.message);
+            })
+          );
+        }
+        
+        if (TELEGRAM_NEWS_CHAT_ID_DE) {
+          brandTasks.push(
+            sendPhotoToTelegram(
+              TELEGRAM_NEWS_CHAT_ID_DE,
+              BRAND_IMAGE_URL,
+              getBrandCaption("de"),
+              buildBrandKeyboard("de")
+            ).catch((err) => {
+              log("Brand insert error (DE):", err.message);
+            })
+          );
+        }
+        
+        await Promise.all(brandTasks);
+        // Небольшая задержка между бренд-вставкой и новостью
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      // Отправляем новость
+      const caption = buildPostCaption(topic);
       const text = buildPostText(topic);
+      const keyboard = buildNewsKeyboard(topic);
+      const imageUrl = topic.imageUrl || "";
 
       const tasks = [];
 
       if (TELEGRAM_NEWS_CHAT_ID_RU) {
         tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, text).then((res) => {
+          sendPhotoToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, imageUrl, caption, keyboard).then((res) => {
             if (res && res.ok) perLanguage.ru.sent += 1;
             else if (res && !res.skipped) perLanguage.ru.errors.push(res);
           }),
@@ -212,7 +419,7 @@ exports.handler = async (event) => {
 
       if (TELEGRAM_NEWS_CHAT_ID_EN) {
         tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, text).then((res) => {
+          sendPhotoToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, imageUrl, caption, keyboard).then((res) => {
             if (res && res.ok) perLanguage.en.sent += 1;
             else if (res && !res.skipped) perLanguage.en.errors.push(res);
           }),
@@ -221,7 +428,7 @@ exports.handler = async (event) => {
 
       if (TELEGRAM_NEWS_CHAT_ID_DE) {
         tasks.push(
-          sendToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, text).then((res) => {
+          sendPhotoToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, imageUrl, caption, keyboard).then((res) => {
             if (res && res.ok) perLanguage.de.sent += 1;
             else if (res && !res.skipped) perLanguage.de.errors.push(res);
           }),

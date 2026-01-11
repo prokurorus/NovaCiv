@@ -175,6 +175,39 @@ function parseRss(xml, sourceId, languages) {
       description = getTag("summary") || getTag("content:encoded") || "";
     }
 
+    // Извлечение imageUrl из RSS (enclosure, media:thumbnail, og:image)
+    let imageUrl = "";
+    
+    // 1. Проверяем enclosure (type="image/...")
+    const enclosureMatch = block.match(/<enclosure[^>]+url=["']([^"']+)["'][^>]*>/i);
+    if (enclosureMatch) {
+      const enclosureType = (block.match(/<enclosure[^>]+type=["']([^"']+)["']/i) || [])[1] || "";
+      if (enclosureType.startsWith("image/")) {
+        imageUrl = enclosureMatch[1];
+      }
+    }
+    
+    // 2. Проверяем media:thumbnail
+    if (!imageUrl) {
+      const mediaThumb = getTag("media:thumbnail") || getTag("media:content");
+      if (mediaThumb) {
+        const urlMatch = mediaThumb.match(/url=["']([^"']+)["']/i);
+        if (urlMatch) imageUrl = urlMatch[1];
+      }
+    }
+    
+    // 3. Ищем og:image в description (если есть HTML)
+    if (!imageUrl && description) {
+      const ogImageMatch = description.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+      if (ogImageMatch) imageUrl = ogImageMatch[1];
+      
+      // Также проверяем обычные img теги
+      if (!imageUrl) {
+        const imgMatch = description.match(/<img[^>]+src=["']([^"']+)["']/i);
+        if (imgMatch) imageUrl = imgMatch[1];
+      }
+    }
+
     items.push({
       sourceId,
       title: title || "",
@@ -182,6 +215,7 @@ function parseRss(xml, sourceId, languages) {
       guid: guid || "",
       pubDate: pubDate || "",
       description: description || "",
+      imageUrl: imageUrl || "",
       targetLangs: Array.isArray(languages) ? [...languages] : [],
     });
   }
@@ -303,6 +337,7 @@ async function saveNewsToForumLang(item, analyticText, langCode) {
     originalGuid: item.guid || "",
     originalLink: item.link || "",
     pubDate: item.pubDate || "",
+    imageUrl: item.imageUrl || "",
   };
 
   const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {

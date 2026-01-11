@@ -11,9 +11,36 @@
 // 5) Комментирует Issue с результатами
 
 const path = require("path");
+const fs = require("fs");
+
+// --- Загрузка переменных окружения --- //
+// Архитектурно правильный подход: явный путь к .env через ENV_PATH или дефолтный
 const envPath = process.env.ENV_PATH || 
   (process.platform === 'win32' ? path.join(__dirname, '..', '.env') : '/root/NovaCiv/.env');
-require("dotenv").config({ path: envPath, override: true });
+
+// Проверяем существование .env файла перед загрузкой
+if (!fs.existsSync(envPath)) {
+  console.error(`[ops-agent] ERROR: .env file not found at ${envPath}`);
+  console.error(`[ops-agent] ENV_PATH=${process.env.ENV_PATH || 'NOT SET'}`);
+  console.error(`[ops-agent] PROJECT_DIR=${process.env.PROJECT_DIR || 'NOT SET'}`);
+  console.error(`[ops-agent] process.cwd()=${process.cwd()}`);
+  process.exit(1);
+}
+
+// Загружаем переменные окружения с override для гарантии актуальности
+const dotenvResult = require("dotenv").config({ path: envPath, override: true });
+
+if (dotenvResult.error) {
+  console.error(`[ops-agent] ERROR: Failed to load .env from ${envPath}:`, dotenvResult.error);
+  process.exit(1);
+}
+
+// Логируем успешную загрузку (без секретов)
+console.log(`[ops-agent] Loaded .env from ${envPath}`);
+if (dotenvResult.parsed) {
+  const keys = Object.keys(dotenvResult.parsed);
+  console.log(`[ops-agent] Loaded ${keys.length} environment variables from .env`);
+}
 
 const axios = require("axios");
 const { execSync } = require("child_process");
@@ -873,12 +900,21 @@ async function main() {
   logger.log(`[ops-agent] GitHub: ${GITHUB_OWNER}/${GITHUB_REPO}`);
   logger.log(`[ops-agent] Project dir: ${PROJECT_DIR}`);
   logger.log(`[ops-agent] Check interval: ${CHECK_INTERVAL}ms`);
+  logger.log(`[ops-agent] ENV_PATH: ${envPath}`);
 
+  // Критическая проверка GITHUB_TOKEN после загрузки .env
   if (!GITHUB_TOKEN) {
-    logger.error("[ops-agent] GITHUB_TOKEN not set in environment");
-    logger.error("[ops-agent] Please set GITHUB_TOKEN in .env file");
+    logger.error("[ops-agent] ❌ GITHUB_TOKEN not set in environment");
+    logger.error(`[ops-agent] ENV_PATH was: ${envPath}`);
+    logger.error(`[ops-agent] .env file exists: ${fs.existsSync(envPath)}`);
+    logger.error("[ops-agent] Please add GITHUB_TOKEN to .env file:");
+    logger.error("[ops-agent]   GITHUB_TOKEN=ghp_xxxxx");
+    logger.error("[ops-agent] Then restart: pm2 restart nova-ops-agent");
     process.exit(1);
   }
+
+  // Логируем успешную загрузку токена (без значения)
+  logger.log(`[ops-agent] ✅ GITHUB_TOKEN loaded (${GITHUB_TOKEN.length} chars)`);
 
   // Проверяем доступность проекта
   if (!fs.existsSync(PROJECT_DIR)) {

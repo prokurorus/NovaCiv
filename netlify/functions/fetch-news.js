@@ -15,7 +15,7 @@
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
-const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
+const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 
 // Максимум новых RSS-элементов за один запуск
@@ -499,10 +499,10 @@ exports.handler = async (event) => {
   const qs = event.queryStringParameters || {};
   if (NEWS_CRON_SECRET) {
     if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
-      console.log("auth gate blocked");
+      console.log("auth gate blocked (no token or token mismatch)");
       return {
         statusCode: 403,
-        body: "Forbidden",
+        body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
       };
     }
   }

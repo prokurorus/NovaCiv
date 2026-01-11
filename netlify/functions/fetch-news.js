@@ -494,19 +494,35 @@ exports.handler = async (event) => {
     };
   }
 
-  // Проверка токена: только если NEWS_CRON_SECRET задан (для ручных вызовов)
-  // Scheduled вызовы Netlify не передают query параметры, поэтому пропускаем проверку
-  const qs = event.queryStringParameters || {};
-  if (NEWS_CRON_SECRET) {
-    if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
-      console.log("auth gate blocked (no token or token mismatch)");
-      return {
-        statusCode: 403,
-        body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
-      };
+  // Определяем тип вызова: scheduled или HTTP/manual
+  // Netlify scheduled функции имеют заголовок x-netlify-event: schedule
+  // Также проверяем User-Agent: Netlify-Scheduled-Function
+  const headers = event.headers || {};
+  const userAgent = headers["user-agent"] || headers["User-Agent"] || "";
+  // Проверяем заголовок в разных регистрах (case-insensitive)
+  const eventHeader = headers["x-netlify-event"] || headers["X-Netlify-Event"] || headers["x-nf-event"] || headers["X-Nf-Event"];
+  const isScheduled = 
+    (eventHeader === "schedule" || eventHeader === "Schedule") ||
+    userAgent === "Netlify-Scheduled-Function";
+  
+  if (isScheduled) {
+    console.log("invocation type: scheduled");
+    console.log("auth skipped");
+  } else {
+    console.log("invocation type: http");
+    // Проверка токена только для HTTP/manual вызовов
+    const qs = event.queryStringParameters || {};
+    if (NEWS_CRON_SECRET) {
+      if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+        console.log("auth gate blocked (no token or token mismatch)");
+        return {
+          statusCode: 403,
+          body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
+        };
+      }
     }
+    console.log("auth gate passed");
   }
-  console.log("auth gate passed");
 
   if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
     return {

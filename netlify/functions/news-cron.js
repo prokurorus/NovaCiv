@@ -150,27 +150,23 @@ async function writeHealthMetrics(metrics) {
 }
 
 exports.handler = async (event) => {
+  const startTime = Date.now();
+  const runId = `news-cron-${startTime}`;
+
   try {
-    const url = new URL(event.rawUrl);
-    const token = url.searchParams.get("token");
-    const limitParam = url.searchParams.get("limit");
-
-    if (!NEWS_CRON_SECRET) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          ok: false,
-          error: "NEWS_CRON_SECRET is not configured",
-        }),
-      };
+    // Проверка токена: только если NEWS_CRON_SECRET задан (для ручных вызовов)
+    // Scheduled вызовы Netlify не передают query параметры, поэтому пропускаем проверку
+    const qs = event.queryStringParameters || {};
+    if (NEWS_CRON_SECRET) {
+      if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+        return {
+          statusCode: 403,
+          body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
+        };
+      }
     }
 
-    if (!token || token !== NEWS_CRON_SECRET) {
-      return {
-        statusCode: 403,
-        body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
-      };
-    }
+    const limitParam = qs.limit;
 
     const limit = limitParam
       ? Math.max(1, parseInt(limitParam, 10) || 1)
@@ -262,8 +258,6 @@ exports.handler = async (event) => {
     console.error("news-cron error:", err);
     
     // Heartbeat метрика при ошибке
-    const runId = `news-cron-${Date.now()}`;
-    const startTime = Date.now();
     await writeHealthMetrics({
       ts: startTime,
       runId,

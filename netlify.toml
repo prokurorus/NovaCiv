@@ -24,3 +24,9 @@
 
 [functions."video-worker"]
   schedule = "*/15 * * * *"
+
+[functions."domovoy-auto-post"]
+  schedule = "0 0 * * *"
+
+[functions."domovoy-auto-reply"]
+  schedule = "*/10 * * * *"

@@ -131,6 +131,24 @@ async function markTopicAsPosted(topicId) {
   }
 }
 
+// Запись heartbeat метрик в Firebase
+async function writeHealthMetrics(metrics) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const url = `${FIREBASE_DB_URL}/health/news/newsCronLastRun.json`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics),
+    });
+    if (!res.ok) {
+      log("Failed to write health metrics:", res.status);
+    }
+  } catch (e) {
+    log("Error writing health metrics:", e.message || e);
+  }
+}
+
 exports.handler = async (event) => {
   try {
     const url = new URL(event.rawUrl);
@@ -221,6 +239,16 @@ exports.handler = async (event) => {
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
 
+    // Heartbeat метрика
+    await writeHealthMetrics({
+      ts: startTime,
+      runId,
+      fetchedTopics: topics.length,
+      processed: freshTopics.length,
+      totalSent,
+      perLanguage,
+    });
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -232,6 +260,19 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("news-cron error:", err);
+    
+    // Heartbeat метрика при ошибке
+    const runId = `news-cron-${Date.now()}`;
+    const startTime = Date.now();
+    await writeHealthMetrics({
+      ts: startTime,
+      runId,
+      fetchedTopics: 0,
+      processed: 0,
+      totalSent: 0,
+      perLanguage: { ru: { sent: 0 }, en: { sent: 0 }, de: { sent: 0 } },
+    });
+    
     return {
       statusCode: 500,
       body: JSON.stringify({ ok: false, error: err.message }),

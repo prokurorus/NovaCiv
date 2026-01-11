@@ -265,6 +265,24 @@ async function saveNewsMeta(meta) {
   }
 }
 
+// Запись heartbeat метрик в Firebase
+async function writeHealthMetrics(metrics) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const url = `${FIREBASE_DB_URL}/health/news/fetchNewsLastRun.json`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics),
+    });
+    if (!res.ok) {
+      console.error("Failed to write health metrics:", res.status);
+    }
+  } catch (e) {
+    console.error("Error writing health metrics:", e.message || e);
+  }
+}
+
 // ---------- SAVE TO FORUM ----------
 
 async function saveNewsToForumLang(item, analyticText, langCode) {
@@ -466,12 +484,16 @@ exports.handler = async (event) => {
 
     // 1) Тянем все источники
     const allItems = [];
+    let sourcesOk = 0;
+    let sourcesFailed = 0;
     for (const src of SOURCES) {
       try {
         const items = await fetchRssSource(src);
         allItems.push(...items);
+        sourcesOk++;
       } catch (err) {
         console.error("RSS fetch error:", src.id, err);
+        sourcesFailed++;
       }
     }
 

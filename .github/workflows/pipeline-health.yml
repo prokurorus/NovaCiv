@@ -1,0 +1,33 @@
+name: Pipeline Health Check
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # Every 30 minutes
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check News health
+        run: node scripts/check-health-news.mjs
+        env:
+          NEWS_BASE_URL: ${{ secrets.NEWS_BASE_URL }}
+          NEWS_CRON_SECRET: ${{ secrets.NEWS_CRON_SECRET }}
+
+      - name: Check Domovoy health
+        run: node scripts/check-health-domovoy.mjs
+        env:
+          DOMOVOY_BASE_URL: ${{ secrets.DOMOVOY_BASE_URL || secrets.NEWS_BASE_URL }}
+          NEWS_CRON_SECRET: ${{ secrets.NEWS_CRON_SECRET }}

@@ -6,12 +6,17 @@
 // 1) Раз в запуск генерирует один пост в духе Устава/Манифеста.
 // 2) Поддерживает несколько режимов поста (mode): charter_quote, question_to_reader, term_explainer, charter_series.
 // 3) Пишет пост в Firebase Realtime Database в раздел forum/topics с section: "news" и postKind: "domovoy:<mode>".
-// 4) Никаких отправок в Telegram — только генерация и запись в базу.
+// 4) Отправляет пост в Telegram-канал по языку (TELEGRAM_NEWS_CHAT_ID_RU/EN/DE).
 // 5) Защищён токеном DOMOVOY_CRON_SECRET (?token=...).
 //
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const DOMOVOY_CRON_SECRET = process.env.DOMOVOY_CRON_SECRET || "";
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
+const TELEGRAM_NEWS_CHAT_ID_EN = process.env.TELEGRAM_NEWS_CHAT_ID_EN || process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
 // Модель OpenAI для текста
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -235,6 +240,17 @@ exports.handler = async (event) => {
     }
   }
 
+  const runId = `domovoy-post-${Date.now()}`;
+  const startTime = Date.now();
+  let metrics = {
+    ts: startTime,
+    runId,
+    ok: false,
+    postedPerLang: { ru: 0, en: 0, de: 0 },
+    telegramSentPerLang: { ru: 0, en: 0, de: 0 },
+    errCode: null,
+  };
+
   try {
     const qs = event.queryStringParameters || {};
     const forcedMode = qs.mode && POST_MODES.includes(qs.mode) ? qs.mode : null;
@@ -256,8 +272,36 @@ exports.handler = async (event) => {
     });
 
     log("Saved post to forum:", { topicId });
+    metrics.postedPerLang[langCode] = 1;
 
-    return {
+    // Отправка в Telegram по языку
+    const telegramText = buildPostText(title, body, langCode);
+    let telegramChatId = null;
+    if (langCode === "ru" && TELEGRAM_NEWS_CHAT_ID_RU) {
+      telegramChatId = TELEGRAM_NEWS_CHAT_ID_RU;
+    } else if (langCode === "en" && TELEGRAM_NEWS_CHAT_ID_EN) {
+      telegramChatId = TELEGRAM_NEWS_CHAT_ID_EN;
+    } else if (langCode === "de" && TELEGRAM_NEWS_CHAT_ID_DE) {
+      telegramChatId = TELEGRAM_NEWS_CHAT_ID_DE;
+    }
+
+    if (telegramChatId) {
+      try {
+        const telegramResult = await sendToTelegram(telegramChatId, telegramText);
+        if (telegramResult && telegramResult.ok) {
+          metrics.telegramSentPerLang[langCode] = 1;
+          log("Sent to Telegram:", langCode);
+        } else {
+          log("Telegram send failed:", telegramResult?.reason || "unknown");
+        }
+      } catch (e) {
+        log("Telegram send error:", e.message || e);
+      }
+    }
+
+    metrics.ok = true;
+
+    const result = {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
@@ -266,13 +310,31 @@ exports.handler = async (event) => {
         topicId,
       }),
     };
+
+    await writeHealthMetrics(metrics);
+    return result;
   } catch (err) {
     log("Fatal error:", err);
+    const errMsg = String(err && err.message ? err.message : err);
+    
+    // Определяем errCode
+    if (errMsg.includes("FIREBASE") || errMsg.includes("Firebase")) {
+      metrics.errCode = "FIREBASE";
+    } else if (errMsg.includes("OPENAI") || errMsg.includes("OpenAI")) {
+      metrics.errCode = "OPENAI";
+    } else if (errMsg.includes("TELEGRAM") || errMsg.includes("Telegram")) {
+      metrics.errCode = "TELEGRAM";
+    } else {
+      metrics.errCode = "UNKNOWN";
+    }
+
+    await writeHealthMetrics(metrics);
+    
     return {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
-        error: String(err && err.message ? err.message : err),
+        error: errMsg,
       }),
     };
   }

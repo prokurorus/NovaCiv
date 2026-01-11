@@ -87,6 +87,18 @@ const COMMAND_WHITELIST = {
     handler: handlePipelineTestJob,
     needsGit: false,
     needsPr: false
+  },
+  "snapshot": {
+    description: "Получить последний системный snapshot (без секретов)",
+    handler: handleSnapshot,
+    needsGit: false,
+    needsPr: false
+  },
+  "snapshot:get": {
+    description: "Получить последний системный snapshot (без секретов) [deprecated, use 'snapshot']",
+    handler: handleSnapshot,
+    needsGit: false,
+    needsPr: false
   }
 };
 
@@ -391,6 +403,26 @@ const db = admin.database();
     return "## Pipeline Test Job\n```\n" + sanitizeOutput(result.output || result.error || "") + "\n```";
   } catch (e) {
     return "❌ Test job creation failed: " + e.message;
+  }
+}
+
+async function handleSnapshot() {
+  try {
+    const snapshotPath = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
+    
+    if (!fs.existsSync(snapshotPath)) {
+      return "❌ Snapshot not found. Run snapshot_system.sh first, or wait for cron (every 30 minutes).";
+    }
+    
+    const snapshotContent = fs.readFileSync(snapshotPath, "utf8");
+    
+    // Snapshot уже не содержит секретов (фильтруется в скрипте)
+    // Но добавим дополнительную санитизацию на всякий случай
+    const sanitized = sanitizeOutput(snapshotContent);
+    
+    return sanitized;
+  } catch (e) {
+    return "❌ Failed to read snapshot: " + e.message;
   }
 }
 

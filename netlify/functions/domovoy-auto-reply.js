@@ -266,6 +266,24 @@ async function saveReplyComment({ topicId, replyText, lang, replyToId }) {
   return await res.json().catch(() => ({}));
 }
 
+// Запись heartbeat метрик в Firebase
+async function writeHealthMetrics(metrics) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const url = `${FIREBASE_DB_URL}/health/domovoy/autoReplyLastRun.json`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics),
+    });
+    if (!res.ok) {
+      log("Failed to write health metrics:", res.status);
+    }
+  } catch (e) {
+    log("Error writing health metrics:", e.message || e);
+  }
+}
+
 // ---------- handler ----------
 
 exports.handler = async (event) => {

@@ -13,7 +13,7 @@
 const path = require("path");
 const envPath = process.env.ENV_PATH || 
   (process.platform === 'win32' ? path.join(__dirname, '..', '.env') : '/root/NovaCiv/.env');
-require("dotenv").config({ path: envPath });
+require("dotenv").config({ path: envPath, override: true });
 
 const axios = require("axios");
 const { execSync } = require("child_process");

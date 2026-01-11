@@ -44,7 +44,6 @@ if (dotenvResult.parsed) {
 
 const axios = require("axios");
 const { execSync } = require("child_process");
-const fs = require("fs");
 
 // --- Парсинг аргументов командной строки --- //
 

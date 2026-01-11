@@ -88,6 +88,18 @@ NEWS_BASE_URL=https://novaciv.netlify.app NEWS_CRON_SECRET=your_token node scrip
 
 Скрипт выводит статус и возвращает exit code 1, если scheduler не работает.
 
+**GitHub Actions мониторинг:**
+
+Настроен автоматический мониторинг через GitHub Actions (`.github/workflows/news-health.yml`):
+- Запускается каждые 30 минут по расписанию
+- Использует скрипт `scripts/check-health-news.mjs`
+- Требует GitHub Secrets: `NEWS_BASE_URL`, `NEWS_CRON_SECRET`
+
+Для настройки secrets:
+1. Перейдите в Settings → Secrets and variables → Actions
+2. Добавьте `NEWS_BASE_URL` (например: `https://novaciv.netlify.app`)
+3. Добавьте `NEWS_CRON_SECRET` (значение из переменной окружения Netlify)
+
 ---
 
 ## URL для ручного вызова

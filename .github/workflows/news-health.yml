@@ -1,0 +1,27 @@
+name: News Scheduler Health Check
+
+on:
+  schedule:
+    # Run every 30 minutes
+    - cron: "*/30 * * * *"
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Check news scheduler health
+        env:
+          NEWS_BASE_URL: ${{ secrets.NEWS_BASE_URL }}
+          NEWS_CRON_SECRET: ${{ secrets.NEWS_CRON_SECRET }}
+        run: node scripts/check-health-news.mjs

@@ -1,7 +1,10 @@
 # Project State — NovaCiv
 
 **Last verified:** 2026-01-11  
+**Last synchronized:** 2026-01-11  
 **Status:** Active
+
+**Sync note:** All active code paths are now aligned with GitHub main. Documentation (Source of Truth, RTDB model, runbooks, snapshot logic) synchronized from server to GitHub.
 
 ---
 

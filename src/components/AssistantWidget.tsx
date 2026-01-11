@@ -413,7 +413,7 @@ const AssistantWidget: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsMuted((prev) => !prev)}
-                  className={`inline-flex h-7 w-7 items-center justify-center rounded-full border text-xs ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full border text-xs ${
                     isMuted
                       ? "border-zinc-300 text-zinc-400 bg-zinc-50"
                       : "border-zinc-800 text-zinc-900 bg-zinc-100"
@@ -424,7 +424,7 @@ const AssistantWidget: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleClearChat}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100"
                   title="Очистить диалог"
                 >
                   ⟲
@@ -432,7 +432,7 @@ const AssistantWidget: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsOpen(false)}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 hover:bg-zinc-100"
                 >
                   ✕
                 </button>

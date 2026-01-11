@@ -79,6 +79,35 @@ const SOURCES = [
     url: "https://rss.dw.com/rdf/rss-de-all",
     languages: ["de"],
   },
+  {
+    id: "spiegel_politik",
+    url: "https://www.spiegel.de/politik/index.rss",
+    languages: ["de"],
+  },
+  {
+    id: "faz_politik",
+    url: "https://www.faz.net/rss/aktuell/politik/",
+    languages: ["de"],
+  },
+  {
+    id: "dw_german_umwelt",
+    url: "https://rss.dw.com/rdf/rss-de-umwelt",
+    languages: ["de"],
+  },
+
+  // Дополнительные английские источники
+  {
+    id: "aljazeera_world",
+    url: "https://www.aljazeera.com/xml/rss/all.xml",
+    languages: ["en"],
+  },
+
+  // Дополнительные русские источники
+  {
+    id: "lenta_rss",
+    url: "https://lenta.ru/rss",
+    languages: ["ru"],
+  },
 ];
 
 // Вывод по языкам (только форум; Telegram теперь отдельной функцией)
@@ -288,6 +317,23 @@ async function saveNewsMeta(meta) {
   }
 }
 
+async function writeHealthMetrics(metrics) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}/health/news/fetchNewsLastRun.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error("Failed to write health metrics:", res.status, text);
+    }
+  } catch (e) {
+    console.error("Error writing health metrics:", e);
+  }
+}
+
 // ---------- SAVE TO FORUM ----------
 
 async function saveNewsToForumLang(item, analyticText, langCode) {
@@ -455,6 +501,13 @@ ${englishText}
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
+  // Auto-diagnostics: generate runId and timestamp
+  const runId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const timestamp = new Date().toISOString();
+  const trigger = event.headers?.["x-netlify-scheduled-event"] ? "scheduled" : "manual";
+
+  console.log(`[fetch-news] [${runId}] Starting at ${timestamp} (trigger: ${trigger})`);
+
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     return {
       statusCode: 405,
@@ -465,6 +518,7 @@ exports.handler = async (event) => {
   if (NEWS_CRON_SECRET) {
     const qs = event.queryStringParameters || {};
     if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+      console.log(`[fetch-news] [${runId}] ERROR: Forbidden - invalid token`);
       return {
         statusCode: 403,
         body: "Forbidden",
@@ -473,11 +527,14 @@ exports.handler = async (event) => {
   }
 
   if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
+    console.log(`[fetch-news] [${runId}] ERROR: Missing OPENAI_API_KEY or FIREBASE_DB_URL`);
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: false,
         error: "OPENAI_API_KEY или FIREBASE_DB_URL не заданы на сервере.",
+        runId,
+        timestamp,
       }),
     };
   }
@@ -501,14 +558,14 @@ exports.handler = async (event) => {
         allItems.push(...items);
         sourceStats.ok += 1;
       } catch (err) {
-        console.error("RSS fetch error:", src.id, err);
+        console.error(`[fetch-news] [${runId}] RSS fetch error: ${src.id}`, err);
         sourceStats.failed += 1;
         sourceStats.failedSources.push({ id: src.id, error: String(err.message || err) });
       }
     }
 
     console.log(
-      `[fetch-news] Sources: ${sourceStats.ok} OK, ${sourceStats.failed} failed. Items fetched: ${allItems.length}`,
+      `[fetch-news] [${runId}] Sources: ${sourceStats.ok} OK, ${sourceStats.failed} failed. Items fetched: ${allItems.length}`,
     );
 
     // 2) Фильтруем по свежести (48 часов) и сортируем по дате (сначала новые)
@@ -545,11 +602,12 @@ exports.handler = async (event) => {
     });
 
     if (countNoDate > 0) {
-      console.log(`[fetch-news] Filtered out ${countNoDate} items without valid pubDate`);
+      console.log(`[fetch-news] [${runId}] Filtered out ${countNoDate} items without valid pubDate`);
     }
     if (countTooOld > 0) {
-      console.log(`[fetch-news] Filtered out ${countTooOld} items older than ${MAX_AGE_HOURS}h`);
+      console.log(`[fetch-news] [${runId}] Filtered out ${countTooOld} items older than ${MAX_AGE_HOURS}h`);
     }
+    console.log(`[fetch-news] [${runId}] After freshness filter: ${freshItems.length} items`);
 
     // Сортируем по дате (сначала новые)
     freshItems.sort((a, b) => {
@@ -580,18 +638,33 @@ exports.handler = async (event) => {
 
     if (toProcess.length === 0) {
       await saveNewsMeta({ processedKeys, titleKeys });
+      
+      // Write heartbeat metrics to Firebase
+      await writeHealthMetrics({
+        ts: Date.now(),
+        runId,
+        sourcesOk: sourceStats.ok,
+        sourcesFailed: sourceStats.failed,
+        fetched: allItems.length,
+        filtered: freshItems.length,
+        processed: 0,
+      });
+      
       return {
         statusCode: 200,
         body: JSON.stringify({
           ok: true,
           processed: 0,
           message: "No new items",
+          runId,
+          timestamp,
         }),
       };
     }
 
     let successCount = 0;
     const titles = [];
+    const perLanguageCounts = { ru: 0, en: 0, de: 0 };
 
     for (const entry of toProcess) {
       const { item, key, titleKey } = entry;
@@ -626,6 +699,7 @@ exports.handler = async (event) => {
           // Сохраняем только в форум
           if (cfg.saveToForum) {
             await saveNewsToForumLang(item, textForLang, code);
+            perLanguageCounts[code] = (perLanguageCounts[code] || 0) + 1;
           }
         }
 
@@ -667,11 +741,29 @@ exports.handler = async (event) => {
         titles.push(item.title || "(no title)");
 
       } catch (err) {
-        console.error("Failed to process news item:", item.title, err);
+        console.error(`[fetch-news] [${runId}] Failed to process news item:`, item.title, err);
       }
     }
 
     await saveNewsMeta({ processedKeys, titleKeys });
+
+    // Write heartbeat metrics to Firebase
+    const filteredCount = freshItems.length;
+    await writeHealthMetrics({
+      ts: Date.now(),
+      runId,
+      sourcesOk: sourceStats.ok,
+      sourcesFailed: sourceStats.failed,
+      fetched: allItems.length,
+      filtered: filteredCount,
+      processed: successCount,
+    });
+
+    // Final logging with all metrics
+    console.log(`[fetch-news] [${runId}] Completed: processed=${successCount}, perLanguage: ru=${perLanguageCounts.ru}, en=${perLanguageCounts.en}, de=${perLanguageCounts.de}`);
+    if (sourceStats.failed > 0) {
+      console.log(`[fetch-news] [${runId}] Failed sources: ${sourceStats.failedSources.map(s => s.id).join(", ")}`);
+    }
 
     return {
       statusCode: 200,
@@ -679,15 +771,20 @@ exports.handler = async (event) => {
         ok: true,
         processed: successCount,
         titles,
+        perLanguageCounts,
+        runId,
+        timestamp,
       }),
     };
   } catch (err) {
-    console.error("fetch-news fatal error:", err);
+    console.error(`[fetch-news] [${runId}] FATAL ERROR:`, err);
     return {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
         error: String(err && err.message ? err.message : err),
+        runId,
+        timestamp,
       }),
     };
   }

@@ -1,0 +1,24 @@
+Команды для проверки nova-ops-agent на сервере
+=================================================
+
+1. Найти все .env файлы в /root/NovaCiv (включая подпапки):
+   find /root/NovaCiv -type f -name ".env" 2>/dev/null | sort
+
+2. Проверить наличие GITHUB_TOKEN= в /root/NovaCiv/.env:
+   grep -qE "^GITHUB_TOKEN=" /root/NovaCiv/.env && echo "✅ GITHUB_TOKEN exists" || echo "❌ GITHUB_TOKEN missing"
+
+3. PM2 describe nova-ops-agent:
+   pm2 describe nova-ops-agent
+
+4. PM2 env (ENV_PATH и PROJECT_DIR):
+   PM2_ID=$(pm2 id nova-ops-agent 2>/dev/null | tail -n 1 | tr -d '[:space:]')
+   pm2 env $PM2_ID | grep -E "^(ENV_PATH|PROJECT_DIR)="
+
+5. Перезапуск и проверка стабильности:
+   pm2 restart nova-ops-agent
+   sleep 5
+   pm2 status nova-ops-agent
+   pm2 logs nova-ops-agent --lines 30 --nostream
+
+6. БЫСТРАЯ ДИАГНОСТИКА (одна команда):
+   PM2_ID=$(pm2 id nova-ops-agent 2>/dev/null | tail -n 1 | tr -d '[:space:]') && pm2 describe nova-ops-agent && echo '---' && pm2 env $PM2_ID | grep -E '^(ENV_PATH|PROJECT_DIR)=' && grep -qE '^GITHUB_TOKEN=' /root/NovaCiv/.env && echo '✅ GITHUB_TOKEN exists' || echo '❌ GITHUB_TOKEN missing'

@@ -26,7 +26,7 @@ const LanguageSwitcher: React.FC = () => {
           key={code}
           type="button"
           onClick={() => handleChange(code)}
-          className={`px-2 py-0.5 rounded-full transition ${
+          className={`px-2.5 py-1 rounded-full transition ${
             language === code
               ? "bg-zinc-900 text-white"
               : "text-zinc-700 hover:bg-zinc-100"

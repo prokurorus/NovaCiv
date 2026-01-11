@@ -111,7 +111,7 @@ export default function TopNav() {
           <button
             type="button"
             onClick={() => setIsOpen((v) => !v)}
-            className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm"
+            className="md:hidden inline-flex items-center justify-center h-10 w-10 md:h-9 md:w-9 rounded-full border border-zinc-300 bg-white text-zinc-700 shadow-sm"
           >
             <span className="sr-only">Toggle navigation</span>
             <div className="flex flex-col gap-[3px]">
@@ -149,7 +149,7 @@ export default function TopNav() {
               const isActive = item.active;
 
               const baseClasses =
-                "inline-flex items-center justify-between gap-3 rounded-2xl border px-4 py-2 text-sm font-medium transition shadow-sm w-full md:w-auto";
+                "inline-flex items-center justify-between gap-3 rounded-2xl border px-4 py-2 text-sm font-medium transition shadow-sm w-full md:w-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-2";
               const activeClasses =
                 "bg-zinc-900 border-zinc-900 text-white shadow-[0_14px_40px_rgba(15,23,42,0.35)]";
               const defaultClasses =

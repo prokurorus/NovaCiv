@@ -156,4 +156,54 @@ async function uploadToYouTube(videoPath, title, options = {}) {
   }
 }
 
+
+/**
+ * Health check: проверяет валидность YouTube access token без upload
+ * @returns {Promise<{ok: boolean, error?: string, message?: string}>}
+ */
+async function checkYouTubeAuth() {
+  const clientId = process.env.YOUTUBE_CLIENT_ID;
+  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+  const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    return { ok: false, error: "YouTube credentials not configured" };
+  }
+
+  try {
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+
+    // Пытаемся получить access token через refresh
+    const { credentials } = await oauth2Client.refreshAccessToken();
+
+    if (credentials && credentials.access_token) {
+      return { ok: true };
+    }
+
+    return { ok: false, error: "No access token received" };
+  } catch (err) {
+    const errorMessage = err?.message || String(err);
+    const apiData = err?.response?.data;
+    const errorCode = apiData?.error?.errors?.[0]?.reason || apiData?.error?.code;
+
+    // Определяем тип ошибки
+    if (errorMessage.includes("invalid_grant") || errorCode === "invalid_grant") {
+      return {
+        ok: false,
+        error: "invalid_grant",
+        message: "Refresh token is invalid or expired. Regenerate token using: node scripts/youtube-get-token.js",
+      };
+    }
+
+    return {
+      ok: false,
+      error: errorCode || "unknown",
+      message: errorMessage,
+    };
+  }
+}
+
+// Attach checkYouTubeAuth to uploadToYouTube before export
+uploadToYouTube.checkYouTubeAuth = checkYouTubeAuth;
 module.exports = uploadToYouTube;

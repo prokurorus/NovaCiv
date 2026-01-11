@@ -17,10 +17,17 @@
   node_bundler = "esbuild"
 
 [functions."news-cron"]
-  schedule = "0 * * * *"
+  schedule = "5 * * * *"
 
+# fetch-news: каждый час для почасового выпуска новостей
+# Ранее: "0 */3 * * *" (каждые 3 часа)
+# Изменено на каждый час для обеспечения почасового выпуска новостей в Telegram
+# Ограничение MAX_NEW_ITEMS_PER_RUN=5 предотвращает перегрузку OpenAI API
 [functions."fetch-news"]
-  schedule = "0 */3 * * *"
+  schedule = "0 * * * *"
 
 [functions."video-worker"]
   schedule = "*/15 * * * *"
+
+[functions."domovoy-daily-video"]
+  schedule = "0 3 * * *"

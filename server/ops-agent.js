@@ -14,32 +14,40 @@ const path = require("path");
 const fs = require("fs");
 
 // --- Загрузка переменных окружения --- //
-// Архитектурно правильный подход: явный путь к .env через ENV_PATH или дефолтный
+// Архитектурно правильный подход: PM2 инъектирует переменные из .env через ecosystem.config.cjs
+// dotenv используется только как fallback (например, для локальной разработки)
+
 const envPath = process.env.ENV_PATH || 
   (process.platform === 'win32' ? path.join(__dirname, '..', '.env') : '/root/NovaCiv/.env');
 
-// Проверяем существование .env файла перед загрузкой
-if (!fs.existsSync(envPath)) {
-  console.error(`[ops-agent] ERROR: .env file not found at ${envPath}`);
-  console.error(`[ops-agent] ENV_PATH=${process.env.ENV_PATH || 'NOT SET'}`);
-  console.error(`[ops-agent] PROJECT_DIR=${process.env.PROJECT_DIR || 'NOT SET'}`);
-  console.error(`[ops-agent] process.cwd()=${process.cwd()}`);
-  process.exit(1);
-}
+// Основной источник переменных окружения — process.env от PM2
+// Загружаем dotenv только как fallback (если переменные не установлены PM2)
+// Проверяем, есть ли критически важные переменные в process.env
+const hasEnvFromPM2 = !!process.env.GITHUB_TOKEN || !!process.env.PROJECT_DIR;
 
-// Загружаем переменные окружения с override для гарантии актуальности
-const dotenvResult = require("dotenv").config({ path: envPath, override: true });
+if (!hasEnvFromPM2) {
+  // Fallback: загружаем из .env файла (для локальной разработки)
+  if (!fs.existsSync(envPath)) {
+    console.error(`[ops-agent] ERROR: .env file not found at ${envPath}`);
+    console.error(`[ops-agent] ENV_PATH=${process.env.ENV_PATH || 'NOT SET'}`);
+    console.error(`[ops-agent] PROJECT_DIR=${process.env.PROJECT_DIR || 'NOT SET'}`);
+    console.error(`[ops-agent] process.cwd()=${process.cwd()}`);
+    process.exit(1);
+  }
 
-if (dotenvResult.error) {
-  console.error(`[ops-agent] ERROR: Failed to load .env from ${envPath}:`, dotenvResult.error);
-  process.exit(1);
-}
-
-// Логируем успешную загрузку (без секретов)
-console.log(`[ops-agent] Loaded .env from ${envPath}`);
-if (dotenvResult.parsed) {
-  const keys = Object.keys(dotenvResult.parsed);
-  console.log(`[ops-agent] Loaded ${keys.length} environment variables from .env`);
+  const dotenvResult = require("dotenv").config({ path: envPath, override: false });
+  
+  if (dotenvResult.error) {
+    console.warn(`[ops-agent] WARNING: Failed to load .env from ${envPath}:`, dotenvResult.error.message);
+  } else {
+    console.log(`[ops-agent] Loaded .env from ${envPath} (fallback mode)`);
+    if (dotenvResult.parsed) {
+      const keys = Object.keys(dotenvResult.parsed);
+      console.log(`[ops-agent] Loaded ${keys.length} environment variables from .env`);
+    }
+  }
+} else {
+  console.log(`[ops-agent] Using environment variables from PM2`);
 }
 
 const axios = require("axios");

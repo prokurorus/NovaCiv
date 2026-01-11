@@ -137,13 +137,38 @@ async function markTopicAsPosted(topicId) {
   }
 }
 
+async function writeHealthMetrics(metrics) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}/health/news/newsCronLastRun.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      log("Failed to write health metrics:", res.status, text);
+    }
+  } catch (e) {
+    log("Error writing health metrics:", e);
+  }
+}
+
 exports.handler = async (event) => {
+  // Auto-diagnostics: generate runId and timestamp
+  const runId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const timestamp = new Date().toISOString();
+  const trigger = event.headers?.["x-netlify-scheduled-event"] ? "scheduled" : "manual";
+
+  log(`[${runId}] Starting news-cron at ${timestamp} (trigger: ${trigger})`);
+
   try {
     const url = new URL(event.rawUrl);
     const token = url.searchParams.get("token");
     const limitParam = url.searchParams.get("limit");
 
     if (!NEWS_CRON_SECRET) {
+      log(`[${runId}] ERROR: NEWS_CRON_SECRET is not configured`);
       return {
         statusCode: 500,
         body: JSON.stringify({
@@ -154,6 +179,7 @@ exports.handler = async (event) => {
     }
 
     if (!token || token !== NEWS_CRON_SECRET) {
+      log(`[${runId}] ERROR: Forbidden - invalid token`);
       return {
         statusCode: 403,
         body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
@@ -164,20 +190,27 @@ exports.handler = async (event) => {
       ? Math.max(1, parseInt(limitParam, 10) || 1)
       : 10;
 
+    log(`[${runId}] Fetching topics from Firebase (limit: ${limit})`);
     const topics = await fetchNewsTopics();
+    log(`[${runId}] Fetched ${topics.length} total topics`);
 
     const freshTopics = topics
       .filter((t) => !t.telegramPostedAt)
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
       .slice(0, limit);
 
+    log(`[${runId}] Filtered to ${freshTopics.length} fresh topics (not posted yet)`);
+
     if (!freshTopics.length) {
+      log(`[${runId}] No new topics to post - exiting`);
       return {
         statusCode: 200,
         body: JSON.stringify({
           ok: true,
           processed: 0,
           message: "No new topics to post",
+          runId,
+          timestamp,
         }),
       };
     }
@@ -250,6 +283,26 @@ exports.handler = async (event) => {
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
 
+    // Write heartbeat metrics to Firebase
+    await writeHealthMetrics({
+      ts: Date.now(),
+      runId,
+      fetchedTopics: topics.length,
+      processed: freshTopics.length,
+      totalSent,
+      perLanguage: {
+        ru: { sent: perLanguage.ru.sent, errors: perLanguage.ru.errors.length },
+        en: { sent: perLanguage.en.sent, errors: perLanguage.en.errors.length },
+        de: { sent: perLanguage.de.sent, errors: perLanguage.de.errors.length },
+      },
+    });
+
+    // Final logging with all metrics
+    log(`[${runId}] Completed: processed=${freshTopics.length}, totalSent=${totalSent}, perLanguage: ru=${perLanguage.ru.sent}, en=${perLanguage.en.sent}, de=${perLanguage.de.sent}`);
+    if (perLanguage.ru.errors.length > 0 || perLanguage.en.errors.length > 0 || perLanguage.de.errors.length > 0) {
+      log(`[${runId}] Errors: ru=${perLanguage.ru.errors.length}, en=${perLanguage.en.errors.length}, de=${perLanguage.de.errors.length}`);
+    }
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -257,13 +310,21 @@ exports.handler = async (event) => {
         processed: freshTopics.length,
         totalSent,
         perLanguage,
+        runId,
+        timestamp,
       }),
     };
   } catch (err) {
+    log(`[${runId}] FATAL ERROR:`, err);
     console.error("news-cron error:", err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ ok: false, error: err.message }),
+      body: JSON.stringify({ 
+        ok: false, 
+        error: err.message,
+        runId,
+        timestamp,
+      }),
     };
   }
 };

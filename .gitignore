@@ -26,6 +26,11 @@ dist-ssr
 # DO NOT COMMIT FIREBASE SERVICE ACCOUNT KEYS
 *firebase-adminsdk-*.json
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # local helper scripts
 sync.ps1
 

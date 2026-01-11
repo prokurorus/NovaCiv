@@ -138,12 +138,59 @@ function logOpenAIError(err, logger) {
   }
 }
 
+// утилита для получения длительности аудио файла
+function getAudioDuration(audioPath, logger = console) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(audioPath)) {
+      logger.warn("[pipeline] audio file not found for duration check", audioPath);
+      resolve(null);
+      return;
+    }
+
+    const proc = spawn(ffmpegPath, [
+      "-i",
+      audioPath,
+      "-f",
+      "null",
+      "-",
+    ]);
+
+    let stderr = "";
+    proc.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    proc.on("close", () => {
+      // ffmpeg всегда возвращает код != 0 для этой команды, но мы извлекаем duration из stderr
+      const durationMatch = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+      if (durationMatch) {
+        const hours = parseInt(durationMatch[1], 10);
+        const minutes = parseInt(durationMatch[2], 10);
+        const seconds = parseInt(durationMatch[3], 10);
+        const centiseconds = parseInt(durationMatch[4], 10);
+        const totalSeconds = hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+        logger.log("[pipeline] detected audio duration:", totalSeconds, "seconds");
+        resolve(totalSeconds);
+      } else {
+        logger.warn("[pipeline] could not extract audio duration from ffmpeg output");
+        resolve(null);
+      }
+    });
+
+    proc.on("error", (err) => {
+      logger.warn("[pipeline] error getting audio duration", err);
+      resolve(null);
+    });
+  });
+}
+
 // основной конвейер: принимает текст и язык, выдаёт путь к mp4
 async function runPipeline({
   script,
   lang = "ru",
   logger = console,
   stamp = Date.now(),
+  maxDurationSec = null, // Максимальная длительность видео в секундах
 }) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is not set");
@@ -180,6 +227,7 @@ async function runPipeline({
     voice,
     audioPath,
     outPath,
+    maxDurationSec,
   });
 
   // 1) генерируем озвучку через OpenAI TTS
@@ -201,6 +249,39 @@ async function runPipeline({
     throw new Error("TTS generation failed");
   }
 
+  // Проверяем длительность аудио, если указан лимит
+  let actualDuration = null;
+  let trimmedAudioPath = audioPath;
+
+  if (maxDurationSec) {
+    actualDuration = await getAudioDuration(audioPath, logger);
+    logger.log("[pipeline] audio duration:", actualDuration, "seconds");
+
+    if (actualDuration && actualDuration > maxDurationSec) {
+      logger.log(
+        "[pipeline] audio too long (",
+        actualDuration,
+        "s), trimming to",
+        maxDurationSec,
+        "s"
+      );
+      // Обрезаем аудио до нужной длительности (перекодируем для надёжности)
+      trimmedAudioPath = path.join(tmpRoot, `nv-${stamp}-${safeLang}-trimmed.mp3`);
+      const trimArgs = [
+        "-y",
+        "-i",
+        audioPath,
+        "-t",
+        String(maxDurationSec),
+        "-acodec",
+        "libmp3lame",
+        trimmedAudioPath,
+      ];
+      await runFfmpeg(trimArgs, logger);
+      logger.log("[pipeline] audio trimmed to", trimmedAudioPath);
+    }
+  }
+
   // 2) собираем видео из картинки + аудио
   const ffmpegArgs = [
     "-y",
@@ -209,7 +290,7 @@ async function runPipeline({
     "-i",
     backgroundPath,
     "-i",
-    audioPath,
+    trimmedAudioPath,
     "-c:v",
     "libx264",
     "-tune",
@@ -223,8 +304,14 @@ async function runPipeline({
     "-shortest",
     "-vf",
     "scale=1080:1920,format=yuv420p",
-    outPath,
   ];
+
+  // Если указан лимит, добавляем его для надёжности
+  if (maxDurationSec) {
+    ffmpegArgs.push("-t", String(maxDurationSec));
+  }
+
+  ffmpegArgs.push(outPath);
 
   await runFfmpeg(ffmpegArgs, logger);
 
@@ -240,6 +327,7 @@ async function runPipeline({
     backgroundPath,
     lang: safeLang,
     text,
+    duration: actualDuration || null,
   };
 }
 

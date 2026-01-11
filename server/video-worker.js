@@ -154,11 +154,13 @@ async function processOneJob() {
 
   const [id, job] = Object.entries(jobs)[0];
   const safeLang = (job.language || "ru").toLowerCase();
+  const jobPlatform = job.platform || null; // "youtube" или "telegram"
 
   logger.log(
     "[worker] attempting to claim job",
     id,
     safeLang,
+    jobPlatform || "all",
     job.topic ? job.topic : ""
   );
 
@@ -213,21 +215,31 @@ async function processOneJob() {
   }
 
   try {
+    const jobText = job.script || job.topic || "";
+    const maxDurationSec = job.maxDurationSec || null;
+
     // Генерируем видео через pipeline
     const pipelineResult = await runPipeline({
-      script: job.script,
+      script: jobText,
       lang: safeLang,
       logger,
       stamp: Date.now(),
+      maxDurationSec: maxDurationSec,
     });
 
     logger.log("[worker] pipeline finished", {
       lang: safeLang,
       videoPath: pipelineResult && pipelineResult.videoPath,
+      duration: pipelineResult && pipelineResult.duration,
     });
 
-    // --- Загрузка на YouTube (если включено в Firebase) ---
-    if (youtubeEnabled) {
+    let youtubeId = null;
+    let telegramChannel = null;
+
+    // --- Загрузка на YouTube (только для YouTube-задач или если platform не указан) ---
+    const shouldUploadToYouTube = youtubeEnabled && (!jobPlatform || jobPlatform === "youtube");
+    
+    if (shouldUploadToYouTube) {
       try {
         const uploadToYouTube = require("./youtube");
 
@@ -240,46 +252,100 @@ async function processOneJob() {
             ? "First contact with NovaCiv"
             : "Первое знакомство с NovaCiv");
 
-        const ytId = await uploadToYouTube(
+        youtubeId = await uploadToYouTube(
           pipelineResult.videoPath,
-          ytTitle
+          ytTitle,
+          { lang: safeLang }
         );
 
-        logger.log("[youtube] uploaded:", ytId);
+        logger.log("[youtube] uploaded:", youtubeId);
 
         await jobRef.update({
-          youtubeId: ytId,
+          youtubeId: youtubeId,
         });
       } catch (err) {
-        logger.error("[youtube] error:", err);
+        // Детальная обработка ошибок YouTube без краша процесса
+        const errorMessage = err?.message || String(err);
+        const isAuthError = errorMessage.includes("invalid_grant") || 
+                           errorMessage.includes("unauthorized") ||
+                           errorMessage.includes("authentication");
+
+        if (isAuthError) {
+          logger.error("[youtube] ❌ AUTH ERROR during upload:", errorMessage);
+          logger.error("[youtube] Worker continues for Telegram, but YouTube upload failed");
+          logger.error("[youtube] ACTION: Check health check logs and regenerate token if needed");
+        } else {
+          logger.error("[youtube] upload error (non-auth):", errorMessage);
+        }
+
         await jobRef.update({
-          youtubeError: String(err && err.message ? err.message : err),
+          youtubeError: errorMessage,
         });
-        // Не прерываем выполнение из-за ошибки YouTube
+        // Не прерываем выполнение из-за ошибки YouTube - продолжаем для Telegram
       }
     } else {
-      logger.log("[youtube] disabled via feature flag, skipping");
+      if (jobPlatform === "telegram") {
+        logger.log("[youtube] skipping (telegram-only job)");
+      } else {
+        logger.log("[youtube] disabled via feature flag, skipping");
+      }
     }
 
-    // --- Отправка в Telegram (если включено в Firebase) ---
-    if (telegramEnabled) {
+    // --- Отправка в Telegram (только для Telegram-задач или если platform не указан) ---
+    const shouldSendToTelegram = telegramEnabled && (!jobPlatform || jobPlatform === "telegram");
+    
+    if (shouldSendToTelegram) {
       const caption =
         job.caption ||
         job.topic ||
         "NovaCiv — novaciv.space. Цифровая цивилизация без правителей.";
 
       try {
+        // Получаем chat ID для логирования
+        const chatId = getTelegramChatIdForLang(safeLang);
+        telegramChannel = chatId || `channel-${safeLang}`;
+
         await sendTelegramVideo({
           lang: safeLang,
           videoPath: pipelineResult.videoPath,
           caption,
         });
+
+        logger.log("[telegram] sent to channel:", telegramChannel);
       } catch (err) {
         logger.error("[telegram] send error:", err);
         // Не прерываем выполнение из-за ошибки Telegram
       }
     } else {
-      logger.log("[telegram] disabled via feature flag, skipping");
+      if (jobPlatform === "youtube") {
+        logger.log("[telegram] skipping (youtube-only job)");
+      } else {
+        logger.log("[telegram] disabled via feature flag, skipping");
+      }
+    }
+
+    // Логируем полную информацию о выполненной задаче
+    const logEntry = {
+      date: new Date().toISOString(),
+      language: safeLang,
+      text: jobText.substring(0, 200), // Первые 200 символов
+      youtubeVideoId: youtubeId || null,
+      telegramChannel: telegramChannel || null,
+      jobId: id,
+      platform: jobPlatform || "all",
+    };
+
+    logger.log("[worker] ✅ VIDEO GENERATION COMPLETE", JSON.stringify(logEntry, null, 2));
+
+    // Сохраняем лог в Firebase для истории
+    try {
+      await db.ref("videoLogs").push({
+        ...logEntry,
+        timestamp: Date.now(),
+        fullText: jobText,
+      });
+    } catch (logErr) {
+      logger.warn("[worker] failed to save log to Firebase", logErr);
     }
 
     // Помечаем задачу как выполненную
@@ -287,6 +353,8 @@ async function processOneJob() {
       status: "done",
       finishedAt: Date.now(),
       videoPath: pipelineResult.videoPath,
+      youtubeId: youtubeId || null,
+      telegramChannel: telegramChannel || null,
     });
 
     logger.log("[worker] job done", id);
@@ -300,6 +368,56 @@ async function processOneJob() {
   }
 }
 
+// --- YouTube Health Check --- //
+
+let lastYouTubeHealthCheck = 0;
+const YOUTUBE_HEALTH_CHECK_INTERVAL = 60 * 60 * 1000; // 1 час
+
+/**
+ * Проверяет валидность YouTube токена (health check)
+ * @returns {Promise<void>}
+ */
+async function checkYouTubeHealth() {
+  const now = Date.now();
+  
+  // Проверяем не чаще раза в час
+  if (now - lastYouTubeHealthCheck < YOUTUBE_HEALTH_CHECK_INTERVAL) {
+    return;
+  }
+
+  lastYouTubeHealthCheck = now;
+
+  try {
+    const { getFeatureFlags } = require("./config/feature-flags");
+    const flags = await getFeatureFlags(logger, false);
+    
+    // Проверяем только если YouTube включен
+    if (flags.youtubeUploadEnabled !== true) {
+      return;
+    }
+
+    const { checkYouTubeAuth } = require("./youtube");
+    const health = await checkYouTubeAuth();
+
+    if (!health.ok) {
+      if (health.error === "invalid_grant") {
+        logger.error("[youtube-health] ❌ AUTH ERROR: Refresh token is invalid or expired");
+        logger.error("[youtube-health] ACTION REQUIRED: Regenerate refresh token");
+        logger.error("[youtube-health] Run: node scripts/youtube-get-token.js");
+        logger.error("[youtube-health] Worker will continue for Telegram, but YouTube uploads will fail");
+      } else {
+        logger.error("[youtube-health] ⚠️  Auth check failed:", health.error, health.message);
+        logger.error("[youtube-health] YouTube uploads may fail, but worker continues");
+      }
+    } else {
+      logger.log("[youtube-health] ✅ Auth token is valid");
+    }
+  } catch (err) {
+    // Не крашим процесс из-за ошибки health check
+    logger.error("[youtube-health] Health check error (non-fatal):", err?.message || err);
+  }
+}
+
 // --- Основной цикл --- //
 
 /**
@@ -310,9 +428,14 @@ async function loop() {
 
   while (true) {
     try {
+      // Периодическая проверка YouTube health
+      await checkYouTubeHealth();
+      
+      // Обработка задач
       await processOneJob();
     } catch (e) {
       logger.error("[worker] loop error", e);
+      // Продолжаем работу даже при ошибках
     }
 
     // Пауза между проверками очереди (15 секунд)

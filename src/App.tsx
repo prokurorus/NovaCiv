@@ -108,7 +108,7 @@ function StatsBar({ visitors, likes, joined, onLike }: StatsBarProps) {
           </span>
           <button
             onClick={onLike}
-            className="text-[11px] border rounded-full px-3 py-1 hover:bg-zinc-50 active:bg-zinc-100 transition"
+            className="text-xs border rounded-full px-3.5 py-1.5 hover:bg-zinc-50 active:bg-zinc-100 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
           >
             {current.likeButton}
           </button>
@@ -278,7 +278,7 @@ function MainScreen() {
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
                   href="/Manifesto-ru"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Manifesto
@@ -289,7 +289,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Manifesto-en"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Manifesto
@@ -300,7 +300,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Manifesto-de"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Manifest
@@ -311,7 +311,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Manifesto-es"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Manifiesto
@@ -325,7 +325,7 @@ function MainScreen() {
           </div>
 
           {/* Устав */}
-          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg:white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
+          <div className="relative overflow-hidden rounded-2xl border border-zinc-200 bg-white/80 shadow-[0_18px_60px_rgba(15,23,42,0.08)] p-5 sm:p-6">
             <div className="absolute -bottom-10 -left-10 h-24 w-24 rounded-full bg-zinc-100 blur-2xl opacity-80 pointer-events-none" />
             <div className="relative space-y-4">
               <div className="space-y-1">
@@ -340,7 +340,7 @@ function MainScreen() {
               <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <a
                   href="/Charter-ru"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Charter
@@ -351,7 +351,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Charter-en"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Charter
@@ -362,7 +362,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Charter-de"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Charta
@@ -373,7 +373,7 @@ function MainScreen() {
                 </a>
                 <a
                   href="/Charter-es"
-                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                  className="group flex flex-col items-center justify-center rounded-2xl border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 focus-visible:ring-offset-1"
                 >
                   <span className="text-[11px] uppercase tracking-wide text-gray-400">
                     Carta

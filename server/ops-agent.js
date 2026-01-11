@@ -132,6 +132,16 @@ const logger = console;
 
 // --- GitHub API --- //
 
+function hasLabel(issue, name) {
+  const labels = Array.isArray(issue.labels) ? issue.labels : [];
+  return labels.some(l => (typeof l === "string" ? l : l?.name) === name);
+}
+
+function getLabelNames(issue) {
+  const labels = Array.isArray(issue.labels) ? issue.labels : [];
+  return labels.map(l => (typeof l === "string" ? l : l?.name)).filter(Boolean);
+}
+
 /**
  * Создает комментарий в Issue
  */
@@ -209,6 +219,26 @@ async function addLabel(issueNumber, label) {
     );
   } catch (error) {
     logger.error(`[ops-agent] Failed to add label to issue #${issueNumber}:`, error.response?.data || error.message);
+  }
+}
+
+/**
+ * Удаляет метку Issue
+ */
+async function removeLabel(issueNumber, label) {
+  if (!GITHUB_TOKEN) return;
+  try {
+    await axios.delete(
+      `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`,
+      {
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      }
+    );
+  } catch (error) {
+    // ignore if label not found / already removed
   }
 }
 
@@ -733,6 +763,12 @@ function formatAvailableCommands() {
 }
 
 async function processIssue(issue) {
+  // Skip issues already handled
+  const labelNames = getLabelNames(issue);
+  if (labelNames.includes("ops-agent:done") || labelNames.includes("ops-agent:error") || labelNames.includes("ops-agent:processing")) {
+    return;
+  }
+
   const issueNumber = issue.number;
   const issueId = `${GITHUB_OWNER}/${GITHUB_REPO}#${issueNumber}`;
 
@@ -813,6 +849,7 @@ async function processIssue(issue) {
       `---\n\n${result}`;
     await commentIssue(issueNumber, comment);
     await addLabel(issueNumber, "ops-agent:done");
+    await removeLabel(issueNumber, "ops");
     
     logger.log(`[ops-agent] Issue #${issueNumber} processed successfully`);
   } catch (error) {

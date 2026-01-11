@@ -1,0 +1,58 @@
+#!/bin/bash
+# Remote diagnostic command for ops-agent
+# Usage: ssh root@77.42.36.198 "bash -lc '$(cat scripts/check-ops-agent-remote.sh)'"
+
+set -euo pipefail
+
+PROJECT_DIR=/root/NovaCiv
+ENV_FILE=$PROJECT_DIR/.env
+ECO_FILE=$PROJECT_DIR/ecosystem.config.cjs
+APP_NAME=nova-ops-agent
+SCRIPT=$PROJECT_DIR/server/ops-agent.js
+
+echo "=== HOST ==="
+hostname; whoami; date -Is; echo
+
+echo "=== CHECK FILES ==="
+ls -la "$SCRIPT" "$ENV_FILE" 2>/dev/null || true
+echo
+
+echo "=== CHECK .env (NO SECRETS) ==="
+if [ -f "$ENV_FILE" ]; then
+  echo "✅ .env exists"
+  echo "Keys present (values redacted):"
+  grep -E "^[A-Z_]+=" "$ENV_FILE" | sed -E 's/(=).*/\1***REDACTED***/' || true
+else
+  echo "❌ .env not found"
+fi
+echo
+
+echo "=== CHECK PM2 STATUS ==="
+pm2 list | grep -E "($APP_NAME|name|status|uptime)" || echo "PM2 not running or app not found"
+echo
+
+echo "=== CHECK PM2 ENV (nova-ops-agent) ==="
+PM2_ID="$(pm2 id "$APP_NAME" 2>/dev/null | tail -n 1 | tr -d '[:space:]' || echo '')"
+if [ -n "$PM2_ID" ]; then
+  echo "PM2 Process ID: $PM2_ID"
+  echo "ENV_PATH: $(pm2 env "$PM2_ID" 2>/dev/null | grep -E '^ENV_PATH=' | cut -d'=' -f2- || echo 'NOT SET')"
+  echo "PROJECT_DIR: $(pm2 env "$PM2_ID" 2>/dev/null | grep -E '^PROJECT_DIR=' | cut -d'=' -f2- || echo 'NOT SET')"
+else
+  echo "⚠️  Process not found in PM2"
+fi
+echo
+
+echo "=== CHECK ECOSYSTEM CONFIG ==="
+if [ -f "$ECO_FILE" ]; then
+  echo "✅ ecosystem.config.cjs exists"
+  cat "$ECO_FILE" | head -n 20
+else
+  echo "❌ ecosystem.config.cjs not found"
+fi
+echo
+
+echo "=== RECENT LOGS (last 20 lines) ==="
+pm2 logs "$APP_NAME" --lines 20 --nostream 2>/dev/null || echo "⚠️  Could not fetch logs"
+echo
+
+echo "=== DONE ==="

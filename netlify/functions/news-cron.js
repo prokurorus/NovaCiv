@@ -289,6 +289,41 @@ async function fetchNewsTopics() {
       log("[firebase-error] data:", errorData);
       log("[firebase-error] requestUrlSafe:", requestUrlSafe);
       
+      // Проверяем, является ли это ошибкой отсутствия индекса
+      const errorStr = typeof errorData === "string" ? errorData : JSON.stringify(errorData);
+      const isIndexError = resp.status === 400 && 
+        (errorStr.includes("Index not defined") || 
+         errorStr.includes("index") && errorStr.toLowerCase().includes("not found"));
+      
+      if (isIndexError) {
+        // Fallback: запрос без индекса, фильтрация в JS
+        log("[news-cron] WARNING: firebase missing index on section; using full-scan fallback");
+        
+        const fallbackUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+        const fallbackResp = await fetch(fallbackUrl);
+        
+        if (!fallbackResp.ok) {
+          throw new Error(
+            `Firebase topics fetch failed (fallback): ${fallbackResp.status} ${fallbackResp.statusText}`,
+          );
+        }
+        
+        const fallbackData = await fallbackResp.json();
+        if (!fallbackData || typeof fallbackData !== "object") {
+          return [];
+        }
+        
+        // Фильтруем в JS по section === "news"
+        const allItems = Object.entries(fallbackData).map(([id, value]) => ({
+          id,
+          ...(value || {}),
+        }));
+        
+        const filteredItems = allItems.filter((item) => item.section === "news");
+        
+        return filteredItems;
+      }
+      
       throw new Error(
         `Firebase topics fetch failed: ${resp.status} ${resp.statusText}`,
       );

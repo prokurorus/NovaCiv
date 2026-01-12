@@ -1281,5 +1281,15 @@ exports.handler = async (event) => {
         error: errorMsg,
       }),
     };
+  } catch (outerErr) {
+    // Ошибка в основном try блоке (до внутреннего try)
+    console.error("fetch-news outer error:", outerErr);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        error: `Outer error: ${String(outerErr && outerErr.message ? outerErr.message : outerErr)}`,
+      }),
+    };
   }
 };

@@ -18,9 +18,11 @@
 
 [functions."news-cron"]
   schedule = "0 * * * *"
+  included_files = ["netlify/lib/**"]
 
 [functions."fetch-news"]
   schedule = "30 * * * *"
+  included_files = ["netlify/lib/**"]
 
 [functions."video-worker"]
   schedule = "*/15 * * * *"

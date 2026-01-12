@@ -14,7 +14,7 @@
 [functions]
   included_files = ["media/**", "tools/**", "server/**"]
   external_node_modules = ["ffmpeg-static", "openai"]
-  node_bundler = "esbuild"
+  node_bundler = "nft"
 
 [functions."news-cron"]
   schedule = "0 * * * *"

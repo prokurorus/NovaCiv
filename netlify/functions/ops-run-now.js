@@ -6,10 +6,15 @@
 
 const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
-// Импортируем handlers функций
-const fetchNewsHandler = require("./fetch-news").handler;
-const newsCronHandler = require("./news-cron").handler;
-const domovoyAutoPostHandler = require("./domovoy-auto-post").handler;
+// Импортируем handlers функций (динамически, чтобы esbuild не бандлил их)
+let fetchNewsHandler, newsCronHandler, domovoyAutoPostHandler;
+try {
+  fetchNewsHandler = require("./fetch-news").handler;
+  newsCronHandler = require("./news-cron").handler;
+  domovoyAutoPostHandler = require("./domovoy-auto-post").handler;
+} catch (e) {
+  log("Warning: Failed to load handlers:", e.message);
+}
 
 const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
 

@@ -591,8 +591,24 @@ function determineInvocationType(event) {
 
 exports.handler = async (event) => {
   try {
+    console.log("[news-cron] Handler called");
+    
     // Загружаем зависимости внутри handler
-    loadDependencies();
+    try {
+      console.log("[news-cron] Loading dependencies...");
+      loadDependencies();
+      console.log("[news-cron] Dependencies loaded");
+    } catch (depError) {
+      console.error("[news-cron] Failed to load dependencies:", depError.message, depError.stack);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          ok: false,
+          error: `Dependency loading failed: ${String(depError && depError.message ? depError.message : depError)}`,
+          stack: depError && depError.stack ? String(depError.stack) : "",
+        }),
+      };
+    }
     
     const startTime = Date.now();
     const runId = `news-cron-${startTime}`;

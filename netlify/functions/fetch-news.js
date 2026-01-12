@@ -806,8 +806,24 @@ function determineInvocationType(event) {
 
 exports.handler = async (event) => {
   try {
+    console.log("[fetch-news] Handler called");
+    
     // Загружаем зависимости внутри handler
-    loadDependencies();
+    try {
+      console.log("[fetch-news] Loading dependencies...");
+      loadDependencies();
+      console.log("[fetch-news] Dependencies loaded");
+    } catch (depError) {
+      console.error("[fetch-news] Failed to load dependencies:", depError.message, depError.stack);
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          ok: false,
+          error: `Dependency loading failed: ${String(depError && depError.message ? depError.message : depError)}`,
+          stack: depError && depError.stack ? String(depError.stack) : "",
+        }),
+      };
+    }
     
     console.log("fetch-news start");
     const startTime = Date.now();

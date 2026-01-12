@@ -380,6 +380,9 @@ exports.handler = async (event) => {
     // Определяем тип вызова
     const invocation = determineInvocationType(event);
     
+    // Получаем query параметры (нужны для всех типов вызовов)
+    const qs = event.queryStringParameters || {};
+    
     if (invocation.type === "scheduled") {
       log("invocation type: scheduled");
       log("auth skipped");
@@ -389,7 +392,6 @@ exports.handler = async (event) => {
     } else {
       log("invocation type: http");
       // Проверка токена только для HTTP/manual вызовов
-      const qs = event.queryStringParameters || {};
       if (NEWS_CRON_SECRET) {
         if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
           log("auth gate blocked (no token or token mismatch)");

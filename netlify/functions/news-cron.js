@@ -1034,5 +1034,15 @@ ${text}
       statusCode: 500,
       body: JSON.stringify({ ok: false, error: errorMsg }),
     };
+  } catch (outerErr) {
+    // Ошибка вне основного try блока (например, при инициализации)
+    console.error("news-cron outer error:", outerErr);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        error: `Outer error: ${String(outerErr && outerErr.message ? outerErr.message : outerErr)}`,
+      }),
+    };
   }
 };

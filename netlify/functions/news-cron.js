@@ -290,21 +290,85 @@ async function writeHealthMetrics(metrics) {
   }
 }
 
+// ---------- HELPERS FOR INVOCATION TYPE DETECTION ----------
+
+// Безопасное чтение заголовков с учетом разных регистров
+function getHeader(headers, key) {
+  if (!headers || !key) return "";
+  const lowerKey = key.toLowerCase();
+  // Пробуем разные варианты регистра
+  return headers[key] || headers[lowerKey] || headers[key.toLowerCase()] || headers[key.toUpperCase()] || "";
+}
+
+// Определение типа вызова и проверка auth
+function determineInvocationType(event) {
+  const headers = event.headers || {};
+  const userAgent = getHeader(headers, "user-agent");
+  const eventHeader = getHeader(headers, "x-netlify-event") || getHeader(headers, "x-nf-event");
+  const referer = getHeader(headers, "referer") || getHeader(headers, "referrer");
+  
+  // Проверка scheduled: заголовок x-netlify-event или x-nf-event == "schedule" (case-insensitive)
+  // ИЛИ User-Agent == "Netlify-Scheduled-Function"
+  const isScheduled = 
+    (eventHeader && eventHeader.toLowerCase() === "schedule") ||
+    userAgent === "Netlify-Scheduled-Function";
+  
+  if (isScheduled) {
+    return {
+      type: "scheduled",
+      skipAuth: true,
+    };
+  }
+  
+  // Проверка Netlify Run Now: не scheduled + флаг включен + referer содержит app.netlify.com/app.netlify.app
+  const allowRunNowBypass = process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS && 
+    process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS.toLowerCase() === "true";
+  
+  if (allowRunNowBypass && referer) {
+    const refererLower = referer.toLowerCase();
+    if (refererLower.includes("app.netlify.com") || refererLower.includes("app.netlify.app")) {
+      return {
+        type: "netlify_run_now",
+        skipAuth: true,
+      };
+    }
+  }
+  
+  // Иначе - обычный HTTP вызов
+  return {
+    type: "http",
+    skipAuth: false,
+  };
+}
+
 exports.handler = async (event) => {
   const startTime = Date.now();
   const runId = `news-cron-${startTime}`;
 
   try {
-    // Проверка токена: только если NEWS_CRON_SECRET задан (для ручных вызовов)
-    // Scheduled вызовы Netlify не передают query параметры, поэтому пропускаем проверку
-    const qs = event.queryStringParameters || {};
-    if (NEWS_CRON_SECRET) {
-      if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
-        return {
-          statusCode: 403,
-          body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
-        };
+    // Определяем тип вызова
+    const invocation = determineInvocationType(event);
+    
+    if (invocation.type === "scheduled") {
+      log("invocation type: scheduled");
+      log("auth skipped");
+    } else if (invocation.type === "netlify_run_now") {
+      log("invocation type: netlify_run_now");
+      log("auth skipped (ALLOW_NETLIFY_RUN_NOW_BYPASS=true)");
+    } else {
+      log("invocation type: http");
+      // Проверка токена только для HTTP/manual вызовов
+      const qs = event.queryStringParameters || {};
+      if (NEWS_CRON_SECRET) {
+        if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+          log("auth gate blocked (no token or token mismatch)");
+          return {
+            statusCode: 403,
+            body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
+          };
+        }
       }
+      log("auth gate passed");
     }
 
     const limitParam = qs.limit;

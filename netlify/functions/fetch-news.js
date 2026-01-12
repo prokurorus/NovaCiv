@@ -482,6 +482,57 @@ ${englishText}
   return answer;
 }
 
+// ---------- HELPERS FOR INVOCATION TYPE DETECTION ----------
+
+// Безопасное чтение заголовков с учетом разных регистров
+function getHeader(headers, key) {
+  if (!headers || !key) return "";
+  const lowerKey = key.toLowerCase();
+  // Пробуем разные варианты регистра
+  return headers[key] || headers[lowerKey] || headers[key.toLowerCase()] || headers[key.toUpperCase()] || "";
+}
+
+// Определение типа вызова и проверка auth
+function determineInvocationType(event) {
+  const headers = event.headers || {};
+  const userAgent = getHeader(headers, "user-agent");
+  const eventHeader = getHeader(headers, "x-netlify-event") || getHeader(headers, "x-nf-event");
+  const referer = getHeader(headers, "referer") || getHeader(headers, "referrer");
+  
+  // Проверка scheduled: заголовок x-netlify-event или x-nf-event == "schedule" (case-insensitive)
+  // ИЛИ User-Agent == "Netlify-Scheduled-Function"
+  const isScheduled = 
+    (eventHeader && eventHeader.toLowerCase() === "schedule") ||
+    userAgent === "Netlify-Scheduled-Function";
+  
+  if (isScheduled) {
+    return {
+      type: "scheduled",
+      skipAuth: true,
+    };
+  }
+  
+  // Проверка Netlify Run Now: не scheduled + флаг включен + referer содержит app.netlify.com/app.netlify.app
+  const allowRunNowBypass = process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS && 
+    process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS.toLowerCase() === "true";
+  
+  if (allowRunNowBypass && referer) {
+    const refererLower = referer.toLowerCase();
+    if (refererLower.includes("app.netlify.com") || refererLower.includes("app.netlify.app")) {
+      return {
+        type: "netlify_run_now",
+        skipAuth: true,
+      };
+    }
+  }
+  
+  // Иначе - обычный HTTP вызов
+  return {
+    type: "http",
+    skipAuth: false,
+  };
+}
+
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
@@ -494,20 +545,15 @@ exports.handler = async (event) => {
     };
   }
 
-  // Определяем тип вызова: scheduled или HTTP/manual
-  // Netlify scheduled функции имеют заголовок x-netlify-event: schedule
-  // Также проверяем User-Agent: Netlify-Scheduled-Function
-  const headers = event.headers || {};
-  const userAgent = headers["user-agent"] || headers["User-Agent"] || "";
-  // Проверяем заголовок в разных регистрах (case-insensitive)
-  const eventHeader = headers["x-netlify-event"] || headers["X-Netlify-Event"] || headers["x-nf-event"] || headers["X-Nf-Event"];
-  const isScheduled = 
-    (eventHeader === "schedule" || eventHeader === "Schedule") ||
-    userAgent === "Netlify-Scheduled-Function";
+  // Определяем тип вызова
+  const invocation = determineInvocationType(event);
   
-  if (isScheduled) {
+  if (invocation.type === "scheduled") {
     console.log("invocation type: scheduled");
     console.log("auth skipped");
+  } else if (invocation.type === "netlify_run_now") {
+    console.log("invocation type: netlify_run_now");
+    console.log("auth skipped (ALLOW_NETLIFY_RUN_NOW_BYPASS=true)");
   } else {
     console.log("invocation type: http");
     // Проверка токена только для HTTP/manual вызовов

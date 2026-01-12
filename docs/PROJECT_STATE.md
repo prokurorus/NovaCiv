@@ -144,6 +144,10 @@
 - `TELEGRAM_NEWS_CHAT_ID_EN` — ID чата для новостей (EN)
 - `TELEGRAM_NEWS_CHAT_ID_DE` — ID чата для новостей (DE)
 - `NEWS_CRON_SECRET` — секрет для health endpoints
+- `ALLOW_NETLIFY_RUN_NOW_BYPASS` — флаг для тестирования Netlify "Run now" без токена (по умолчанию false/не задано)
+  - Если `true`, позволяет "Run now" в Netlify Dashboard обходить проверку токена
+  - Работает только для вызовов с referer содержащим `app.netlify.com` или `app.netlify.app`
+  - Scheduled вызовы (cron) всегда обходят проверку токена независимо от этого флага
 - `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` — YouTube OAuth
 - И другие (см. `.env.example`)
 

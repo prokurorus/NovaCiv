@@ -294,12 +294,25 @@ async function audit() {
 
     console.log("\n[db-audit] ========================\n");
 
-    process.exit(report.status === "FAIL" ? 1 : report.status === "WARN" ? 0 : 0);
+    return report;
   } catch (error) {
     console.error("[db-audit] FATAL ERROR:", error.message);
     console.error("[db-audit] Stack:", error.stack);
-    process.exit(1);
+    throw error;
   }
 }
 
-audit();
+// Экспортируем функцию для использования в других модулях
+module.exports = { audit };
+
+// Если запущен напрямую - выполняем
+if (require.main === module) {
+  audit()
+    .then((report) => {
+      process.exit(report.status === "FAIL" ? 1 : 0);
+    })
+    .catch((error) => {
+      console.error("[db-audit] FATAL ERROR:", error.message);
+      process.exit(1);
+    });
+}

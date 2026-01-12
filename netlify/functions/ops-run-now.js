@@ -52,6 +52,164 @@ exports.handler = async (event) => {
     };
   }
 
+  // Режим maintenance: запуск db-audit и db-audit-fix
+  const isMaintenance = qs.maintenance === "1" || qs.maintenance === "true";
+  if (isMaintenance) {
+    log("Maintenance mode: running db-audit and fixes...");
+    await writeEvent("ops-run-now", "info", "Maintenance mode started", {});
+    
+    try {
+      // Импортируем функции audit и fix
+      // В Netlify Functions используем require с относительным путём
+      const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
+      
+      // Путь к tools/ из netlify/functions/
+      const path = require("path");
+      const projectRoot = path.resolve(__dirname, "../..");
+      
+      // Загружаем модули (удаляем кэш для свежего импорта)
+      const auditPath = path.join(projectRoot, "tools/db-audit.js");
+      const fixPath = path.join(projectRoot, "tools/db-audit-fix.js");
+      
+      delete require.cache[auditPath];
+      delete require.cache[fixPath];
+      
+      const { audit } = require(auditPath);
+      const { fix } = require(fixPath);
+      
+      // 1) Запускаем audit
+      log("Step 1: Running db-audit...");
+      const auditReport = await audit();
+      
+      // Сохраняем отчёт в Firebase через HTTP API
+      try {
+        if (FIREBASE_DB_URL) {
+          const reportUrl = `${FIREBASE_DB_URL}/ops/dbAudit/latest.json`;
+          await fetch(reportUrl, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(auditReport),
+          });
+          log("Audit report saved to /ops/dbAudit/latest");
+        }
+      } catch (e) {
+        log("Failed to save audit report:", e.message);
+      }
+      
+      // 2) Если найдены проблемы - запускаем fix
+      const hasKeyIssues = Object.keys(auditReport.keyIssues || {}).length > 0;
+      const hasSchemaIssues = Object.keys(auditReport.schemaIssues || {}).length > 0;
+      const needsFix = hasKeyIssues || hasSchemaIssues || auditReport.status === "WARN" || auditReport.status === "FAIL";
+      
+      let fixResults = null;
+      if (needsFix) {
+        log("Step 2: Issues found, running db-audit-fix...");
+        await writeEvent("ops-run-now", "info", "Running db-audit-fix", {
+          keyIssues: hasKeyIssues,
+          schemaIssues: hasSchemaIssues,
+        });
+        
+        try {
+          fixResults = await fix();
+          log("db-audit-fix completed:", fixResults);
+          
+          // Повторный audit после фиксов
+          log("Step 3: Running post-fix audit...");
+          const postFixReport = await audit();
+          
+          // Обновляем отчёт через HTTP API
+          try {
+            if (FIREBASE_DB_URL) {
+              const reportUrl = `${FIREBASE_DB_URL}/ops/dbAudit/latest.json`;
+              await fetch(reportUrl, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...postFixReport,
+                  preFixStatus: auditReport.status,
+                  fixesApplied: fixResults,
+                }),
+              });
+              log("Post-fix audit report saved");
+            }
+          } catch (e) {
+            log("Failed to save post-fix report:", e.message);
+          }
+        } catch (fixError) {
+          log("db-audit-fix error:", fixError.message);
+          await writeEvent("ops-run-now", "error", "db-audit-fix failed", {
+            error: String(fixError && fixError.message ? fixError.message : fixError),
+          });
+        }
+      } else {
+        log("No issues found, skipping db-audit-fix");
+      }
+      
+      // 3) Записываем событие "maintenance done"
+      await writeEvent("ops-run-now", "info", "Maintenance done", {
+        auditStatus: auditReport.status,
+        hasKeyIssues,
+        hasSchemaIssues,
+        fixesApplied: fixResults !== null,
+        fixResults: fixResults ? {
+          keysMigrated: fixResults.keysMigrated || 0,
+          topicsNormalized: fixResults.topicsNormalized || 0,
+          newsMetaCleaned: fixResults.newsMetaCleaned || 0,
+        } : null,
+      });
+      
+      await writeHeartbeat("ops-run-now", {
+        lastRunAt: startTime,
+        lastOkAt: Date.now(),
+        metrics: {
+          maintenanceMode: true,
+          auditStatus: auditReport.status,
+          fixesApplied: fixResults !== null,
+        },
+      });
+      
+      const duration = Date.now() - startTime;
+      log(`Maintenance completed in ${duration}ms`);
+      
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: true,
+          mode: "maintenance",
+          duration,
+          audit: {
+            status: auditReport.status,
+            warnings: auditReport.warnings.length,
+            errors: auditReport.errors.length,
+            keyIssues: Object.keys(auditReport.keyIssues || {}).length,
+            schemaIssues: Object.keys(auditReport.schemaIssues || {}).length,
+          },
+          fixes: fixResults,
+        }),
+      };
+    } catch (error) {
+      log("Maintenance error:", error.message);
+      
+      await writeHeartbeat("ops-run-now", {
+        lastRunAt: startTime,
+        lastErrorAt: Date.now(),
+        lastErrorMsg: String(error && error.message ? error.message : error),
+      });
+      await writeEvent("ops-run-now", "error", "Maintenance failed", {
+        error: String(error && error.message ? error.message : error),
+      });
+      
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          ok: false,
+          mode: "maintenance",
+          error: String(error && error.message ? error.message : error),
+        }),
+      };
+    }
+  }
+
   const results = {
     fetchNews: null,
     newsCron: null,

@@ -322,22 +322,33 @@ async function fix() {
     }
     console.log("[db-audit-fix] ========================\n");
 
-    // Повторный audit
-    console.log("[db-audit-fix] Running post-fix audit...");
-    const { exec } = require("child_process");
-    exec("node tools/db-audit.js", (error, stdout, stderr) => {
-      if (error) {
-        console.error("[db-audit-fix] Post-fix audit error:", error);
-      } else {
-        console.log(stdout);
-      }
-    });
-
+    return fixes;
   } catch (error) {
     console.error("[db-audit-fix] FATAL ERROR:", error.message);
     console.error("[db-audit-fix] Stack:", error.stack);
-    process.exit(1);
+    throw error;
   }
 }
 
-fix();
+// Экспортируем функцию для использования в других модулях
+module.exports = { fix };
+
+// Если запущен напрямую - выполняем
+if (require.main === module) {
+  fix()
+    .then(async (fixes) => {
+      // Повторный audit
+      console.log("[db-audit-fix] Running post-fix audit...");
+      const { audit } = require("./db-audit");
+      try {
+        await audit();
+      } catch (error) {
+        console.error("[db-audit-fix] Post-fix audit error:", error.message);
+      }
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error("[db-audit-fix] FATAL ERROR:", error.message);
+      process.exit(1);
+    });
+}

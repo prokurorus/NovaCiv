@@ -33,3 +33,6 @@
 
 [functions."domovoy-auto-reply"]
   schedule = "*/10 * * * *"
+
+[functions."ops-run-now"]
+  node_bundler = "nft"

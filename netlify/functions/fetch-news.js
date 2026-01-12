@@ -798,18 +798,23 @@ function determineInvocationType(event) {
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
-  console.log("fetch-news start");
-  const startTime = Date.now();
-  const component = "fetch-news";
-  
-  // DEBUG режим: проверяем параметр ?debug=1
-  const qs = event.queryStringParameters || {};
-  const isDebug = qs.debug === "1" || qs.debug === "true";
+  try {
+    console.log("fetch-news start");
+    const startTime = Date.now();
+    const component = "fetch-news";
+    
+    // DEBUG режим: проверяем параметр ?debug=1
+    const qs = event.queryStringParameters || {};
+    const isDebug = qs.debug === "1" || qs.debug === "true";
 
-  // Записываем начало выполнения
-  await writeHeartbeat(component, {
-    lastRunAt: startTime,
-  });
+    // Записываем начало выполнения
+    try {
+      await writeHeartbeat(component, {
+        lastRunAt: startTime,
+      });
+    } catch (e) {
+      console.error("Failed to write initial heartbeat:", e.message);
+    }
 
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     await writeEvent(component, "warn", "Invalid HTTP method", { method: event.httpMethod });
@@ -1272,6 +1277,17 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         ok: false,
         error: errorMsg,
+      }),
+    };
+  } catch (initError) {
+    // Ошибка при инициализации (до выполнения handler)
+    console.error("fetch-news initialization error:", initError);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        ok: false,
+        error: `Initialization error: ${String(initError && initError.message ? initError.message : initError)}`,
+        stack: initError && initError.stack ? String(initError.stack) : "",
       }),
     };
   }

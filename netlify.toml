@@ -36,3 +36,4 @@
 
 [functions."ops-run-now"]
   node_bundler = "nft"
+  included_files = ["tools/**", "server/**"]

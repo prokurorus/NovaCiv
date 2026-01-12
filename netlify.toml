@@ -28,5 +28,8 @@
 [functions."domovoy-auto-post"]
   schedule = "0 0 * * *"
 
+[functions."domovoy-every-3h"]
+  schedule = "0 */3 * * *"
+
 [functions."domovoy-auto-reply"]
   schedule = "*/10 * * * *"

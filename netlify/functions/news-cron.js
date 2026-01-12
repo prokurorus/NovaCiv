@@ -239,26 +239,80 @@ async function fetchNewsTopics() {
     throw new Error("FIREBASE_DB_URL is not configured");
   }
 
+  // Парсим URL для безопасного логирования
+  let dbUrlHost = "";
+  let topicsPath = "forum/topics";
+  let queryParams = { orderBy: '"section"', equalTo: '"news"' };
+  let requestUrlSafe = "";
+
+  try {
+    const dbUrlObj = new URL(FIREBASE_DB_URL);
+    dbUrlHost = dbUrlObj.host;
+    
+    // Строим безопасный URL для логирования
+    const queryString = new URLSearchParams({
+      orderBy: '"section"',
+      equalTo: '"news"',
+    }).toString();
+    requestUrlSafe = `${FIREBASE_DB_URL}/forum/topics.json?${queryString}`;
+    
+    // Убираем возможные секреты из URL (если есть auth параметры)
+    requestUrlSafe = requestUrlSafe.replace(/[?&]auth=[^&]*/gi, "&auth=***");
+  } catch (e) {
+    log("Error parsing FIREBASE_DB_URL:", e.message);
+    dbUrlHost = "unknown";
+    requestUrlSafe = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=%22section%22&equalTo=%22news%22`;
+  }
+
+  // Логирование перед запросом
+  log("[firebase-request] dbUrlHost:", dbUrlHost);
+  log("[firebase-request] topicsPath:", topicsPath);
+  log("[firebase-request] queryParams:", queryParams);
+  log("[firebase-request] requestUrlSafe:", requestUrlSafe);
+
   const url = `${FIREBASE_DB_URL}/forum/topics.json?orderBy=%22section%22&equalTo=%22news%22`;
 
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(
-      `Firebase topics fetch failed: ${resp.status} ${resp.statusText}`,
-    );
+  try {
+    const resp = await fetch(url);
+    
+    if (!resp.ok) {
+      // Детальное логирование для 400 ошибок
+      const errorText = await resp.text();
+      let errorData = errorText;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        // Если не JSON, оставляем как текст
+      }
+      
+      log("[firebase-error] status:", resp.status);
+      log("[firebase-error] data:", errorData);
+      log("[firebase-error] requestUrlSafe:", requestUrlSafe);
+      
+      throw new Error(
+        `Firebase topics fetch failed: ${resp.status} ${resp.statusText}`,
+      );
+    }
+
+    const data = await resp.json();
+    if (!data || typeof data !== "object") {
+      return [];
+    }
+
+    const items = Object.entries(data).map(([id, value]) => ({
+      id,
+      ...(value || {}),
+    }));
+
+    return items;
+  } catch (err) {
+    // Если это не ошибка ответа (уже залогирована выше), логируем общую ошибку
+    if (!err.message || !err.message.includes("Firebase topics fetch failed")) {
+      log("[firebase-error] fetch exception:", err.message);
+      log("[firebase-error] requestUrlSafe:", requestUrlSafe);
+    }
+    throw err;
   }
-
-  const data = await resp.json();
-  if (!data || typeof data !== "object") {
-    return [];
-  }
-
-  const items = Object.entries(data).map(([id, value]) => ({
-    id,
-    ...(value || {}),
-  }));
-
-  return items;
 }
 
 async function markTopicAsPosted(topicId) {

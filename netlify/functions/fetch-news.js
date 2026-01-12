@@ -512,13 +512,29 @@ function determineInvocationType(event) {
     };
   }
   
-  // Проверка Netlify Run Now: не scheduled + флаг включен + referer содержит app.netlify.com/app.netlify.app
+  // Проверка Netlify Run Now: не scheduled + флаг включен + признаки Netlify вызова
   const allowRunNowBypass = process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS && 
     process.env.ALLOW_NETLIFY_RUN_NOW_BYPASS.toLowerCase() === "true";
   
-  if (allowRunNowBypass && referer) {
-    const refererLower = referer.toLowerCase();
-    if (refererLower.includes("app.netlify.com") || refererLower.includes("app.netlify.app")) {
+  if (allowRunNowBypass) {
+    // Проверяем признаки Netlify Run Now:
+    // - referer содержит app.netlify.com или app.netlify.app
+    // - ИЛИ присутствует x-nf-request-id
+    // - ИЛИ присутствует x-nf-site-id
+    // - ИЛИ присутствует x-nf-deploy-id
+    // - ИЛИ user-agent содержит "Netlify"
+    const xNfRequestId = getHeader(headers, "x-nf-request-id");
+    const xNfSiteId = getHeader(headers, "x-nf-site-id");
+    const xNfDeployId = getHeader(headers, "x-nf-deploy-id");
+    
+    const looksLikeNetlifyRunNow = 
+      (referer && (referer.toLowerCase().includes("app.netlify.com") || referer.toLowerCase().includes("app.netlify.app"))) ||
+      xNfRequestId ||
+      xNfSiteId ||
+      xNfDeployId ||
+      (userAgent && userAgent.toLowerCase().includes("netlify"));
+    
+    if (looksLikeNetlifyRunNow) {
       return {
         type: "netlify_run_now",
         skipAuth: true,
@@ -527,6 +543,21 @@ function determineInvocationType(event) {
   }
   
   // Иначе - обычный HTTP вызов
+  // DEBUG-логирование только когда type = "http" и ALLOW_NETLIFY_RUN_NOW_BYPASS = "true"
+  if (allowRunNowBypass) {
+    const xNfRequestId = getHeader(headers, "x-nf-request-id");
+    const xNfSiteId = getHeader(headers, "x-nf-site-id");
+    const xNfDeployId = getHeader(headers, "x-nf-deploy-id");
+    
+    console.log("[debug] allowBypass=true http invocation headers keys:", Object.keys(headers));
+    console.log("[debug] ua=", userAgent);
+    console.log("[debug] x-nf-request-id=", xNfRequestId);
+    console.log("[debug] x-nf-site-id=", xNfSiteId);
+    console.log("[debug] x-nf-deploy-id=", xNfDeployId);
+    console.log("[debug] referer=", referer);
+    console.log("[debug] x-netlify-event=", eventHeader);
+  }
+  
   return {
     type: "http",
     skipAuth: false,

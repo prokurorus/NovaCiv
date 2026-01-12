@@ -18,34 +18,28 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.co
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
-// Операторский пульт - загружаем внутри handler для избежания проблем с инициализацией
+// Операторский пульт - загружаем на верхнем уровне, как в ops-run-now.js
 let writeHeartbeat, writeEvent, writeFirebaseError, RSS_SOURCES;
 
-function loadDependencies() {
-  if (!writeHeartbeat) {
-    try {
-      const opsPulse = require("../lib/opsPulse");
-      writeHeartbeat = opsPulse.writeHeartbeat;
-      writeEvent = opsPulse.writeEvent;
-      writeFirebaseError = opsPulse.writeFirebaseError;
-    } catch (e) {
-      console.error("Failed to load opsPulse:", e.message);
-      // Fallback functions
-      writeHeartbeat = async () => {};
-      writeEvent = async () => {};
-      writeFirebaseError = async () => {};
-    }
-  }
-  
-  if (!RSS_SOURCES) {
-    try {
-      const rssSources = require("../lib/rssSourcesByLang");
-      RSS_SOURCES = rssSources.RSS_SOURCES;
-    } catch (e) {
-      console.error("Failed to load rssSourcesByLang:", e.message);
-      RSS_SOURCES = { ru: [], en: [], de: [] };
-    }
-  }
+try {
+  const opsPulse = require("../lib/opsPulse");
+  writeHeartbeat = opsPulse.writeHeartbeat;
+  writeEvent = opsPulse.writeEvent;
+  writeFirebaseError = opsPulse.writeFirebaseError;
+} catch (e) {
+  console.error("Failed to load opsPulse:", e.message);
+  // Fallback functions
+  writeHeartbeat = async () => {};
+  writeEvent = async () => {};
+  writeFirebaseError = async () => {};
+}
+
+try {
+  const rssSources = require("../lib/rssSourcesByLang");
+  RSS_SOURCES = rssSources.RSS_SOURCES;
+} catch (e) {
+  console.error("Failed to load rssSourcesByLang:", e.message);
+  RSS_SOURCES = { ru: [], en: [], de: [] };
 }
 
 // Максимум кандидатов для сбора (на язык)
@@ -806,25 +800,6 @@ function determineInvocationType(event) {
 
 exports.handler = async (event) => {
   try {
-    console.log("[fetch-news] Handler called");
-    
-    // Загружаем зависимости внутри handler
-    try {
-      console.log("[fetch-news] Loading dependencies...");
-      loadDependencies();
-      console.log("[fetch-news] Dependencies loaded");
-    } catch (depError) {
-      console.error("[fetch-news] Failed to load dependencies:", depError.message, depError.stack);
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          ok: false,
-          error: `Dependency loading failed: ${String(depError && depError.message ? depError.message : depError)}`,
-          stack: depError && depError.stack ? String(depError.stack) : "",
-        }),
-      };
-    }
-    
     console.log("fetch-news start");
     const startTime = Date.now();
     const component = "fetch-news";

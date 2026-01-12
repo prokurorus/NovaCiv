@@ -10,37 +10,31 @@ const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Операторский пульт - загружаем внутри handler для избежания проблем с инициализацией
+// Операторский пульт - загружаем на верхнем уровне, как в ops-run-now.js
 let writeHeartbeat, writeEvent, writeFirebaseError, formatNewsMessage;
 
-function loadDependencies() {
-  if (!writeHeartbeat) {
-    try {
-      const opsPulse = require("../lib/opsPulse");
-      writeHeartbeat = opsPulse.writeHeartbeat;
-      writeEvent = opsPulse.writeEvent;
-      writeFirebaseError = opsPulse.writeFirebaseError;
-    } catch (e) {
-      console.error("Failed to load opsPulse:", e.message);
-      // Fallback functions
-      writeHeartbeat = async () => {};
-      writeEvent = async () => {};
-      writeFirebaseError = async () => {};
-    }
-  }
-  
-  if (!formatNewsMessage) {
-    try {
-      const telegramFormat = require("../lib/telegramFormat");
-      formatNewsMessage = telegramFormat.formatNewsMessage;
-    } catch (e) {
-      console.error("Failed to load telegramFormat:", e.message);
-      // Fallback function
-      formatNewsMessage = ({ title, sense, why, view, question, lang }) => {
-        return `${title || ""}\n\n${sense || ""}\n\n${why || ""}\n\n${view || ""}\n\n${question || ""}`;
-      };
-    }
-  }
+try {
+  const opsPulse = require("../lib/opsPulse");
+  writeHeartbeat = opsPulse.writeHeartbeat;
+  writeEvent = opsPulse.writeEvent;
+  writeFirebaseError = opsPulse.writeFirebaseError;
+} catch (e) {
+  console.error("Failed to load opsPulse:", e.message);
+  // Fallback functions
+  writeHeartbeat = async () => {};
+  writeEvent = async () => {};
+  writeFirebaseError = async () => {};
+}
+
+try {
+  const telegramFormat = require("../lib/telegramFormat");
+  formatNewsMessage = telegramFormat.formatNewsMessage;
+} catch (e) {
+  console.error("Failed to load telegramFormat:", e.message);
+  // Fallback function
+  formatNewsMessage = ({ title, sense, why, view, question, lang }) => {
+    return `${title || ""}\n\n${sense || ""}\n\n${why || ""}\n\n${view || ""}\n\n${question || ""}`;
+  };
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -591,25 +585,6 @@ function determineInvocationType(event) {
 
 exports.handler = async (event) => {
   try {
-    console.log("[news-cron] Handler called");
-    
-    // Загружаем зависимости внутри handler
-    try {
-      console.log("[news-cron] Loading dependencies...");
-      loadDependencies();
-      console.log("[news-cron] Dependencies loaded");
-    } catch (depError) {
-      console.error("[news-cron] Failed to load dependencies:", depError.message, depError.stack);
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          ok: false,
-          error: `Dependency loading failed: ${String(depError && depError.message ? depError.message : depError)}`,
-          stack: depError && depError.stack ? String(depError.stack) : "",
-        }),
-      };
-    }
-    
     const startTime = Date.now();
     const runId = `news-cron-${startTime}`;
     const component = "news-cron";

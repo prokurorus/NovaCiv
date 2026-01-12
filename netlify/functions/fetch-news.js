@@ -18,29 +18,9 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.co
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
-// Операторский пульт - загружаем на верхнем уровне, как в ops-run-now.js
-let writeHeartbeat, writeEvent, writeFirebaseError, RSS_SOURCES;
-
-try {
-  const opsPulse = require("../lib/opsPulse");
-  writeHeartbeat = opsPulse.writeHeartbeat;
-  writeEvent = opsPulse.writeEvent;
-  writeFirebaseError = opsPulse.writeFirebaseError;
-} catch (e) {
-  console.error("Failed to load opsPulse:", e.message);
-  // Fallback functions
-  writeHeartbeat = async () => {};
-  writeEvent = async () => {};
-  writeFirebaseError = async () => {};
-}
-
-try {
-  const rssSources = require("../lib/rssSourcesByLang");
-  RSS_SOURCES = rssSources.RSS_SOURCES;
-} catch (e) {
-  console.error("Failed to load rssSourcesByLang:", e.message);
-  RSS_SOURCES = { ru: [], en: [], de: [] };
-}
+// Операторский пульт
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { RSS_SOURCES } = require("../lib/rssSourcesByLang");
 
 // Максимум кандидатов для сбора (на язык)
 const MAX_CANDIDATES_PER_LANG = 60;
@@ -799,23 +779,18 @@ function determineInvocationType(event) {
 // ---------- HANDLER ----------
 
 exports.handler = async (event) => {
-  try {
-    console.log("fetch-news start");
-    const startTime = Date.now();
-    const component = "fetch-news";
-    
-    // DEBUG режим: проверяем параметр ?debug=1
-    const qs = event.queryStringParameters || {};
-    const isDebug = qs.debug === "1" || qs.debug === "true";
+  console.log("fetch-news start");
+  const startTime = Date.now();
+  const component = "fetch-news";
+  
+  // DEBUG режим: проверяем параметр ?debug=1
+  const qs = event.queryStringParameters || {};
+  const isDebug = qs.debug === "1" || qs.debug === "true";
 
-    // Записываем начало выполнения
-    try {
-      await writeHeartbeat(component, {
-        lastRunAt: startTime,
-      });
-    } catch (e) {
-      console.error("Failed to write initial heartbeat:", e.message);
-    }
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
 
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     await writeEvent(component, "warn", "Invalid HTTP method", { method: event.httpMethod });
@@ -1225,7 +1200,6 @@ exports.handler = async (event) => {
       }),
     };
   } catch (err) {
-    // Внутренний catch для try блока на строке 881
     console.error("fetch-news fatal error:", err);
     
     // DEBUG режим: возвращаем полный стек
@@ -1279,16 +1253,6 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         ok: false,
         error: errorMsg,
-      }),
-    };
-  } catch (outerErr) {
-    // Ошибка в основном try блоке (до внутреннего try)
-    console.error("fetch-news outer error:", outerErr);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        ok: false,
-        error: `Outer error: ${String(outerErr && outerErr.message ? outerErr.message : outerErr)}`,
       }),
     };
   }

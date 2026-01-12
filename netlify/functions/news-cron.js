@@ -10,32 +10,9 @@ const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Операторский пульт - загружаем на верхнем уровне, как в ops-run-now.js
-let writeHeartbeat, writeEvent, writeFirebaseError, formatNewsMessage;
-
-try {
-  const opsPulse = require("../lib/opsPulse");
-  writeHeartbeat = opsPulse.writeHeartbeat;
-  writeEvent = opsPulse.writeEvent;
-  writeFirebaseError = opsPulse.writeFirebaseError;
-} catch (e) {
-  console.error("Failed to load opsPulse:", e.message);
-  // Fallback functions
-  writeHeartbeat = async () => {};
-  writeEvent = async () => {};
-  writeFirebaseError = async () => {};
-}
-
-try {
-  const telegramFormat = require("../lib/telegramFormat");
-  formatNewsMessage = telegramFormat.formatNewsMessage;
-} catch (e) {
-  console.error("Failed to load telegramFormat:", e.message);
-  // Fallback function
-  formatNewsMessage = ({ title, sense, why, view, question, lang }) => {
-    return `${title || ""}\n\n${sense || ""}\n\n${why || ""}\n\n${view || ""}\n\n${question || ""}`;
-  };
-}
+// Операторский пульт
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { formatNewsMessage } = require("../lib/telegramFormat");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -584,23 +561,18 @@ function determineInvocationType(event) {
 }
 
 exports.handler = async (event) => {
-  try {
-    const startTime = Date.now();
-    const runId = `news-cron-${startTime}`;
-    const component = "news-cron";
-    
-    // DEBUG режим: проверяем параметр ?debug=1
-    const qs = event.queryStringParameters || {};
-    const isDebug = qs.debug === "1" || qs.debug === "true";
+  const startTime = Date.now();
+  const runId = `news-cron-${startTime}`;
+  const component = "news-cron";
+  
+  // DEBUG режим: проверяем параметр ?debug=1
+  const qs = event.queryStringParameters || {};
+  const isDebug = qs.debug === "1" || qs.debug === "true";
 
-    // Записываем начало выполнения
-    try {
-      await writeHeartbeat(component, {
-        lastRunAt: startTime,
-      });
-    } catch (e) {
-      console.error("Failed to write initial heartbeat:", e.message);
-    }
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
 
   try {
     // Определяем тип вызова
@@ -1033,16 +1005,6 @@ ${text}
     return {
       statusCode: 500,
       body: JSON.stringify({ ok: false, error: errorMsg }),
-    };
-  } catch (outerErr) {
-    // Ошибка вне основного try блока (например, при инициализации)
-    console.error("news-cron outer error:", outerErr);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        ok: false,
-        error: `Outer error: ${String(outerErr && outerErr.message ? outerErr.message : outerErr)}`,
-      }),
     };
   }
 };

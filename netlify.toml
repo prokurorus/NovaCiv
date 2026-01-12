@@ -12,7 +12,7 @@
   status = 200
 
 [functions]
-  included_files = ["media/**"]
+  included_files = ["media/**", "tools/**"]
   external_node_modules = ["ffmpeg-static", "openai"]
   node_bundler = "esbuild"
 

@@ -113,22 +113,25 @@ Core values of NovaCiv:
 
 You receive a news item (headline, short description, sometimes a text fragment).
 
-Your task is to briefly and clearly explain the news for NovaCiv readers
-and show how it looks through our values.
+Your task: create a meaningful analysis (NOT a dry summary) that helps readers understand the news through NovaCiv values.
 
-Answer in ENGLISH in a calm, neutral tone. Avoid propaganda language and party slogans.
-Do not attack individuals.
+Answer in ENGLISH. Write calmly, clearly, like an adult. No slogans, no propaganda, no moralizing, no "we need more information" excuses. One paragraph = one thought.
 
-Structure of the answer:
-1) Short summary – 3–5 sentences in simple language.
-2) Why it matters – 2–4 sentences about how it affects people, freedoms, the future,
-   technologies, or ecosystems.
-3) NovaCiv perspective – 3–6 sentences: where you see risks of violence, monopolies or
-   manipulation, and where you see chances for science, cooperation and fair social systems.
-4) Question to the reader – 1–2 short questions inviting them to reflect on their own view.
+Structure (return as JSON):
+{
+  "sense": "240-360 characters. The living meaning of the news, in human language. What actually happened and why it matters to people.",
+  "why": "Up to 180 characters. ONE thesis about how this affects people, freedoms, future, technologies, or ecosystems.",
+  "view": "Up to 220 characters. ONE thesis strictly in NovaCiv principles: non-violence, autonomy, transparency, anti-militarism, anti-power-concentration. Where are risks of violence/monopolies/manipulation? Where are opportunities for science/cooperation?",
+  "question": "Up to 160 characters. ONE question inviting reflection, not a call to action."
+}
 
-Do not invent facts that are not in the news.
-If information is missing, honestly say what data would be needed for solid conclusions.
+Rules:
+- sense: human language, not bureaucratic. Show the real meaning.
+- why: one clear thesis, not a list.
+- view: strictly in NovaCiv principles. No generic "this is important".
+- question: one question that makes people think, not a rhetorical one.
+- No invented facts. If information is missing, say so briefly.
+- No water, no fluff. Every word counts.
 `.trim();
 
 const SYSTEM_PROMPT_TRANSLATE = `
@@ -365,7 +368,7 @@ async function writeHealthMetrics(metrics) {
 
 // ---------- SAVE TO FORUM ----------
 
-async function saveNewsToForumLang(item, analyticText, langCode) {
+async function saveNewsToForumLang(item, analyticData, langCode) {
   if (!FIREBASE_DB_URL) {
     const error = new Error("FIREBASE_DB_URL is not set");
     await writeFirebaseError("fetch-news", error, {
@@ -376,9 +379,21 @@ async function saveNewsToForumLang(item, analyticText, langCode) {
   }
 
   const now = Date.now();
+  
+  // Сохраняем структурированные данные (sense, why, view, question)
+  // Для обратной совместимости также сохраняем как content
+  const content = typeof analyticData === "string" 
+    ? analyticText 
+    : JSON.stringify(analyticData);
+  
   const payload = {
     title: item.title || "(no title)",
-    content: analyticText.trim(),
+    content: content,
+    // Структурированные данные для форматирования
+    sense: typeof analyticData === "object" ? analyticData.sense : null,
+    why: typeof analyticData === "object" ? analyticData.why : null,
+    view: typeof analyticData === "object" ? analyticData.view : null,
+    question: typeof analyticData === "object" ? analyticData.question : null,
     section: "news",
     createdAt: now,
     createdAtServer: now,
@@ -480,7 +495,38 @@ Do not repeat the title. We only need the analytical text.
     throw new Error("Empty answer from OpenAI for news item");
   }
 
-  return answer;
+  // Парсим JSON ответ
+  try {
+    const parsed = JSON.parse(answer);
+    if (parsed.sense && parsed.why && parsed.view && parsed.question) {
+      return parsed;
+    }
+  } catch (e) {
+    // Не JSON, пытаемся извлечь из текста
+    console.log("[fetch-news] OpenAI response is not JSON, trying to parse:", answer.slice(0, 200));
+  }
+
+  // Fallback: если не получилось распарсить JSON
+  const fallback = {
+    sense: `${item.title || "News"}. ${item.description ? item.description.slice(0, 200) : "Суть: важное событие, требующее внимания."}`,
+    why: "Это влияет на свободы людей и будущее общества.",
+    view: "С точки зрения NovaCiv важно оценить риски насилия и концентрации власти, а также возможности для сотрудничества.",
+    question: "Как это событие влияет на вашу свободу и автономию?",
+  };
+
+  // Пытаемся извлечь секции из текста
+  const senseMatch = answer.match(/"sense"\s*:\s*"([^"]+)"/i) || answer.match(/sense[:\s]+(.*?)(?:\n|"why"|$)/i);
+  const whyMatch = answer.match(/"why"\s*:\s*"([^"]+)"/i) || answer.match(/why[:\s]+(.*?)(?:\n|"view"|$)/i);
+  const viewMatch = answer.match(/"view"\s*:\s*"([^"]+)"/i) || answer.match(/view[:\s]+(.*?)(?:\n|"question"|$)/i);
+  const questionMatch = answer.match(/"question"\s*:\s*"([^"]+)"/i) || answer.match(/question[:\s]+(.*?)(?:\n|$)/i);
+
+  if (senseMatch) fallback.sense = senseMatch[1].slice(0, 360);
+  if (whyMatch) fallback.why = whyMatch[1].slice(0, 180);
+  if (viewMatch) fallback.view = viewMatch[1].slice(0, 220);
+  if (questionMatch) fallback.question = questionMatch[1].slice(0, 160);
+
+  console.log("[fetch-news] Using fallback analysis structure");
+  return fallback;
 }
 
 async function translateText(englishText, targetLangCode) {

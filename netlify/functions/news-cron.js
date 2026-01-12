@@ -11,6 +11,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { formatNewsMessage } = require("../lib/telegramFormat");
 const TELEGRAM_NEWS_CHAT_ID_EN =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
@@ -135,8 +136,21 @@ async function sendToTelegram(chatId, text) {
 }
 
 // Парсинг аналитического текста на секции
-function parseAnalyticText(content) {
-  if (!content) return { summary: "", whyImportant: "", perspective: "", question: "" };
+// Поддерживает как старый формат (текст), так и новый (структурированные данные)
+function parseAnalyticData(topic) {
+  // Если есть структурированные данные - используем их
+  if (topic.sense && topic.why && topic.view && topic.question) {
+    return {
+      sense: topic.sense,
+      why: topic.why,
+      view: topic.view,
+      question: topic.question,
+    };
+  }
+  
+  // Fallback: парсим из content (старый формат)
+  const content = topic.content || "";
+  if (!content) return { sense: "", why: "", view: "", question: "" };
   
   const text = String(content).trim();
   
@@ -145,29 +159,29 @@ function parseAnalyticText(content) {
   const perspectiveMatch = text.match(/(?:NovaCiv perspective|Взгляд NovaCiv|NovaCiv-Perspektive)[:.\s]+(.*?)(?:\n\n|$)/i);
   const questionMatch = text.match(/(?:Question|Вопрос|Frage)[:.\s]+(.*?)(?:\n\n|$)/i);
   
-  // Summary - всё до "Why it matters" или первые 2-3 предложения
-  let summary = text;
+  // Sense - всё до "Why it matters" или первые 2-3 предложения
+  let sense = text;
   if (whyMatch) {
-    summary = text.substring(0, whyMatch.index).trim();
+    sense = text.substring(0, whyMatch.index).trim();
   } else if (perspectiveMatch) {
-    summary = text.substring(0, perspectiveMatch.index).trim();
+    sense = text.substring(0, perspectiveMatch.index).trim();
   }
   
-  // Если summary слишком длинный, берём первые 2-3 предложения
-  const sentences = summary.split(/[.!?]+/).filter(s => s.trim().length > 10);
+  // Если sense слишком длинный, берём первые 2-3 предложения
+  const sentences = sense.split(/[.!?]+/).filter(s => s.trim().length > 10);
   if (sentences.length > 3) {
-    summary = sentences.slice(0, 3).join(". ") + ".";
+    sense = sentences.slice(0, 3).join(". ") + ".";
   }
   
   return {
-    summary: summary.slice(0, 360).trim(),
-    whyImportant: whyMatch ? whyMatch[1].trim().slice(0, 200) : "",
-    perspective: perspectiveMatch ? perspectiveMatch[1].trim().slice(0, 200) : "",
-    question: questionMatch ? questionMatch[1].trim().slice(0, 150) : "",
+    sense: sense.slice(0, 360).trim(),
+    why: whyMatch ? whyMatch[1].trim().slice(0, 180) : "",
+    view: perspectiveMatch ? perspectiveMatch[1].trim().slice(0, 220) : "",
+    question: questionMatch ? questionMatch[1].trim().slice(0, 160) : "",
   };
 }
 
-// Извлечение домена из URL
+// Извлечение домена из URL (для обратной совместимости)
 function extractDomain(url) {
   if (!url) return "";
   try {
@@ -178,117 +192,24 @@ function extractDomain(url) {
   }
 }
 
-// Форматирование даты
-function formatDate(pubDate, lang) {
-  if (!pubDate) return "";
-  try {
-    const date = new Date(pubDate);
-    const now = new Date();
-    const diffHours = Math.floor((now - date) / (1000 * 60 * 60));
-    
-    if (diffHours < 1) {
-      return lang === "ru" ? "только что" : lang === "de" ? "gerade eben" : "just now";
-    } else if (diffHours < 24) {
-      return lang === "ru" ? `${diffHours} ч назад` : lang === "de" ? `vor ${diffHours} Std` : `${diffHours}h ago`;
-    } else {
-      const diffDays = Math.floor(diffHours / 24);
-      return lang === "ru" ? `${diffDays} дн назад` : lang === "de" ? `vor ${diffDays} Tagen` : `${diffDays}d ago`;
-    }
-  } catch (e) {
-    return "";
-  }
-}
-
-// Создание красивого HTML сообщения для новости
+// Создание красивого HTML сообщения для новости (использует telegramFormat)
 function buildNewsMessage(topic) {
-  const lines = [];
-  const MAX_LENGTH = 3500;
+  const parsed = parseAnalyticData(topic);
   
-  // Заголовок
-  lines.push(`<b>🌐 NovaCiv — Movement news</b>`);
-  lines.push(`<b>${escapeHtml(topic.title || "(no title)")}</b>`);
-  lines.push("");
+  // Извлекаем sourceName из originalLink
+  const sourceName = topic.originalLink ? extractDomain(topic.originalLink) : "";
   
-  // Источник и дата
-  const domain = topic.originalLink ? extractDomain(topic.originalLink) : "";
-  const dateStr = formatDate(topic.pubDate, topic.lang);
-  if (domain || dateStr) {
-    const sourceLine = [domain, dateStr].filter(Boolean).join(" • ");
-    lines.push(`<i>${escapeHtml(sourceLine)}</i>`);
-    lines.push("");
-  }
-  
-  // Парсим аналитический текст
-  const parsed = parseAnalyticText(topic.content);
-  
-  // Смысл (summary) - 1-2 короткие строки
-  if (parsed.summary) {
-    lines.push(escapeHtml(parsed.summary));
-    lines.push("");
-  }
-  
-  // Почему важно
-  if (parsed.whyImportant) {
-    const whyLabel = topic.lang === "ru" ? "Почему важно:" : topic.lang === "de" ? "Warum wichtig:" : "Why it matters:";
-    lines.push(`<b>${whyLabel}</b> ${escapeHtml(parsed.whyImportant)}`);
-    lines.push("");
-  }
-  
-  // Взгляд NovaCiv
-  if (parsed.perspective) {
-    const perspectiveLabel = topic.lang === "ru" ? "Взгляд NovaCiv:" : topic.lang === "de" ? "NovaCiv-Perspektive:" : "NovaCiv perspective:";
-    lines.push(`<b>${perspectiveLabel}</b> ${escapeHtml(parsed.perspective)}`);
-    lines.push("");
-  }
-  
-  // Вопрос
-  if (parsed.question) {
-    const questionLabel = topic.lang === "ru" ? "Вопрос:" : topic.lang === "de" ? "Frage:" : "Question:";
-    lines.push(`<b>${questionLabel}</b> ${escapeHtml(parsed.question)}`);
-    lines.push("");
-  }
-  
-  // Ссылки
-  if (topic.originalLink) {
-    lines.push(`<a href="${escapeHtml(topic.originalLink)}">Источник</a>`);
-  }
-  lines.push(`https://novaciv.space/news`);
-  
-  let message = lines.join("\n");
-  
-  // Контроль длины: обрезаем по приоритету
-  if (message.length > MAX_LENGTH) {
-    // Удаляем "Почему важно"
-    if (parsed.whyImportant) {
-      const whyLabel = topic.lang === "ru" ? "Почему важно:" : topic.lang === "de" ? "Warum wichtig:" : "Why it matters:";
-      message = message.replace(new RegExp(`<b>${whyLabel}</b>.*?\n\n`, "s"), "");
-    }
-    
-    if (message.length > MAX_LENGTH && parsed.perspective) {
-      // Удаляем "Взгляд NovaCiv"
-      const perspectiveLabel = topic.lang === "ru" ? "Взгляд NovaCiv:" : topic.lang === "de" ? "NovaCiv-Perspektive:" : "NovaCiv perspective:";
-      message = message.replace(new RegExp(`<b>${perspectiveLabel}</b>.*?\n\n`, "s"), "");
-    }
-    
-    if (message.length > MAX_LENGTH && parsed.summary) {
-      // Обрезаем summary
-      const summaryIndex = message.indexOf(parsed.summary);
-      if (summaryIndex !== -1) {
-        const beforeSummary = message.substring(0, summaryIndex);
-        const afterSummary = message.substring(summaryIndex + parsed.summary.length);
-        const maxSummaryLength = MAX_LENGTH - beforeSummary.length - afterSummary.length - 50;
-        const truncatedSummary = parsed.summary.slice(0, Math.max(100, maxSummaryLength)) + "...";
-        message = beforeSummary + truncatedSummary + afterSummary;
-      }
-    }
-    
-    // Финальная обрезка
-    if (message.length > MAX_LENGTH) {
-      message = message.slice(0, MAX_LENGTH - 3) + "...";
-    }
-  }
-  
-  return message;
+  return formatNewsMessage({
+    title: topic.title,
+    url: topic.originalLink,
+    sourceName: sourceName,
+    date: topic.pubDate,
+    sense: parsed.sense,
+    why: parsed.why,
+    view: parsed.view,
+    question: parsed.question,
+    lang: topic.lang || "ru",
+  });
 }
 
 // Создание caption для фото поста (краткий формат) - DEPRECATED, используем buildNewsMessage
@@ -301,7 +222,7 @@ function buildPostText(topic) {
   return buildNewsMessage(topic);
 }
 
-// Экранирование HTML
+// Экранирование HTML (для обратной совместимости, используется из telegramFormat)
 function escapeHtml(text) {
   if (!text) return "";
   return String(text)
@@ -681,9 +602,47 @@ exports.handler = async (event) => {
 
     const topics = await fetchNewsTopics();
 
+    // Загружаем состояние для дедупа
+    const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+    let lastNewsSource = null;
+    let recentTitleKeys = {};
+    
+    try {
+      if (FIREBASE_DB_URL) {
+        const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state.json`;
+        const stateResp = await fetch(stateUrl);
+        if (stateResp.ok) {
+          const state = await stateResp.json() || {};
+          lastNewsSource = state.lastNewsSource || null;
+          recentTitleKeys = state.recentTitleKeys || {};
+        }
+      }
+    } catch (e) {
+      log("Failed to load news state:", e.message);
+    }
+
+    // Фильтруем и сортируем с приоритетами
     const freshTopics = topics
       .filter((t) => !t.telegramPostedAt)
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .map((t) => {
+        // Приоритет по свежести (больше createdAt = выше приоритет)
+        let priority = t.createdAt || 0;
+        
+        // Штраф если источник повторяется
+        const sourceId = t.sourceId || "";
+        if (lastNewsSource && sourceId === lastNewsSource) {
+          priority -= 86400000; // Штраф 24 часа
+        }
+        
+        // Штраф если заголовок похож на недавние
+        const titleKey = safeKey(t.title || "");
+        if (recentTitleKeys[titleKey]) {
+          priority -= 43200000; // Штраф 12 часов
+        }
+        
+        return { ...t, _priority: priority };
+      })
+      .sort((a, b) => b._priority - a._priority)
       .slice(0, 1); // Ограничение: максимум 1 новость за запуск
 
     if (!freshTopics.length) {
@@ -785,31 +744,38 @@ exports.handler = async (event) => {
       const imageUrl = topic.imageUrl || "";
 
       const tasks = [];
+      const titleShort = (topic.title || "").slice(0, 50);
 
       // Отправляем как текстовое сообщение (HTML формат, с preview)
       if (TELEGRAM_NEWS_CHAT_ID_RU && topic.lang === "ru") {
         tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, message, keyboard).then((res) => {
-            if (res && res.ok) perLanguage.ru.sent += 1;
-            else if (res && !res.skipped) perLanguage.ru.errors.push(res);
+          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, message, keyboard).then(async (res) => {
+            if (res && res.ok) {
+              perLanguage.ru.sent += 1;
+              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "ru" });
+            } else if (res && !res.skipped) perLanguage.ru.errors.push(res);
           }),
         );
       }
 
       if (TELEGRAM_NEWS_CHAT_ID_EN && topic.lang === "en") {
         tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, message, keyboard).then((res) => {
-            if (res && res.ok) perLanguage.en.sent += 1;
-            else if (res && !res.skipped) perLanguage.en.errors.push(res);
+          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, message, keyboard).then(async (res) => {
+            if (res && res.ok) {
+              perLanguage.en.sent += 1;
+              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "en" });
+            } else if (res && !res.skipped) perLanguage.en.errors.push(res);
           }),
         );
       }
 
       if (TELEGRAM_NEWS_CHAT_ID_DE && topic.lang === "de") {
         tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, message, keyboard).then((res) => {
-            if (res && res.ok) perLanguage.de.sent += 1;
-            else if (res && !res.skipped) perLanguage.de.errors.push(res);
+          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, message, keyboard).then(async (res) => {
+            if (res && res.ok) {
+              perLanguage.de.sent += 1;
+              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "de" });
+            } else if (res && !res.skipped) perLanguage.de.errors.push(res);
           }),
         );
       }

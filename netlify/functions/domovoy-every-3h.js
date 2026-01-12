@@ -16,40 +16,8 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
-
-// Семена для Домового (цитаты/мысли из Манифеста и Устава)
-const SEEDS = {
-  ru: [
-    "Ненасилие и отказ от принуждения — основа свободного общества.",
-    "Ценность разумной жизни превыше любых идеологий.",
-    "Прямая демократия даёт каждому голос в решении общих вопросов.",
-    "Наука и критическое мышление — инструменты познания истины.",
-    "Децентрализация власти защищает от монополий и злоупотреблений.",
-    "Сотрудничество вместо господства — путь к устойчивому будущему.",
-    "Прозрачность решений укрепляет доверие в сообществе.",
-    "Автономия личности неотделима от ответственности перед другими.",
-  ],
-  en: [
-    "Non-violence and rejection of coercion are the foundation of a free society.",
-    "The value of intelligent life exceeds any ideology.",
-    "Direct democracy gives everyone a voice in common decisions.",
-    "Science and critical thinking are tools for discovering truth.",
-    "Decentralization of power protects against monopolies and abuse.",
-    "Cooperation instead of domination is the path to a sustainable future.",
-    "Transparency of decisions strengthens trust in the community.",
-    "Personal autonomy is inseparable from responsibility to others.",
-  ],
-  de: [
-    "Gewaltlosigkeit und Ablehnung von Zwang sind die Grundlage einer freien Gesellschaft.",
-    "Der Wert intelligenten Lebens übersteigt jede Ideologie.",
-    "Direkte Demokratie gibt jedem eine Stimme bei gemeinsamen Entscheidungen.",
-    "Wissenschaft und kritisches Denken sind Werkzeuge zur Wahrheitsfindung.",
-    "Dezentralisierung der Macht schützt vor Monopolen und Missbrauch.",
-    "Zusammenarbeit statt Herrschaft ist der Weg in eine nachhaltige Zukunft.",
-    "Transparenz von Entscheidungen stärkt das Vertrauen in die Gemeinschaft.",
-    "Persönliche Autonomie ist untrennbar mit Verantwortung anderen gegenüber verbunden.",
-  ],
-};
+const { formatDomovoyMessage } = require("../lib/telegramFormat");
+const { getSeeds } = require("../lib/domovoySeeds");
 
 function log(...args) {
   console.log("[domovoy-every-3h]", ...args);
@@ -77,42 +45,57 @@ function safeKey(value) {
     .slice(0, 120);
 }
 
-// Загрузка последнего использованного seed
-async function getLastSeedKey(lang) {
-  if (!FIREBASE_DB_URL) return null;
+// Загрузка истории последних 48 часов
+async function getRecentSeeds(lang) {
+  if (!FIREBASE_DB_URL) return [];
   try {
     const safeLang = safeKey(lang);
-    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${safeLang}.json`;
+    const url = `${FIREBASE_DB_URL}/domovoy/state/recent_${safeLang}.json`;
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
-      return data || null;
+      // data может быть массивом или объектом с ключами
+      if (Array.isArray(data)) {
+        return data;
+      } else if (data && typeof data === "object") {
+        return Object.values(data).filter(Boolean);
+      }
     }
   } catch (e) {
     await writeFirebaseError("domovoy-every-3h", e, {
-      path: `domovoy/state/lastSeedKey_${safeKey(lang)}`,
+      path: `domovoy/state/recent_${safeKey(lang)}`,
       op: "read",
     });
-    log("Error loading last seed key:", e.message);
+    log("Error loading recent seeds:", e.message);
   }
-  return null;
+  return [];
 }
 
-// Сохранение последнего использованного seed
-async function saveLastSeedKey(lang, seedKey, timestamp) {
+// Сохранение истории последних 48 часов
+async function saveRecentSeed(lang, seedKey, timestamp) {
   if (!FIREBASE_DB_URL) return;
   try {
     const safeLang = safeKey(lang);
-    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${safeLang}.json`;
+    const recent = await getRecentSeeds(lang);
+    
+    // Добавляем новый seed
+    recent.push({ seedKey, timestamp });
+    
+    // Удаляем старые (старше 48 часов)
+    const cutoff = timestamp - 48 * 60 * 60 * 1000;
+    const filtered = recent.filter((item) => item.timestamp >= cutoff);
+    
+    // Сохраняем
+    const url = `${FIREBASE_DB_URL}/domovoy/state/recent_${safeLang}.json`;
     const res = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seedKey, timestamp }),
+      body: JSON.stringify(filtered),
     });
     if (!res.ok) {
       const errorText = await res.text().catch(() => "");
-      await writeFirebaseError("domovoy-every-3h", new Error(`Failed to save seed key: ${res.status}`), {
-        path: `domovoy/state/lastSeedKey_${safeLang}`,
+      await writeFirebaseError("domovoy-every-3h", new Error(`Failed to save recent seeds: ${res.status}`), {
+        path: `domovoy/state/recent_${safeLang}`,
         op: "write",
         status: res.status,
         firebaseError: errorText.slice(0, 200),
@@ -120,40 +103,40 @@ async function saveLastSeedKey(lang, seedKey, timestamp) {
     }
   } catch (e) {
     await writeFirebaseError("domovoy-every-3h", e, {
-      path: `domovoy/state/lastSeedKey_${safeKey(lang)}`,
+      path: `domovoy/state/recent_${safeKey(lang)}`,
       op: "write",
     });
-    log("Error saving last seed key:", e.message);
+    log("Error saving recent seeds:", e.message);
   }
 }
 
 // Выбор seed с ротацией (избегаем повторов минимум 48 часов)
-function selectSeed(lang, lastSeedData) {
-  const seeds = SEEDS[lang] || SEEDS.en;
+async function selectSeed(lang) {
+  const seeds = getSeeds(lang);
   if (seeds.length === 0) return null;
   
-  const now = Date.now();
-  const MIN_INTERVAL_MS = 48 * 60 * 60 * 1000; // 48 часов
+  const recent = await getRecentSeeds(lang);
+  const recentKeys = new Set(recent.map((item) => item.seedKey));
   
-  // Если есть последний seed и он недавний - исключаем его
-  let availableSeeds = seeds;
-  if (lastSeedData && lastSeedData.seedKey !== undefined) {
-    const age = now - (lastSeedData.timestamp || 0);
-    if (age < MIN_INTERVAL_MS) {
-      // Исключаем последний seed
-      availableSeeds = seeds.filter((_, idx) => idx !== lastSeedData.seedKey);
-      if (availableSeeds.length === 0) {
-        // Если все исключены, используем все
-        availableSeeds = seeds;
-      }
+  // Исключаем недавние seeds
+  let availableSeeds = seeds.filter((seed) => !recentKeys.has(seed.key));
+  
+  // Если все seeds в recent - очищаем recent и используем все
+  if (availableSeeds.length === 0) {
+    await writeEvent("domovoy-every-3h", "warn", "All seeds in recent history, clearing", { lang });
+    availableSeeds = seeds;
+    // Очищаем recent
+    if (FIREBASE_DB_URL) {
+      const safeLang = safeKey(lang);
+      const url = `${FIREBASE_DB_URL}/domovoy/state/recent_${safeLang}.json`;
+      await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify([]) });
     }
   }
   
   // Выбираем случайный из доступных
   const selectedSeed = availableSeeds[Math.floor(Math.random() * availableSeeds.length)];
-  const seedKey = seeds.indexOf(selectedSeed);
   
-  return { seed: selectedSeed, seedKey };
+  return selectedSeed;
 }
 
 // Генерация поста через OpenAI
@@ -169,43 +152,40 @@ async function generatePost(seed, lang) {
     : `You are the house spirit of the digital civilization NovaCiv. You speak English, know the NovaCiv Manifesto and Charter. Write clearly and calmly, without pomp and slogans. Respect the reader.`;
 
   const userPrompt = lang === "ru"
-    ? `Создай короткий пост (600-1200 символов) на основе этой мысли из Манифеста/Устава NovaCiv:
+    ? `Создай короткий пост на основе этой мысли из Манифеста/Устава NovaCiv:
 
-"${seed}"
+"${seed.quote}"
 
-Структура:
-1) Короткий заголовок (3-6 слов)
-2) Цитата/мысль (точная или слегка перефразированная, но без искажения смысла)
-3) 2-4 строки размышления Домового в стиле NovaCiv: спокойно, ясно, без лозунгов, без пафоса
-4) 1 вопрос к читателю
-
-Ответ верни строго в формате JSON:
-{"title": "...", "body": "..."}`
+Структура (верни JSON):
+{
+  "headline": "3-6 слов",
+  "quote": "1-3 строки цитаты (точная или слегка перефразированная, но без искажения смысла)",
+  "reflection": "2-4 строки размышления Домового в стиле NovaCiv: спокойно, ясно, без лозунгов, без пафоса",
+  "question": "1 вопрос к читателю"
+}`
     : lang === "de"
-    ? `Erstelle einen kurzen Post (600-1200 Zeichen) basierend auf diesem Gedanken aus dem Manifest/der Charta von NovaCiv:
+    ? `Erstelle einen kurzen Post basierend auf diesem Gedanken aus dem Manifest/der Charta von NovaCiv:
 
-"${seed}"
+"${seed.quote}"
 
-Struktur:
-1) Kurze Überschrift (3-6 Wörter)
-2) Zitat/Gedanke (genau oder leicht umformuliert, aber ohne Sinnverzerrung)
-3) 2-4 Zeilen Nachdenken des Hausgeists im NovaCiv-Stil: ruhig, klar, ohne Slogans, ohne Pathos
-4) 1 Frage an den Leser
+Struktur (Antworte im JSON-Format):
+{
+  "headline": "3-6 Wörter",
+  "quote": "1-3 Zeilen Zitat (genau oder leicht umformuliert, aber ohne Sinnverzerrung)",
+  "reflection": "2-4 Zeilen Nachdenken des Hausgeists im NovaCiv-Stil: ruhig, klar, ohne Slogans, ohne Pathos",
+  "question": "1 Frage an den Leser"
+}`
+    : `Create a short post based on this thought from the NovaCiv Manifesto/Charter:
 
-Antworte strikt im JSON-Format:
-{"title": "...", "body": "..."}`
-    : `Create a short post (600-1200 characters) based on this thought from the NovaCiv Manifesto/Charter:
+"${seed.quote}"
 
-"${seed}"
-
-Structure:
-1) Short title (3-6 words)
-2) Quote/thought (exact or slightly rephrased, but without distorting meaning)
-3) 2-4 lines of Domovoy's reflection in NovaCiv style: calmly, clearly, without slogans, without pomp
-4) 1 question to the reader
-
-Return answer strictly in JSON format:
-{"title": "...", "body": "..."}`;
+Structure (return JSON):
+{
+  "headline": "3-6 words",
+  "quote": "1-3 lines of quote (exact or slightly rephrased, but without distorting meaning)",
+  "reflection": "2-4 lines of Domovoy's reflection in NovaCiv style: calmly, clearly, without slogans, without pomp",
+  "question": "1 question to the reader"
+}`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -240,48 +220,32 @@ Return answer strictly in JSON format:
   let parsed;
   try {
     parsed = JSON.parse(content);
+    if (parsed.headline && parsed.quote && parsed.reflection && parsed.question) {
+      return parsed;
+    }
   } catch (e) {
-    // Если не JSON, пытаемся извлечь из текста
-    const titleMatch = content.match(/"title"\s*:\s*"([^"]+)"/);
-    const bodyMatch = content.match(/"body"\s*:\s*"([^"]+)"/);
-    parsed = {
-      title: titleMatch ? titleMatch[1] : "NovaCiv",
-      body: bodyMatch ? bodyMatch[1] : content,
-    };
+    // Не JSON, пытаемся извлечь из текста
+    console.log("[domovoy-every-3h] OpenAI response is not JSON, trying to parse:", content.slice(0, 200));
   }
 
+  // Fallback: если не получилось распарсить
   return {
-    title: parsed.title || "NovaCiv",
-    body: parsed.body || content,
+    headline: seed.headline || "NovaCiv",
+    quote: seed.quote || "",
+    reflection: "Размышление о ценности жизни, свободы и справедливости.",
+    question: "Как это влияет на вашу свободу и автономию?",
   };
 }
 
-// Форматирование поста для Telegram (HTML)
-function formatPostForTelegram(title, body, lang) {
-  const lines = [];
-  
-  lines.push(`<b>🤖 NovaCiv — Домовой</b>`);
-  lines.push(`<b>${escapeHtml(title)}</b>`);
-  lines.push("");
-  lines.push(escapeHtml(body));
-  lines.push("");
-  lines.push(`https://novaciv.space`);
-  
-  let message = lines.join("\n");
-  
-  // Контроль длины: 600-1200 символов
-  if (message.length > 1200) {
-    // Обрезаем body
-    const headerLength = lines[0].length + lines[1].length + lines[2].length + lines[lines.length - 2].length + lines[lines.length - 1].length + 10;
-    const maxBodyLength = 1200 - headerLength;
-    const bodyText = escapeHtml(body);
-    if (bodyText.length > maxBodyLength) {
-      const truncatedBody = bodyText.slice(0, maxBodyLength - 3) + "...";
-      message = lines[0] + "\n" + lines[1] + "\n\n" + truncatedBody + "\n\n" + lines[lines.length - 1];
-    }
-  }
-  
-  return message;
+// Форматирование поста для Telegram (использует telegramFormat)
+function formatPostForTelegram(postData, lang) {
+  return formatDomovoyMessage({
+    headline: postData.headline,
+    quote: postData.quote,
+    reflection: postData.reflection,
+    question: postData.question,
+    lang: lang,
+  });
 }
 
 // Отправка в Telegram
@@ -404,12 +368,9 @@ exports.handler = async (event) => {
     const forcedLang = qs.lang;
     const lang = forcedLang || (["ru", "en", "de"][Math.floor(Date.now() / (3 * 60 * 60 * 1000)) % 3]);
 
-    // Загружаем последний seed
-    const lastSeedData = await getLastSeedKey(lang);
-    
     // Выбираем seed с ротацией
-    const seedSelection = selectSeed(lang, lastSeedData);
-    if (!seedSelection) {
+    const seed = await selectSeed(lang);
+    if (!seed) {
       await writeEvent(component, "warn", "No seeds available", { lang });
       return {
         statusCode: 200,
@@ -417,15 +378,14 @@ exports.handler = async (event) => {
       };
     }
 
-    const { seed, seedKey } = seedSelection;
-    log("Selected seed:", seedKey, "for lang:", lang);
+    log("Selected seed:", seed.key, "for lang:", lang);
 
     // Генерируем пост
-    const { title, body } = await generatePost(seed, lang);
-    log("Generated post:", title);
+    const postData = await generatePost(seed, lang);
+    log("Generated post:", postData.headline);
 
     // Форматируем для Telegram
-    const message = formatPostForTelegram(title, body, lang);
+    const message = formatPostForTelegram(postData, lang);
 
     // Отправляем в Telegram по языку
     let chatId = null;
@@ -451,8 +411,11 @@ exports.handler = async (event) => {
       throw new Error(`Telegram send failed: ${telegramResult.description || "unknown"}`);
     }
 
-    // Сохраняем последний seed
-    await saveLastSeedKey(lang, seedKey, Date.now());
+    // Сохраняем seed в историю
+    await saveRecentSeed(lang, seed.key, Date.now());
+    
+    // Записываем событие об отправке
+    await writeEvent(component, "info", `domovoy post sent: ${postData.headline}`, { lang, seedKey: seed.key });
 
     // Heartbeat: успешное выполнение
     await writeHeartbeat(component, {
@@ -473,8 +436,8 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         ok: true,
         lang,
-        title,
-        seedKey,
+        headline: postData.headline,
+        seedKey: seed.key,
       }),
     };
   } catch (err) {

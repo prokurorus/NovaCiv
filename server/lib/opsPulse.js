@@ -94,12 +94,13 @@ async function writeEvent(component, level, message, meta = {}) {
     const newEventKey = Date.now().toString();
     events[newEventKey] = event;
     
-    // Удаляем старые события, если их больше MAX_EVENTS
+    // Авто-cleanup: удаляем старые события, если их больше MAX_EVENTS
     if (eventKeys.length >= MAX_EVENTS) {
       const keysToRemove = eventKeys.slice(0, eventKeys.length - MAX_EVENTS + 1);
       for (const key of keysToRemove) {
         delete events[key];
       }
+      console.log(`[ops-pulse] Cleaned ${keysToRemove.length} old events (buffer size: ${MAX_EVENTS})`);
     }
     
     await eventsRef.set(events);
@@ -109,7 +110,59 @@ async function writeEvent(component, level, message, meta = {}) {
   }
 }
 
+/**
+ * Записывает ошибку Firebase в /ops/events с полной информацией
+ */
+async function writeFirebaseError(component, error, meta = {}) {
+  try {
+    const db = getDb();
+    const eventsRef = db.ref("ops/events");
+    
+    const errorMeta = {
+      op: meta.op || "unknown",
+      path: meta.path || "unknown",
+      status: meta.status || null,
+      firebaseError: meta.firebaseError || null,
+      ...meta,
+    };
+    
+    // Безопасная очистка
+    const safeMeta = {};
+    for (const [key, value] of Object.entries(errorMeta)) {
+      if (typeof value === "string") {
+        safeMeta[key] = value
+          .replace(/sk-[a-zA-Z0-9]+/g, "sk-***")
+          .replace(/ghp_[a-zA-Z0-9]+/g, "ghp_***")
+          .replace(/AIza[^"'\s]+/g, "AIza***")
+          .replace(/-----BEGIN[^-]+-----END[^-]+-----/gs, "***PRIVATE_KEY***")
+          .slice(0, 200);
+      } else {
+        safeMeta[key] = value;
+      }
+    }
+    
+    const errorMsg = String(error && error.message ? error.message : error).slice(0, 500);
+    
+    await writeEvent(component, "error", `Firebase ${errorMeta.op} error: ${errorMsg}`, safeMeta);
+    
+    // Также обновляем heartbeat
+    await writeHeartbeat(component, {
+      lastRunAt: Date.now(),
+      lastErrorAt: Date.now(),
+      lastErrorMsg: errorMsg
+        .replace(/sk-[a-zA-Z0-9]+/g, "sk-***")
+        .replace(/ghp_[a-zA-Z0-9]+/g, "ghp_***")
+        .replace(/AIza[^"'\s]+/g, "AIza***")
+        .replace(/-----BEGIN[^-]+-----END[^-]+-----/gs, "***PRIVATE_KEY***")
+        .slice(0, 500),
+    });
+  } catch (e) {
+    console.error(`[ops-pulse] Failed to write Firebase error:`, e.message);
+  }
+}
+
 module.exports = {
   writeHeartbeat,
   writeEvent,
+  writeFirebaseError,
 };

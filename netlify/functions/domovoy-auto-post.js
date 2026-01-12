@@ -19,7 +19,18 @@ const TELEGRAM_NEWS_CHAT_ID_EN = process.env.TELEGRAM_NEWS_CHAT_ID_EN || process
 const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+
+// Безопасная санитизация ключей Firebase
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
 
 // Модель OpenAI для текста
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -211,19 +222,36 @@ async function savePostToForum({ langCode, mode, title, body }) {
     postKind: `domovoy:${mode}`,
   };
 
-  const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Firebase write error: HTTP ${res.status} – ${text}`);
+    if (!res.ok) {
+      const text = await res.text();
+      const error = new Error(`Firebase write error: HTTP ${res.status} – ${text}`);
+      await writeFirebaseError("domovoy-auto-post", error, {
+        path: "forum/topics",
+        op: "write",
+        status: res.status,
+        firebaseError: text.slice(0, 200),
+      });
+      throw error;
+    }
+
+    const data = await res.json();
+    return data.name || null;
+  } catch (error) {
+    if (!error.message || !error.message.includes("Firebase write error")) {
+      await writeFirebaseError("domovoy-auto-post", error, {
+        path: "forum/topics",
+        op: "write",
+      });
+    }
+    throw error;
   }
-
-  const data = await res.json();
-  return data.name || null;
 }
 
 exports.handler = async (event) => {

@@ -1,0 +1,69 @@
+{
+  "rules": {
+    "forum": {
+      "topics": {
+        ".indexOn": ["section"],
+        "$topicId": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "comments": {
+        "$topicId": {
+          "$commentId": {
+            ".read": true,
+            ".write": true
+          }
+        }
+      }
+    },
+    "newsMeta": {
+      "$lang": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "domovoy": {
+      "state": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "ops": {
+      ".read": true,
+      ".write": true,
+      "heartbeat": {
+        "$component": {
+          ".read": true,
+          ".write": true
+        }
+      },
+      "events": {
+        ".read": true,
+        ".write": true
+      },
+      "dbAudit": {
+        ".read": true,
+        ".write": true
+      },
+      "migrations": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "config": {
+      "features": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "health": {
+      ".read": true,
+      ".write": true
+    },
+    "videoJobs": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}

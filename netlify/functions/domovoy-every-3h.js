@@ -15,7 +15,7 @@ const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
 
 // Семена для Домового (цитаты/мысли из Манифеста и Устава)
 const SEEDS = {
@@ -66,17 +66,33 @@ function escapeHtml(text) {
     .replace(/'/g, "&#039;");
 }
 
+// Безопасная санитизация ключей Firebase
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
+
 // Загрузка последнего использованного seed
 async function getLastSeedKey(lang) {
   if (!FIREBASE_DB_URL) return null;
   try {
-    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${lang}.json`;
+    const safeLang = safeKey(lang);
+    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${safeLang}.json`;
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
       return data || null;
     }
   } catch (e) {
+    await writeFirebaseError("domovoy-every-3h", e, {
+      path: `domovoy/state/lastSeedKey_${safeKey(lang)}`,
+      op: "read",
+    });
     log("Error loading last seed key:", e.message);
   }
   return null;
@@ -86,13 +102,27 @@ async function getLastSeedKey(lang) {
 async function saveLastSeedKey(lang, seedKey, timestamp) {
   if (!FIREBASE_DB_URL) return;
   try {
-    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${lang}.json`;
-    await fetch(url, {
+    const safeLang = safeKey(lang);
+    const url = `${FIREBASE_DB_URL}/domovoy/state/lastSeedKey_${safeLang}.json`;
+    const res = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seedKey, timestamp }),
     });
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      await writeFirebaseError("domovoy-every-3h", new Error(`Failed to save seed key: ${res.status}`), {
+        path: `domovoy/state/lastSeedKey_${safeLang}`,
+        op: "write",
+        status: res.status,
+        firebaseError: errorText.slice(0, 200),
+      });
+    }
   } catch (e) {
+    await writeFirebaseError("domovoy-every-3h", e, {
+      path: `domovoy/state/lastSeedKey_${safeKey(lang)}`,
+      op: "write",
+    });
     log("Error saving last seed key:", e.message);
   }
 }

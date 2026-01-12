@@ -25,7 +25,18 @@ const DOMOVOY_NAME_EN = "Domovoy";
 const DOMOVOY_NAME_RU = "Домовой NovaCiv";
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+
+// Безопасная санитизация ключей Firebase
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
 
 function log(...args) {
   console.log("[domovoy-auto-reply]", ...args);
@@ -85,8 +96,13 @@ async function loadRecentDomovoyTopics(limit = 40) {
 
 // Загружаем комментарии к теме из forum/comments/<topicId>
 async function loadCommentsForTopic(topicId) {
-  const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
-  const data = await fetchJson(url).catch((e) => {
+  const safeTopicId = safeKey(topicId);
+  const url = `${FIREBASE_DB_URL}/forum/comments/${safeTopicId}.json`;
+  const data = await fetchJson(url).catch(async (e) => {
+    await writeFirebaseError("domovoy-auto-reply", e, {
+      path: `forum/comments/${safeTopicId}`,
+      op: "read",
+    });
     log("loadCommentsForTopic error", topicId, e.message);
     return null;
   });
@@ -240,7 +256,8 @@ Task:
 
 // сохраняем ответ как новый комментарий
 async function saveReplyComment({ topicId, replyText, lang, replyToId }) {
-  const url = `${FIREBASE_DB_URL}/forum/comments/${topicId}.json`;
+  const safeTopicId = safeKey(topicId);
+  const url = `${FIREBASE_DB_URL}/forum/comments/${safeTopicId}.json`;
   const now = Date.now();
 
   const payload = {
@@ -253,20 +270,37 @@ async function saveReplyComment({ topicId, replyText, lang, replyToId }) {
     replyToId: replyToId || null,
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Failed to save reply for topic ${topicId}: HTTP ${res.status} – ${text}`,
-    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      const error = new Error(
+        `Failed to save reply for topic ${topicId}: HTTP ${res.status} – ${text}`,
+      );
+      await writeFirebaseError("domovoy-auto-reply", error, {
+        path: `forum/comments/${safeTopicId}`,
+        op: "write",
+        status: res.status,
+        firebaseError: text.slice(0, 200),
+      });
+      throw error;
+    }
+
+    return await res.json().catch(() => ({}));
+  } catch (error) {
+    if (!error.message || !error.message.includes("Failed to save reply")) {
+      await writeFirebaseError("domovoy-auto-reply", error, {
+        path: `forum/comments/${safeTopicId}`,
+        op: "write",
+      });
+    }
+    throw error;
   }
-
-  return await res.json().catch(() => ({}));
 }
 
 // Запись heartbeat метрик в Firebase

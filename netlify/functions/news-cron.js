@@ -10,7 +10,7 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
 const TELEGRAM_NEWS_CHAT_ID_EN =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
@@ -347,7 +347,12 @@ function getBrandCaption(lang) {
 
 async function fetchNewsTopics() {
   if (!FIREBASE_DB_URL) {
-    throw new Error("FIREBASE_DB_URL is not configured");
+    const error = new Error("FIREBASE_DB_URL is not configured");
+    await writeFirebaseError("news-cron", error, {
+      path: "forum/topics",
+      op: "read",
+    });
+    throw error;
   }
 
   // Парсим URL для безопасного логирования
@@ -406,36 +411,64 @@ async function fetchNewsTopics() {
         (errorStr.includes("Index not defined") || 
          errorStr.includes("index") && errorStr.toLowerCase().includes("not found"));
       
-      if (isIndexError) {
-        // ВРЕМЕННЫЙ Fallback: запрос без индекса, фильтрация в JS
-        // TODO: Применить индекс в Firebase Rules (см. docs/firebase.rules.patch.json)
-        // После применения индекса этот fallback не должен срабатывать
-        log("[news-cron] WARNING: firebase missing index on section; using full-scan fallback");
-        
-        const fallbackUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
-        const fallbackResp = await fetch(fallbackUrl);
-        
-        if (!fallbackResp.ok) {
-          throw new Error(
-            `Firebase topics fetch failed (fallback): ${fallbackResp.status} ${fallbackResp.statusText}`,
-          );
-        }
-        
-        const fallbackData = await fallbackResp.json();
-        if (!fallbackData || typeof fallbackData !== "object") {
-          return [];
-        }
-        
-        // Фильтруем в JS по section === "news"
-        const allItems = Object.entries(fallbackData).map(([id, value]) => ({
-          id,
-          ...(value || {}),
-        }));
-        
-        const filteredItems = allItems.filter((item) => item.section === "news");
-        
-        return filteredItems;
+    if (isIndexError) {
+      // ВРЕМЕННЫЙ Fallback: запрос без индекса, фильтрация в JS
+      // TODO: Применить индекс в Firebase Rules (см. docs/firebase.rules.required.json)
+      // После применения индекса этот fallback не должен срабатывать
+      log("[news-cron] WARNING: firebase missing index on section; using full-scan fallback");
+      
+      await writeEvent("news-cron", "warn", "Firebase index missing for /forum/topics.section — using fallback", {
+        path: "forum/topics",
+        op: "query",
+        status: 400,
+        firebaseError: "Index not defined",
+      });
+      
+      const fallbackUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+      const fallbackResp = await fetch(fallbackUrl);
+      
+      if (!fallbackResp.ok) {
+        const errorText = await fallbackResp.text().catch(() => "");
+        await writeFirebaseError("news-cron", new Error(`Fallback fetch failed: ${fallbackResp.status}`), {
+          path: "forum/topics",
+          op: "read",
+          status: fallbackResp.status,
+          firebaseError: errorText.slice(0, 200),
+        });
+        throw new Error(
+          `Firebase topics fetch failed (fallback): ${fallbackResp.status} ${fallbackResp.statusText}`,
+        );
       }
+      
+      const fallbackData = await fallbackResp.json();
+      if (!fallbackData || typeof fallbackData !== "object") {
+        return [];
+      }
+      
+      // Фильтруем в JS по section === "news"
+      const allItems = Object.entries(fallbackData).map(([id, value]) => ({
+        id,
+        ...(value || {}),
+      }));
+      
+      // Hard limit на full-scan: максимум 5000 записей
+      const HARD_LIMIT = 5000;
+      if (allItems.length > HARD_LIMIT) {
+        log(`[news-cron] WARNING: Full-scan returned ${allItems.length} items, limiting to ${HARD_LIMIT}`);
+        await writeEvent("news-cron", "warn", `Full-scan exceeded hard limit: ${allItems.length} > ${HARD_LIMIT}`, {
+          path: "forum/topics",
+          op: "query",
+          returnedCount: allItems.length,
+          hardLimit: HARD_LIMIT,
+        });
+      }
+      
+      const filteredItems = allItems
+        .slice(0, HARD_LIMIT)
+        .filter((item) => item.section === "news");
+      
+      return filteredItems;
+    }
       
       throw new Error(
         `Firebase topics fetch failed: ${resp.status} ${resp.statusText}`,
@@ -466,22 +499,39 @@ async function fetchNewsTopics() {
 async function markTopicAsPosted(topicId) {
   if (!FIREBASE_DB_URL) return;
 
-  const url = `${FIREBASE_DB_URL}/forum/topics/${safeKey(topicId)}.json`;
-  const resp = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      telegramPostedAt: Date.now(),
-    }),
-  });
+  const safeTopicId = safeKey(topicId);
+  const url = `${FIREBASE_DB_URL}/forum/topics/${safeTopicId}.json`;
+  
+  try {
+    const resp = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegramPostedAt: Date.now(),
+      }),
+    });
 
-  if (!resp.ok) {
-    log(
-      "Failed to mark topic as posted:",
-      topicId,
-      resp.status,
-      resp.statusText,
-    );
+    if (!resp.ok) {
+      const errorText = await resp.text().catch(() => "");
+      await writeFirebaseError("news-cron", new Error(`Failed to mark topic: ${resp.status}`), {
+        path: `forum/topics/${safeTopicId}`,
+        op: "write",
+        status: resp.status,
+        firebaseError: errorText.slice(0, 200),
+      });
+      log(
+        "Failed to mark topic as posted:",
+        topicId,
+        resp.status,
+        resp.statusText,
+      );
+    }
+  } catch (error) {
+    await writeFirebaseError("news-cron", error, {
+      path: `forum/topics/${safeTopicId}`,
+      op: "write",
+    });
+    log("Error marking topic as posted:", error.message);
   }
 }
 

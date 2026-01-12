@@ -18,7 +18,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.co
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
 
 
 // Максимум новых RSS-элементов за один запуск
@@ -299,17 +299,48 @@ async function loadNewsMeta() {
 
 async function saveNewsMeta(meta) {
   if (!FIREBASE_DB_URL) return;
+  
+  // Санитизация всех ключей в processedKeys и titleKeys
+  const sanitizedMeta = {
+    processedKeys: {},
+    titleKeys: {},
+  };
+  
+  if (meta.processedKeys) {
+    for (const [key, value] of Object.entries(meta.processedKeys)) {
+      const safe = safeKey(key);
+      sanitizedMeta.processedKeys[safe] = value;
+    }
+  }
+  
+  if (meta.titleKeys) {
+    for (const [key, value] of Object.entries(meta.titleKeys)) {
+      const safe = safeKey(key);
+      sanitizedMeta.titleKeys[safe] = value;
+    }
+  }
+  
   try {
     const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(meta),
+      body: JSON.stringify(sanitizedMeta),
     });
     if (!res.ok) {
       const text = await res.text();
+      await writeFirebaseError("fetch-news", new Error(`Failed to write news meta: ${res.status}`), {
+        path: NEWS_META_PATH,
+        op: "write",
+        status: res.status,
+        firebaseError: text.slice(0, 200),
+      });
       console.error("Failed to write news meta:", res.status, text);
     }
   } catch (e) {
+    await writeFirebaseError("fetch-news", e, {
+      path: NEWS_META_PATH,
+      op: "write",
+    });
     console.error("Error writing news meta:", e);
   }
 }
@@ -336,7 +367,12 @@ async function writeHealthMetrics(metrics) {
 
 async function saveNewsToForumLang(item, analyticText, langCode) {
   if (!FIREBASE_DB_URL) {
-    throw new Error("FIREBASE_DB_URL is not set");
+    const error = new Error("FIREBASE_DB_URL is not set");
+    await writeFirebaseError("fetch-news", error, {
+      path: "forum/topics",
+      op: "write",
+    });
+    throw error;
   }
 
   const now = Date.now();
@@ -348,22 +384,39 @@ async function saveNewsToForumLang(item, analyticText, langCode) {
     createdAtServer: now,
     authorNickname: "NovaCiv News",
     lang: langCode,
-    sourceId: item.sourceId || "",
+    sourceId: safeKey(item.sourceId || ""),
     originalGuid: item.guid || "",
     originalLink: item.link || "",
     pubDate: item.pubDate || "",
     imageUrl: item.imageUrl || "",
   };
 
-  const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  try {
+    const res = await fetch(`${FIREBASE_DB_URL}/forum/topics.json`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Firebase write error: HTTP ${res.status} – ${text}`);
+    if (!res.ok) {
+      const text = await res.text();
+      const error = new Error(`Firebase write error: HTTP ${res.status} – ${text}`);
+      await writeFirebaseError("fetch-news", error, {
+        path: "forum/topics",
+        op: "write",
+        status: res.status,
+        firebaseError: text.slice(0, 200),
+      });
+      throw error;
+    }
+  } catch (error) {
+    if (!error.message || !error.message.includes("Firebase write error")) {
+      await writeFirebaseError("fetch-news", error, {
+        path: "forum/topics",
+        op: "write",
+      });
+    }
+    throw error;
   }
 }
 

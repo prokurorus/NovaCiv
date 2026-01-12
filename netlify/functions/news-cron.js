@@ -603,7 +603,43 @@ exports.handler = async (event) => {
       ? Math.max(1, parseInt(limitParam, 10) || 1)
       : 10;
 
-    const topics = await fetchNewsTopics();
+    // Ищем topics с scheduledFor на текущий час
+    const now = Date.now();
+    const currentHour = new Date(now);
+    currentHour.setMinutes(0, 0, 0);
+    const hourStart = currentHour.getTime();
+    const hourEnd = hourStart + 60 * 60 * 1000;
+
+    // Загружаем topics с scheduledFor в текущем часе
+    let topics = [];
+    if (FIREBASE_DB_URL) {
+      try {
+        // Используем fallback full-scan, так как индекса по scheduledFor может не быть
+        const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+        const topicsResp = await fetch(topicsUrl);
+        if (topicsResp.ok) {
+          const topicsData = await topicsResp.json();
+          topics = Object.entries(topicsData || {}).map(([id, value]) => ({
+            id,
+            ...(value || {}),
+          })).filter(t => 
+            t.section === "news" && 
+            !t.posted &&
+            t.scheduledFor &&
+            t.scheduledFor >= hourStart &&
+            t.scheduledFor < hourEnd
+          );
+        }
+      } catch (e) {
+        log(`[news-cron] Failed to fetch topics:`, e.message);
+        // Fallback: используем старый метод
+        topics = await fetchNewsTopics();
+        topics = topics.filter(t => !t.posted);
+      }
+    } else {
+      topics = await fetchNewsTopics();
+      topics = topics.filter(t => !t.posted);
+    }
 
     // Каналы по языкам
     const CHANNELS = {

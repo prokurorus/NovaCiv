@@ -85,10 +85,35 @@ async function smokeTest() {
       console.log("[content-smoke-test] ✓ news-cron heartbeat updated");
     }
     
-    // Проверяем события
+    // Проверяем события за последний час
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const eventList = Object.values(events).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    
+    // Проверяем fetch-news: prepared news for {lang}
+    const preparedEvents = eventList.filter(
+      (e) => e.component === "fetch-news" && 
+             e.message && 
+             e.message.includes("prepared news for") &&
+             (e.ts || 0) > oneHourAgo
+    );
+    
+    const preparedRu = preparedEvents.some(e => e.message.includes("prepared news for ru"));
+    const preparedEn = preparedEvents.some(e => e.message.includes("prepared news for en"));
+    const preparedDe = preparedEvents.some(e => e.message.includes("prepared news for de"));
+    
+    if (preparedRu && preparedEn && preparedDe) {
+      console.log("[content-smoke-test] ✓ All languages prepared in last hour");
+    } else {
+      console.log(`[content-smoke-test] FAIL: Missing prepared events - ru:${preparedRu} en:${preparedEn} de:${preparedDe}`);
+      process.exit(1);
+    }
+    
+    // Проверяем news-cron: news sent
     const recentNewsEvents = eventList.filter(
-      (e) => e.component === "news-cron" && e.message && e.message.includes("news sent:")
+      (e) => e.component === "news-cron" && 
+             e.message && 
+             e.message.includes("news sent:") &&
+             (e.ts || 0) > oneHourAgo
     );
     
     if (recentNewsEvents.length > 0) {
@@ -96,7 +121,7 @@ async function smokeTest() {
       const latest = recentNewsEvents[0];
       console.log(`[content-smoke-test]   Latest: ${latest.message} (${Math.floor((Date.now() - latest.ts) / 1000)}s ago)`);
     } else {
-      console.log("[content-smoke-test] ⚠ No recent 'news sent' events found");
+      console.log("[content-smoke-test] ⚠ No recent 'news sent' events found (may be normal if just prepared)");
     }
     
     // Проверяем domovoy-every-3h

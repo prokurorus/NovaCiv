@@ -21,8 +21,11 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
 const { RSS_SOURCES } = require("../lib/rssSourcesByLang");
 
-// Максимум новых RSS-элементов за один запуск (на язык)
-const MAX_NEW_ITEMS_PER_LANG = 5;
+// Максимум кандидатов для сбора (на язык)
+const MAX_CANDIDATES_PER_LANG = 60;
+
+// Временное окно для сбора новостей (6 часов)
+const NEWS_WINDOW_HOURS = 6;
 
 // Где храним метаданные о уже обработанных новостях (по языкам)
 const NEWS_META_BASE_PATH = "/newsMeta";
@@ -220,6 +223,133 @@ function makeNewsKey(item) {
   return safeKey(rawKey);
 }
 
+// ---------- МУСОР-ФИЛЬТР (до OpenAI) ----------
+
+function isJunkItem(item, publishedSources, publishedTitles) {
+  // Нет title или url
+  if (!item.title || !item.link) {
+    return { isJunk: true, reason: "missing title or url" };
+  }
+
+  // title < 35 символов
+  if (item.title.length < 35) {
+    return { isJunk: true, reason: "title too short" };
+  }
+
+  // Источник уже публиковался на этом языке за 24 часа
+  const sourceId = item.sourceId || safeKey(item.sourceName || "");
+  const now = Date.now();
+  const cutoff24h = now - 24 * 60 * 60 * 1000;
+  
+  if (publishedSources[sourceId] && publishedSources[sourceId] > cutoff24h) {
+    return { isJunk: true, reason: "source published recently" };
+  }
+
+  // Заголовок похож на опубликованный за 48 часов
+  const titleKey = safeKey(normalizeTitle(item.title));
+  const cutoff48h = now - 48 * 60 * 60 * 1000;
+  
+  if (publishedTitles[titleKey] && publishedTitles[titleKey] > cutoff48h) {
+    return { isJunk: true, reason: "similar title published recently" };
+  }
+
+  return { isJunk: false };
+}
+
+// ---------- СКОРИНГ НОВОСТЕЙ (0-100) ----------
+
+function scoreNewsItem(item) {
+  let score = 0;
+  const title = (item.title || "").toLowerCase();
+  const description = (item.description || "").toLowerCase();
+  const text = `${title} ${description}`;
+
+  // +25 — международные последствия
+  const internationalKeywords = [
+    "international", "global", "world", "united nations", "eu", "nato",
+    "международный", "мировой", "оон", "ес", "нато",
+    "international", "weltweit", "eu", "nato", "uno"
+  ];
+  if (internationalKeywords.some(kw => text.includes(kw))) {
+    score += 25;
+  }
+
+  // +20 — власть / закон / институты
+  const powerKeywords = [
+    "government", "parliament", "court", "law", "legislation", "policy",
+    "правительство", "парламент", "суд", "закон", "политика",
+    "regierung", "parlament", "gericht", "gesetz", "politik"
+  ];
+  if (powerKeywords.some(kw => text.includes(kw))) {
+    score += 20;
+  }
+
+  // +15 — права, свободы, автономия
+  const rightsKeywords = [
+    "rights", "freedom", "liberty", "autonomy", "privacy", "democracy",
+    "права", "свобода", "автономия", "приватность", "демократия",
+    "rechte", "freiheit", "autonomie", "privat", "demokratie"
+  ];
+  if (rightsKeywords.some(kw => text.includes(kw))) {
+    score += 15;
+  }
+
+  // +10 — технологии, ИИ, наука
+  const techKeywords = [
+    "technology", "ai", "artificial intelligence", "science", "research",
+    "технология", "ии", "искусственный интеллект", "наука", "исследование",
+    "technologie", "ki", "künstliche intelligenz", "wissenschaft", "forschung"
+  ];
+  if (techKeywords.some(kw => text.includes(kw))) {
+    score += 10;
+  }
+
+  // +10 — решение / прецедент / первый случай
+  const precedentKeywords = [
+    "first", "precedent", "decision", "ruling", "breakthrough",
+    "первый", "прецедент", "решение", "прорыв",
+    "erst", "präzedenzfall", "entscheidung", "durchbruch"
+  ];
+  if (precedentKeywords.some(kw => text.includes(kw))) {
+    score += 10;
+  }
+
+  // −15 — локальный криминал без последствий
+  const crimeKeywords = [
+    "murder", "robbery", "theft", "assault", "arrest",
+    "убийство", "ограбление", "кража", "нападение", "арест",
+    "mord", "raub", "diebstahl", "angriff", "verhaftung"
+  ];
+  if (crimeKeywords.some(kw => text.includes(kw)) && 
+      !internationalKeywords.some(kw => text.includes(kw)) &&
+      !powerKeywords.some(kw => text.includes(kw))) {
+    score -= 15;
+  }
+
+  // −15 — спорт / шоу / селебы
+  const entertainmentKeywords = [
+    "sport", "football", "soccer", "celebrity", "star", "show",
+    "спорт", "футбол", "звезда", "шоу", "селебрити",
+    "sport", "fußball", "star", "show", "prominente"
+  ];
+  if (entertainmentKeywords.some(kw => text.includes(kw))) {
+    score -= 15;
+  }
+
+  // −10 — сенсационность без содержания
+  const sensationalKeywords = [
+    "shocking", "amazing", "incredible", "unbelievable", "breaking",
+    "шокирующий", "невероятный", "сенсация",
+    "schockierend", "unglaublich", "sensation"
+  ];
+  if (sensationalKeywords.some(kw => text.includes(kw)) && score < 20) {
+    score -= 10;
+  }
+
+  // Ограничиваем диапазон 0-100
+  return Math.max(0, Math.min(100, score));
+}
+
 // ---------- META IN FIREBASE ----------
 
 const emptyMeta = { processedKeys: {}, titleKeys: {} };
@@ -322,7 +452,7 @@ async function writeHealthMetrics(metrics) {
 
 // ---------- SAVE TO FORUM ----------
 
-async function saveNewsToForumLang(item, analyticData, langCode) {
+async function saveNewsToForumLang(item, analyticData, langCode, scheduledFor) {
   if (!FIREBASE_DB_URL) {
     const error = new Error("FIREBASE_DB_URL is not set");
     await writeFirebaseError("fetch-news", error, {
@@ -351,6 +481,7 @@ async function saveNewsToForumLang(item, analyticData, langCode) {
     section: "news",
     createdAt: now,
     createdAtServer: now,
+    scheduledFor: scheduledFor, // Время ближайшего часа для публикации
     authorNickname: "NovaCiv News",
     lang: langCode,
     sourceId: safeKey(item.sourceId || item.sourceName || ""),
@@ -360,6 +491,7 @@ async function saveNewsToForumLang(item, analyticData, langCode) {
     pubDate: item.pubDate || "",
     imageUrl: item.imageUrl || "",
     analysisLang: "en", // Анализ всегда на EN
+    posted: false,
   };
 
   try {
@@ -690,7 +822,351 @@ exports.handler = async (event) => {
   }
 
   try {
+    // Вычисляем scheduledFor (ближайший час)
+    const now = new Date();
+    const nextHour = new Date(now);
+    nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+    const scheduledFor = nextHour.getTime();
 
+    console.log(`[fetch-news] Preparing news for ${new Date(scheduledFor).toISOString()}`);
+
+    // Обрабатываем по языкам
+    const languages = ["ru", "en", "de"];
+    const results = {
+      ru: { prepared: false, fallback: false },
+      en: { prepared: false, fallback: false },
+      de: { prepared: false, fallback: false },
+    };
+    let totalCreated = 0;
+
+    for (const lang of languages) {
+      console.log(`[fetch-news] Processing ${lang}...`);
+      
+      // Загружаем метаданные для дедупа
+      const meta = await loadNewsMeta(lang);
+      const { processedKeys, titleKeys } = meta;
+
+      // Строим словари для мусор-фильтра
+      const publishedSources = {};
+      const publishedTitles = {};
+      const nowTs = Date.now();
+      const cutoff24h = nowTs - 24 * 60 * 60 * 1000;
+      const cutoff48h = nowTs - 48 * 60 * 60 * 1000;
+
+      // Заполняем publishedSources из processedKeys
+      for (const [key, value] of Object.entries(processedKeys)) {
+        if (value.processedAt && value.processedAt > cutoff24h) {
+          const sourceId = value.sourceId || key.split("::")[0];
+          if (sourceId) {
+            publishedSources[sourceId] = Math.max(publishedSources[sourceId] || 0, value.processedAt);
+          }
+        }
+      }
+
+      // Заполняем publishedTitles из titleKeys
+      for (const [key, value] of Object.entries(titleKeys)) {
+        if (value.processedAt && value.processedAt > cutoff48h) {
+          publishedTitles[key] = Math.max(publishedTitles[key] || 0, value.processedAt);
+        }
+      }
+
+      // 1) Сбор кандидатов за последние 6 часов
+      const sources = RSS_SOURCES[lang] || [];
+      if (sources.length === 0) {
+        console.log(`[fetch-news] No sources for ${lang}`);
+        continue;
+      }
+
+      const candidates = [];
+      const windowStart = nowTs - NEWS_WINDOW_HOURS * 60 * 60 * 1000;
+
+      for (const source of sources) {
+        try {
+          const items = await fetchRssSource(source.url, source.name, lang);
+          items.forEach(item => {
+            item.sourceName = source.name;
+            item.sourceLang = lang;
+            item.sourceId = safeKey(source.name);
+          });
+          
+          // Фильтруем по времени (последние 6 часов)
+          const recentItems = items.filter(item => {
+            if (!item.pubDate) return false;
+            try {
+              const pubTime = new Date(item.pubDate).getTime();
+              return pubTime >= windowStart;
+            } catch (e) {
+              return false;
+            }
+          });
+
+          candidates.push(...recentItems);
+          
+          if (candidates.length >= MAX_CANDIDATES_PER_LANG) {
+            break; // Жёсткий лимит
+          }
+        } catch (err) {
+          console.error(`[fetch-news] RSS fetch error for ${lang}/${source.name}:`, err.message);
+        }
+      }
+
+      // Ограничиваем до MAX_CANDIDATES_PER_LANG
+      const limitedCandidates = candidates.slice(0, MAX_CANDIDATES_PER_LANG);
+      console.log(`[fetch-news] ${lang}: collected ${limitedCandidates.length} candidates`);
+
+      // 2) Мусор-фильтр
+      const filteredCandidates = [];
+      for (const item of limitedCandidates) {
+        const junkCheck = isJunkItem(item, publishedSources, publishedTitles);
+        if (!junkCheck.isJunk) {
+          filteredCandidates.push(item);
+        }
+      }
+      console.log(`[fetch-news] ${lang}: after junk filter: ${filteredCandidates.length}`);
+
+      if (filteredCandidates.length === 0) {
+        console.log(`[fetch-news] ${lang}: no candidates after filtering`);
+        // Fallback: попробуем взять EN и перевести
+        if (lang !== "en") {
+          results[lang].fallback = true;
+        }
+        continue;
+      }
+
+      // 3) Скоринг
+      const scoredCandidates = filteredCandidates.map(item => ({
+        item,
+        score: scoreNewsItem(item),
+      }));
+
+      // 4) Выбор ТОП-5
+      const top5 = scoredCandidates
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      console.log(`[fetch-news] ${lang}: top 5 scores:`, top5.map(t => t.score));
+
+      // 5) Анализ только ТОП-5
+      const analyzed = [];
+      for (const { item, score } of top5) {
+        try {
+          // Если источник не EN - переводим заголовок и excerpt в EN для анализа
+          let itemForAnalysis = item;
+          if (item.sourceLang !== "en") {
+            const titleEn = await translateText(item.title || "", "en");
+            const descEn = await translateText(item.description || "", "en");
+            itemForAnalysis = {
+              ...item,
+              title: typeof titleEn === "string" ? titleEn : item.title,
+              description: typeof descEn === "string" ? descEn : item.description,
+            };
+          }
+
+          // Анализ на EN
+          const analyticEn = await analyzeNewsItemEn(itemForAnalysis);
+          
+          // Проверяем валидность
+          if (analyticEn && typeof analyticEn === "object" && 
+              analyticEn.sense && analyticEn.why && analyticEn.view && analyticEn.question) {
+            analyzed.push({
+              item,
+              score,
+              analysis: analyticEn,
+            });
+          }
+        } catch (err) {
+          console.error(`[fetch-news] Analysis failed for ${lang} item:`, err.message);
+        }
+      }
+
+      if (analyzed.length === 0) {
+        console.log(`[fetch-news] ${lang}: no valid analysis results`);
+        if (lang !== "en") {
+          results[lang].fallback = true;
+        }
+        continue;
+      }
+
+      // 6) Финальный выбор 1 лучшей
+      // Критерии: ясность sense, наличие причинно-следственного слоя, отсутствие морали, нормальный вопрос
+      const best = analyzed
+        .map(a => {
+          let quality = 0;
+          const { sense, why, view, question } = a.analysis;
+          
+          // Ясность sense (длина в разумных пределах)
+          if (sense && sense.length >= 240 && sense.length <= 360) quality += 10;
+          
+          // Наличие причинно-следственного слоя в why
+          if (why && (why.includes("leads to") || why.includes("affects") || why.includes("влияет") || why.includes("приводит"))) quality += 10;
+          
+          // Отсутствие морали в view (нет слов "should", "must", "должен", "обязан")
+          if (view && !/(should|must|должен|обязан|sollte|muss)/i.test(view)) quality += 10;
+          
+          // Нормальный вопрос (не риторический, не "как вы считаете")
+          if (question && !/(как вы считаете|what do you think|was denkst du)/i.test(question) && question.includes("?")) quality += 10;
+          
+          return { ...a, quality };
+        })
+        .sort((a, b) => (b.quality + b.score) - (a.quality + a.score))[0];
+
+      if (!best) {
+        console.log(`[fetch-news] ${lang}: no best candidate selected`);
+        if (lang !== "en") {
+          results[lang].fallback = true;
+        }
+        continue;
+      }
+
+      // 7) Сохранение в Firebase
+      try {
+        await saveNewsToForumLang(best.item, best.analysis, lang, scheduledFor);
+        
+        // Обновляем метаданные
+        const key = makeNewsKey(best.item);
+        const titleKey = safeKey(normalizeTitle(best.item.title || ""));
+        const updatedProcessedKeys = { ...processedKeys };
+        const updatedTitleKeys = { ...titleKeys };
+        
+        updatedProcessedKeys[key] = {
+          processedAt: Date.now(),
+          sourceId: best.item.sourceId || "",
+        };
+        if (titleKey) {
+          updatedTitleKeys[titleKey] = {
+            processedAt: Date.now(),
+          };
+        }
+        
+        await saveNewsMeta(lang, { processedKeys: updatedProcessedKeys, titleKeys: updatedTitleKeys });
+        
+        results[lang].prepared = true;
+        totalCreated++;
+        console.log(`[fetch-news] ${lang}: prepared 1 news item`);
+        await writeEvent(component, "info", `prepared news for ${lang}`, { 
+          lang, 
+          score: best.score,
+          quality: best.quality,
+        });
+      } catch (err) {
+        console.error(`[fetch-news] Failed to save ${lang} news:`, err.message);
+        await writeEvent(component, "error", `Failed to save news for ${lang}`, { 
+          lang, 
+          error: err.message,
+        });
+      }
+    }
+
+    // Fallback для языков, где не удалось подготовить
+    for (const lang of languages) {
+      if (!results[lang].prepared && results[lang].fallback && lang !== "en") {
+        // Пытаемся взять EN и перевести
+        try {
+          // Ищем последнюю EN новость
+          if (FIREBASE_DB_URL) {
+            const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json?orderBy="lang"&equalTo="en"&limitToLast=10`;
+            const topicsResp = await fetch(topicsUrl);
+            if (topicsResp.ok) {
+              const topicsData = await topicsResp.json();
+              const enTopics = Object.values(topicsData || {}).filter(t => 
+                t.section === "news" && t.lang === "en" && t.sense && t.why && t.view && t.question
+              );
+              
+              if (enTopics.length > 0) {
+                const latestEn = enTopics.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+                
+                // Переводим все поля
+                const translateField = async (text) => {
+                  if (!OPENAI_API_KEY || !text) return text;
+                  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+                  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${OPENAI_API_KEY}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      model,
+                      messages: [
+                        { role: "system", content: "You are a precise translator. Return only the translation, no explanations." },
+                        { role: "user", content: `Translate to ${lang === "ru" ? "Russian" : "German"}: ${text}` },
+                      ],
+                      max_tokens: 300,
+                      temperature: 0.3,
+                    }),
+                  });
+                  if (!response.ok) return text;
+                  const data = await response.json();
+                  return data.choices?.[0]?.message?.content?.trim() || text;
+                };
+
+                const translatedTitle = await translateField(latestEn.title);
+                const translatedSense = await translateField(latestEn.sense);
+                const translatedWhy = await translateField(latestEn.why);
+                const translatedView = await translateField(latestEn.view);
+                const translatedQuestion = await translateField(latestEn.question);
+
+                const translatedTopic = {
+                  ...latestEn,
+                  id: `${latestEn.id || Date.now()}_translated_${lang}`,
+                  lang: lang,
+                  sourceLang: "en",
+                  translatedFrom: true,
+                  sourceTopicId: latestEn.id,
+                  title: translatedTitle,
+                  sense: translatedSense,
+                  why: translatedWhy,
+                  view: translatedView,
+                  question: translatedQuestion,
+                  scheduledFor: scheduledFor,
+                  posted: false,
+                };
+
+                // Сохраняем переведённую topic
+                const saveUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+                const saveResp = await fetch(saveUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(translatedTopic),
+                });
+                
+                if (saveResp.ok) {
+                  results[lang].prepared = true;
+                  totalCreated++;
+                  console.log(`[fetch-news] ${lang}: fallback translation used`);
+                  await writeEvent(component, "warn", `fallback used for ${lang}`, { lang, sourceLang: "en" });
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[fetch-news] Fallback failed for ${lang}:`, err.message);
+        }
+      }
+    }
+
+    // Heartbeat
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastOkAt: Date.now(),
+      metrics: {
+        createdTopicsCount: totalCreated,
+        preparedRu: results.ru.prepared,
+        preparedEn: results.en.prepared,
+        preparedDe: results.de.prepared,
+        scheduledFor: scheduledFor,
+      },
+    });
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        ok: true,
+        prepared: totalCreated,
+        results,
+        scheduledFor: new Date(scheduledFor).toISOString(),
+      }),
+    };
   } catch (err) {
     console.error("fetch-news fatal error:", err);
     

@@ -6,6 +6,7 @@
 
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
+const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -563,6 +564,10 @@ exports.handler = async (event) => {
   const startTime = Date.now();
   const runId = `news-cron-${startTime}`;
   const component = "news-cron";
+  
+  // DEBUG режим: проверяем параметр ?debug=1
+  const qs = event.queryStringParameters || {};
+  const isDebug = qs.debug === "1" || qs.debug === "true";
 
   // Записываем начало выполнения
   await writeHeartbeat(component, {
@@ -574,7 +579,7 @@ exports.handler = async (event) => {
     const invocation = determineInvocationType(event);
     
     // Получаем query параметры (нужны для всех типов вызовов)
-    const qs = event.queryStringParameters || {};
+    // qs уже объявлен выше
     
     if (invocation.type === "scheduled") {
       log("invocation type: scheduled");
@@ -585,8 +590,11 @@ exports.handler = async (event) => {
     } else {
       log("invocation type: http");
       // Проверка токена только для HTTP/manual вызовов
-      if (NEWS_CRON_SECRET) {
-        if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+      // Поддерживаем оба токена для обратной совместимости
+      const validToken = NEWS_CRON_SECRET || OPS_CRON_SECRET;
+      if (validToken) {
+        const providedToken = qs.token;
+        if (!providedToken || (providedToken !== NEWS_CRON_SECRET && providedToken !== OPS_CRON_SECRET)) {
           log("auth gate blocked (no token or token mismatch)");
           return {
             statusCode: 403,
@@ -595,6 +603,19 @@ exports.handler = async (event) => {
         }
       }
       log("auth gate passed");
+    }
+
+    // Явная проверка переменных окружения
+    if (!FIREBASE_DB_URL) {
+      const errorMsg = "FIREBASE_DB_URL is not set";
+      await writeEvent(component, "error", errorMsg);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          ok: false,
+          error: errorMsg,
+        }),
+      };
     }
 
     const limitParam = qs.limit;
@@ -649,7 +670,7 @@ exports.handler = async (event) => {
     };
 
     // Загружаем состояние для дедупа (по языкам)
-    const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+    // FIREBASE_DB_URL уже объявлена в начале файла
     const stateByLang = {};
     
     for (const lang of ["ru", "en", "de"]) {
@@ -825,6 +846,103 @@ ${text}
         continue; // Пропускаем этот язык
       }
 
+      // Отправляем в Telegram
+      const messageText = buildNewsMessage(topicToPost);
+      const keyboard = buildNewsKeyboard(topicToPost);
+      
+      let telegramResult = null;
+      try {
+        // Пробуем отправить как фото, если есть изображение
+        if (topicToPost.imageUrl || topicToPost.photoUrl) {
+          telegramResult = await sendPhotoToTelegram(
+            chatId,
+            topicToPost.imageUrl || topicToPost.photoUrl,
+            messageText,
+            keyboard
+          );
+        } else {
+          telegramResult = await sendTextToTelegram(chatId, messageText, keyboard);
+        }
+
+        // Если отправка успешна - записываем метаданные
+        if (telegramResult && telegramResult.ok && telegramResult.result) {
+          const messageId = telegramResult.result.message_id;
+          const postedAt = Date.now();
+          
+          // Формируем permalink если возможно
+          let permalink = null;
+          const channelUsername = process.env[`TELEGRAM_NEWS_CHANNEL_USERNAME_${targetLang.toUpperCase()}`];
+          if (channelUsername) {
+            permalink = `https://t.me/${channelUsername}/${messageId}`;
+          }
+
+          // Записываем метаданные в Firebase
+          const safeTopicId = safeKey(topicToPost.id);
+          const updateUrl = `${FIREBASE_DB_URL}/forum/topics/${safeTopicId}.json`;
+          
+          const updateData = {
+            posted: true,
+            postedAt: postedAt,
+            telegram: {
+              chatId: String(chatId),
+              messageId: messageId,
+              permalink: permalink,
+            },
+            channel: "news",
+          };
+
+          // Если нет channel - добавляем
+          if (!topicToPost.channel) {
+            updateData.channel = "news";
+          }
+
+          try {
+            const updateResp = await fetch(updateUrl, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(updateData),
+            });
+
+            if (!updateResp.ok) {
+              const errorText = await updateResp.text().catch(() => "");
+              log(`Failed to update topic metadata: ${updateResp.status} - ${errorText}`);
+              await writeFirebaseError("news-cron", new Error(`Failed to update topic: ${updateResp.status}`), {
+                path: `forum/topics/${safeTopicId}`,
+                op: "write",
+                status: updateResp.status,
+                firebaseError: errorText.slice(0, 200),
+              });
+            } else {
+              log(`Updated topic ${topicToPost.id} with Telegram metadata`);
+            }
+          } catch (updateError) {
+            log(`Error updating topic metadata:`, updateError.message);
+            await writeFirebaseError("news-cron", updateError, {
+              path: `forum/topics/${safeTopicId}`,
+              op: "write",
+            });
+          }
+
+          perLanguage[targetLang].sent = 1;
+          await writeEvent(component, "info", `news sent: ${targetLang}`, {
+            topicId: topicToPost.id,
+            messageId: messageId,
+            lang: targetLang,
+          });
+        } else {
+          log(`Telegram send failed for ${targetLang}:`, telegramResult?.description || "unknown error");
+          perLanguage[targetLang].errors.push(telegramResult?.description || "unknown error");
+        }
+      } catch (sendError) {
+        log(`Error sending to Telegram for ${targetLang}:`, sendError.message);
+        perLanguage[targetLang].errors.push(sendError.message);
+        await writeEvent(component, "error", `Telegram send error: ${targetLang}`, {
+          error: sendError.message,
+          lang: targetLang,
+        });
+      }
+    }
+
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
 
@@ -855,8 +973,14 @@ ${text}
   } catch (err) {
     console.error("news-cron error:", err);
     
-    // Heartbeat: ошибка
+    // DEBUG режим: возвращаем полный стек
+    const qs = event.queryStringParameters || {};
+    const isDebug = qs.debug === "1" || qs.debug === "true";
+    
     const errorMsg = String(err && err.message ? err.message : err);
+    const errorStack = err && err.stack ? String(err.stack) : "";
+    
+    // Heartbeat: ошибка
     await writeHeartbeat(component, {
       lastRunAt: startTime,
       lastErrorAt: Date.now(),
@@ -866,9 +990,21 @@ ${text}
       error: errorMsg,
     });
     
+    if (isDebug) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          ok: false,
+          error: errorMsg,
+          stack: errorStack,
+          where: "news-cron handler",
+        }),
+      };
+    }
+    
     return {
       statusCode: 500,
-      body: JSON.stringify({ ok: false, error: err.message }),
+      body: JSON.stringify({ ok: false, error: errorMsg }),
     };
   }
 };

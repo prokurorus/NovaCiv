@@ -792,16 +792,6 @@ ${text}
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
 
-    // Heartbeat метрика (старая, для совместимости)
-    await writeHealthMetrics({
-      ts: startTime,
-      runId,
-      fetchedTopics: topics.length,
-      processed: freshTopics.length,
-      totalSent,
-      perLanguage,
-    });
-
     // Heartbeat: успешное выполнение
     await writeHeartbeat(component, {
       lastRunAt: startTime,
@@ -813,15 +803,15 @@ ${text}
     });
     await writeEvent(component, "info", `Sent ${totalSent} messages to Telegram`, {
       fetchedTopics: topics.length,
-      processed: freshTopics.length,
       totalSent,
+      perLanguage,
     });
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: true,
-        processed: freshTopics.length,
+        processed: totalSent,
         totalSent,
         perLanguage,
       }),

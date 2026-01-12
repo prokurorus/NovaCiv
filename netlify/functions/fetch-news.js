@@ -691,55 +691,6 @@ exports.handler = async (event) => {
 
   try {
 
-    // 2) Сортируем по дате (сначала новые)
-    allItems.sort((a, b) => {
-      const da = a.pubDate ? new Date(a.pubDate).getTime() : 0;
-      const db = b.pubDate ? new Date(b.pubDate).getTime() : 0;
-      return db - da;
-    });
-
-    // 3) Отбираем новые
-    const toProcess = [];
-    for (const item of allItems) {
-      if (toProcess.length >= MAX_NEW_ITEMS_PER_RUN) break;
-
-      const key = makeNewsKey(item);
-      const titleKey = safeKey(normalizeTitle(item.title));
-
-      if (processedKeys[key]) continue;
-      if (titleKey && titleKeys[titleKey]) continue;
-      if (!item.title && !item.description) continue;
-
-      toProcess.push({ item, key, titleKey });
-
-      processedKeys[key] = { reservedAt: Date.now() };
-      if (titleKey) {
-        titleKeys[titleKey] = { reservedAt: Date.now() };
-      }
-    }
-
-    if (toProcess.length === 0) {
-      await saveNewsMeta({ processedKeys, titleKeys });
-      console.log("created topics = 0 (no new items)");
-      
-      // Heartbeat: успешное выполнение без новых тем
-      await writeHeartbeat(component, {
-        lastRunAt: startTime,
-        lastOkAt: Date.now(),
-        metrics: { createdTopicsCount: 0 },
-      });
-      await writeEvent(component, "info", "No new items to process");
-      
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          ok: true,
-          processed: 0,
-          message: "No new items",
-        }),
-      };
-    }
-
   } catch (err) {
     console.error("fetch-news fatal error:", err);
     

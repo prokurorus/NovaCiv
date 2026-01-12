@@ -296,7 +296,9 @@ async function fetchNewsTopics() {
          errorStr.includes("index") && errorStr.toLowerCase().includes("not found"));
       
       if (isIndexError) {
-        // Fallback: запрос без индекса, фильтрация в JS
+        // ВРЕМЕННЫЙ Fallback: запрос без индекса, фильтрация в JS
+        // TODO: Применить индекс в Firebase Rules (см. docs/firebase.rules.patch.json)
+        // После применения индекса этот fallback не должен срабатывать
         log("[news-cron] WARNING: firebase missing index on section; using full-scan fallback");
         
         const fallbackUrl = `${FIREBASE_DB_URL}/forum/topics.json`;

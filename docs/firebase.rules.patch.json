@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "forum": {
+      "topics": {
+        ".indexOn": ["section"],
+        "$topicId": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    }
+  }
+}

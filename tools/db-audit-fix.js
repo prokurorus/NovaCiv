@@ -335,20 +335,21 @@ module.exports = { fix };
 
 // Если запущен напрямую - выполняем
 if (require.main === module) {
-  fix()
-    .then(function(fixes) {
+  (async function() {
+    try {
+      const fixes = await fix();
       // Повторный audit
       console.log("[db-audit-fix] Running post-fix audit...");
       const { audit } = require("./db-audit");
-      return audit().catch(function(error) {
+      try {
+        await audit();
+      } catch (error) {
         console.error("[db-audit-fix] Post-fix audit error:", error.message);
-      });
-    })
-    .then(function() {
+      }
       process.exit(0);
-    })
-    .catch(function(error) {
+    } catch (error) {
       console.error("[db-audit-fix] FATAL ERROR:", error.message);
       process.exit(1);
-    });
+    }
+  })();
 }

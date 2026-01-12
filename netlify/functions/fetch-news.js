@@ -17,6 +17,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
+// Операторский пульт
+const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+
 
 // Максимум новых RSS-элементов за один запуск
 const MAX_NEW_ITEMS_PER_RUN = 2;
@@ -580,8 +583,16 @@ function determineInvocationType(event) {
 
 exports.handler = async (event) => {
   console.log("fetch-news start");
+  const startTime = Date.now();
+  const component = "fetch-news";
+
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
 
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
+    await writeEvent(component, "warn", "Invalid HTTP method", { method: event.httpMethod });
     return {
       statusCode: 405,
       body: "Method Not Allowed",
@@ -674,6 +685,15 @@ exports.handler = async (event) => {
     if (toProcess.length === 0) {
       await saveNewsMeta({ processedKeys, titleKeys });
       console.log("created topics = 0 (no new items)");
+      
+      // Heartbeat: успешное выполнение без новых тем
+      await writeHeartbeat(component, {
+        lastRunAt: startTime,
+        lastOkAt: Date.now(),
+        metrics: { createdTopicsCount: 0 },
+      });
+      await writeEvent(component, "info", "No new items to process");
+      
       return {
         statusCode: 200,
         body: JSON.stringify({
@@ -769,6 +789,17 @@ exports.handler = async (event) => {
 
     console.log(`created topics = ${successCount}`);
 
+    // Heartbeat: успешное выполнение
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastOkAt: Date.now(),
+      metrics: { createdTopicsCount: successCount },
+    });
+    await writeEvent(component, "info", `Processed ${successCount} news items`, {
+      successCount,
+      titlesCount: titles.length,
+    });
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -779,11 +810,23 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("fetch-news fatal error:", err);
+    
+    // Heartbeat: ошибка
+    const errorMsg = String(err && err.message ? err.message : err);
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastErrorAt: Date.now(),
+      lastErrorMsg: errorMsg,
+    });
+    await writeEvent(component, "error", "Fatal error in fetch-news", {
+      error: errorMsg,
+    });
+    
     return {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
-        error: String(err && err.message ? err.message : err),
+        error: errorMsg,
       }),
     };
   }

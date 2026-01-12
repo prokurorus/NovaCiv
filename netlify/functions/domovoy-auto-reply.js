@@ -24,6 +24,9 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const DOMOVOY_NAME_EN = "Domovoy";
 const DOMOVOY_NAME_RU = "Домовой NovaCiv";
 
+// Операторский пульт
+const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+
 function log(...args) {
   console.log("[domovoy-auto-reply]", ...args);
 }
@@ -287,8 +290,17 @@ async function writeHealthMetrics(metrics) {
 // ---------- handler ----------
 
 exports.handler = async (event) => {
+  const startTime = Date.now();
+  const component = "domovoy-auto-reply";
+  
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
+
   try {
     if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
+      await writeEvent(component, "warn", "Invalid HTTP method", { method: event.httpMethod });
       return { statusCode: 405, body: "Method Not Allowed" };
     }
 
@@ -296,16 +308,24 @@ exports.handler = async (event) => {
     if (DOMOVOY_CRON_SECRET) {
       const qs = event.queryStringParameters || {};
       if (!qs.token || qs.token !== DOMOVOY_CRON_SECRET) {
+        await writeEvent(component, "warn", "Auth failed", {});
         return { statusCode: 403, body: "Forbidden" };
       }
     }
 
     if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
+      const errorMsg = "OPENAI_API_KEY или FIREBASE_DB_URL не заданы.";
+      await writeHeartbeat(component, {
+        lastRunAt: startTime,
+        lastErrorAt: Date.now(),
+        lastErrorMsg: errorMsg,
+      });
+      await writeEvent(component, "error", "Missing environment variables", {});
       return {
         statusCode: 500,
         body: JSON.stringify({
           ok: false,
-          error: "OPENAI_API_KEY или FIREBASE_DB_URL не заданы.",
+          error: errorMsg,
         }),
       };
     }
@@ -351,6 +371,18 @@ exports.handler = async (event) => {
       }
     }
 
+    // Heartbeat: успешное выполнение
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastOkAt: Date.now(),
+      metrics: {
+        repliedCount: replies.length,
+      },
+    });
+    await writeEvent(component, "info", `Replied to ${replies.length} comments`, {
+      repliesCount: replies.length,
+    });
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -361,11 +393,23 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     log("Fatal error:", err);
+    
+    // Heartbeat: ошибка
+    const errorMsg = String(err && err.message ? err.message : err);
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastErrorAt: Date.now(),
+      lastErrorMsg: errorMsg,
+    });
+    await writeEvent(component, "error", "Fatal error in domovoy-auto-reply", {
+      error: errorMsg,
+    });
+    
     return {
       statusCode: 500,
       body: JSON.stringify({
         ok: false,
-        error: String(err && err.message ? err.message : err),
+        error: errorMsg,
       }),
     };
   }

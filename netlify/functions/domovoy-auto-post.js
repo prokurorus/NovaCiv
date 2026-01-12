@@ -18,6 +18,9 @@ const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
 const TELEGRAM_NEWS_CHAT_ID_EN = process.env.TELEGRAM_NEWS_CHAT_ID_EN || process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
+// Операторский пульт
+const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
+
 // Модель OpenAI для текста
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
@@ -242,6 +245,13 @@ exports.handler = async (event) => {
 
   const runId = `domovoy-post-${Date.now()}`;
   const startTime = Date.now();
+  const component = "domovoy-auto-post";
+  
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
+
   let metrics = {
     ts: startTime,
     runId,
@@ -301,6 +311,23 @@ exports.handler = async (event) => {
 
     metrics.ok = true;
 
+    // Heartbeat: успешное выполнение
+    const totalPosted = Object.values(metrics.postedPerLang).reduce((a, b) => a + b, 0);
+    const totalSent = Object.values(metrics.telegramSentPerLang).reduce((a, b) => a + b, 0);
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastOkAt: Date.now(),
+      metrics: {
+        createdPostsCount: totalPosted,
+        sentToTelegramCount: totalSent,
+      },
+    });
+    await writeEvent(component, "info", `Created post and sent to Telegram`, {
+      mode,
+      lang: langCfg.code,
+      topicId,
+    });
+
     const result = {
       statusCode: 200,
       body: JSON.stringify({
@@ -327,6 +354,17 @@ exports.handler = async (event) => {
     } else {
       metrics.errCode = "UNKNOWN";
     }
+
+    // Heartbeat: ошибка
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastErrorAt: Date.now(),
+      lastErrorMsg: errMsg,
+    });
+    await writeEvent(component, "error", "Fatal error in domovoy-auto-post", {
+      errCode: metrics.errCode,
+      error: errMsg,
+    });
 
     await writeHealthMetrics(metrics);
     

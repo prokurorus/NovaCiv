@@ -8,6 +8,9 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+
+// Операторский пульт
+const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
 const TELEGRAM_NEWS_CHAT_ID_EN =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
@@ -477,6 +480,12 @@ function determineInvocationType(event) {
 exports.handler = async (event) => {
   const startTime = Date.now();
   const runId = `news-cron-${startTime}`;
+  const component = "news-cron";
+
+  // Записываем начало выполнения
+  await writeHeartbeat(component, {
+    lastRunAt: startTime,
+  });
 
   try {
     // Определяем тип вызова
@@ -520,6 +529,19 @@ exports.handler = async (event) => {
       .slice(0, limit);
 
     if (!freshTopics.length) {
+      // Heartbeat: успешное выполнение без новых тем
+      await writeHeartbeat(component, {
+        lastRunAt: startTime,
+        lastOkAt: Date.now(),
+        metrics: {
+          fetchedTopicsCount: topics.length,
+          sentToTelegramCount: 0,
+        },
+      });
+      await writeEvent(component, "info", "No new topics to post", {
+        fetchedTopics: topics.length,
+      });
+      
       return {
         statusCode: 200,
         body: JSON.stringify({
@@ -641,7 +663,7 @@ exports.handler = async (event) => {
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
 
-    // Heartbeat метрика
+    // Heartbeat метрика (старая, для совместимости)
     await writeHealthMetrics({
       ts: startTime,
       runId,
@@ -649,6 +671,21 @@ exports.handler = async (event) => {
       processed: freshTopics.length,
       totalSent,
       perLanguage,
+    });
+
+    // Heartbeat: успешное выполнение
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastOkAt: Date.now(),
+      metrics: {
+        fetchedTopicsCount: topics.length,
+        sentToTelegramCount: totalSent,
+      },
+    });
+    await writeEvent(component, "info", `Sent ${totalSent} messages to Telegram`, {
+      fetchedTopics: topics.length,
+      processed: freshTopics.length,
+      totalSent,
     });
 
     return {
@@ -663,7 +700,7 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error("news-cron error:", err);
     
-    // Heartbeat метрика при ошибке
+    // Heartbeat метрика при ошибке (старая, для совместимости)
     await writeHealthMetrics({
       ts: startTime,
       runId,
@@ -671,6 +708,17 @@ exports.handler = async (event) => {
       processed: 0,
       totalSent: 0,
       perLanguage: { ru: { sent: 0 }, en: { sent: 0 }, de: { sent: 0 } },
+    });
+    
+    // Heartbeat: ошибка
+    const errorMsg = String(err && err.message ? err.message : err);
+    await writeHeartbeat(component, {
+      lastRunAt: startTime,
+      lastErrorAt: Date.now(),
+      lastErrorMsg: errorMsg,
+    });
+    await writeEvent(component, "error", "Error in news-cron", {
+      error: errorMsg,
     });
     
     return {

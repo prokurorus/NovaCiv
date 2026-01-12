@@ -1225,6 +1225,7 @@ exports.handler = async (event) => {
       }),
     };
   } catch (err) {
+    // Внутренний catch для try блока на строке 881
     console.error("fetch-news fatal error:", err);
     
     // DEBUG режим: возвращаем полный стек

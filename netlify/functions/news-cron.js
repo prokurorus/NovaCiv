@@ -11,8 +11,30 @@ const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
-const { formatNewsMessage } = require("../lib/telegramFormat");
+let writeHeartbeat, writeEvent, writeFirebaseError, formatNewsMessage;
+try {
+  const opsPulse = require("../lib/opsPulse");
+  writeHeartbeat = opsPulse.writeHeartbeat;
+  writeEvent = opsPulse.writeEvent;
+  writeFirebaseError = opsPulse.writeFirebaseError;
+} catch (e) {
+  console.error("Failed to load opsPulse:", e.message);
+  // Fallback functions
+  writeHeartbeat = async () => {};
+  writeEvent = async () => {};
+  writeFirebaseError = async () => {};
+}
+
+try {
+  const telegramFormat = require("../lib/telegramFormat");
+  formatNewsMessage = telegramFormat.formatNewsMessage;
+} catch (e) {
+  console.error("Failed to load telegramFormat:", e.message);
+  // Fallback function
+  formatNewsMessage = ({ title, sense, why, view, question, lang }) => {
+    return `${title || ""}\n\n${sense || ""}\n\n${why || ""}\n\n${view || ""}\n\n${question || ""}`;
+  };
+}
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";

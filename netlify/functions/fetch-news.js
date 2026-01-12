@@ -19,8 +19,27 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
 // Операторский пульт
-const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
-const { RSS_SOURCES } = require("../lib/rssSourcesByLang");
+let writeHeartbeat, writeEvent, writeFirebaseError, RSS_SOURCES;
+try {
+  const opsPulse = require("../lib/opsPulse");
+  writeHeartbeat = opsPulse.writeHeartbeat;
+  writeEvent = opsPulse.writeEvent;
+  writeFirebaseError = opsPulse.writeFirebaseError;
+} catch (e) {
+  console.error("Failed to load opsPulse:", e.message);
+  // Fallback functions
+  writeHeartbeat = async () => {};
+  writeEvent = async () => {};
+  writeFirebaseError = async () => {};
+}
+
+try {
+  const rssSources = require("../lib/rssSourcesByLang");
+  RSS_SOURCES = rssSources.RSS_SOURCES;
+} catch (e) {
+  console.error("Failed to load rssSourcesByLang:", e.message);
+  RSS_SOURCES = { ru: [], en: [], de: [] };
+}
 
 // Максимум кандидатов для сбора (на язык)
 const MAX_CANDIDATES_PER_LANG = 60;

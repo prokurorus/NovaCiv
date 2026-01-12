@@ -17,6 +17,17 @@ function log(...args) {
   console.log("[news-cron]", ...args);
 }
 
+// Безопасная санитизация ключей Firebase
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
+
 // Подпись по языку темы
 function getTagline(lang) {
   if (lang === "ru") {
@@ -253,7 +264,7 @@ async function fetchNewsTopics() {
 async function markTopicAsPosted(topicId) {
   if (!FIREBASE_DB_URL) return;
 
-  const url = `${FIREBASE_DB_URL}/forum/topics/${topicId}.json`;
+  const url = `${FIREBASE_DB_URL}/forum/topics/${safeKey(topicId)}.json`;
   const resp = await fetch(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

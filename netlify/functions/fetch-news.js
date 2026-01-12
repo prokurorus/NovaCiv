@@ -236,18 +236,30 @@ async function fetchRssSource(source) {
   return items;
 }
 
+// Безопасная санитизация ключей Firebase
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
+
 function normalizeTitle(title) {
   if (!title) return "";
   return title
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .replace(/[«»"“”]/g, '"')
+    .replace(/[«»"“"]/g, '"')
     .trim();
 }
 
 function makeNewsKey(item) {
   const base = (item.guid || item.link || item.title || "").trim();
-  return `${item.sourceId}::${base.slice(0, 200)}`;
+  const rawKey = `${item.sourceId}::${base.slice(0, 200)}`;
+  return safeKey(rawKey);
 }
 
 // ---------- META IN FIREBASE ----------
@@ -645,7 +657,7 @@ exports.handler = async (event) => {
       if (toProcess.length >= MAX_NEW_ITEMS_PER_RUN) break;
 
       const key = makeNewsKey(item);
-      const titleKey = normalizeTitle(item.title);
+      const titleKey = safeKey(normalizeTitle(item.title));
 
       if (processedKeys[key]) continue;
       if (titleKey && titleKeys[titleKey]) continue;

@@ -781,7 +781,44 @@ exports.handler = async (event) => {
       }
 
       await Promise.all(tasks);
+      
+      // Помечаем тему как отправленную
       await markTopicAsPosted(topic.id);
+      
+      // Обновляем состояние для дедупа
+      try {
+        if (FIREBASE_DB_URL) {
+          const sourceId = topic.sourceId || "";
+          const titleKey = safeKey(topic.title || "");
+          const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state.json`;
+          const now = Date.now();
+          
+          // Обновляем lastNewsSource
+          lastNewsSource = sourceId;
+          
+          // Добавляем titleKey в recent (храним последние 48 часов)
+          recentTitleKeys[titleKey] = now;
+          // Удаляем старые (старше 48 часов)
+          const cutoff = now - 48 * 60 * 60 * 1000;
+          for (const key in recentTitleKeys) {
+            if (recentTitleKeys[key] < cutoff) {
+              delete recentTitleKeys[key];
+            }
+          }
+          
+          await fetch(stateUrl, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              lastNewsSource,
+              recentTitleKeys,
+              updatedAt: now,
+            }),
+          });
+        }
+      } catch (e) {
+        log("Failed to update news state:", e.message);
+      }
     }
 
     const totalSent =

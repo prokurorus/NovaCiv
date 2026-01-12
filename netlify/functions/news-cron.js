@@ -1034,16 +1034,5 @@ ${text}
       statusCode: 500,
       body: JSON.stringify({ ok: false, error: errorMsg }),
     };
-  } catch (initError) {
-    // Ошибка при инициализации (до выполнения handler)
-    console.error("news-cron initialization error:", initError);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        ok: false,
-        error: `Initialization error: ${String(initError && initError.message ? initError.message : initError)}`,
-        stack: initError && initError.stack ? String(initError.stack) : "",
-      }),
-    };
   }
 };

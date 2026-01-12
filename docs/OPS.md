@@ -54,26 +54,75 @@
 
 ## 🧪 Smoke Test
 
-**Путь:** `tools/ops-smoke-test.js`
+**Путь:** `tools/ops-smoke-test-simple.js`
 
 **Что делает:**
-- Читает heartbeat статусы всех компонентов
+- Читает heartbeat статусы всех компонентов через HTTP (без Admin SDK)
 - Проверяет, что функции выполнялись за последние X часов (по умолчанию 24)
 - Проверяет наличие ошибок
 - Выводит последние 5 событий
 - Возвращает OK/FAIL с причинами
+- Если компонент не запускался — предлагает вызвать `ops-run-now`
 
 **Запуск:**
 ```bash
-# Проверка за последние 24 часа (по умолчанию)
-node tools/ops-smoke-test.js
+# Требуется только FIREBASE_DB_URL
+export FIREBASE_DB_URL=https://novaciv-web-default-rtdb.europe-west1.firebasedatabase.app
+node tools/ops-smoke-test-simple.js
 
 # Проверка за последние 12 часов
-node tools/ops-smoke-test.js --hours=12
-
-# Проверка за последние 48 часов
-node tools/ops-smoke-test.js --hours=48
+node tools/ops-smoke-test-simple.js --hours=12
 ```
+
+**Если компонент не запускался:**
+```
+[ops-smoke-test] fetch-news: NOT RUN YET
+  └─ SUGGESTION: Call ops-run-now to force execution
+```
+
+---
+
+## 🚀 Принудительный запуск пайплайнов
+
+**Эндпоинт:** `/.netlify/functions/ops-run-now?token=<OPS_CRON_SECRET>`
+
+**Что делает:**
+- Запускает все пайплайны по очереди (без ожидания scheduled)
+- Выполняет: `fetch-news` → `news-cron`
+- После каждого шага записывает heartbeat + event
+- Защищён токеном `OPS_CRON_SECRET`
+
+**Использование:**
+```bash
+# Через curl
+curl "https://novaciv.space/.netlify/functions/ops-run-now?token=<OPS_CRON_SECRET>"
+
+# Или в браузере
+https://novaciv.space/.netlify/functions/ops-run-now?token=<OPS_CRON_SECRET>
+```
+
+**Ответ:**
+```json
+{
+  "ok": true,
+  "duration": 45230,
+  "results": {
+    "fetchNews": {
+      "statusCode": 200,
+      "ok": true,
+      "body": { "processed": 2, "titles": [...] }
+    },
+    "newsCron": {
+      "statusCode": 200,
+      "ok": true,
+      "body": { "processed": 2, "totalSent": 6 }
+    }
+  }
+}
+```
+
+**Переменная окружения:**
+- `OPS_CRON_SECRET` — токен для доступа к эндпоинту (установить в Netlify Dashboard)
 
 **Ожидаемый результат:**
 ```

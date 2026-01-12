@@ -12,6 +12,9 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
 const { formatNewsMessage } = require("../lib/telegramFormat");
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const TELEGRAM_NEWS_CHAT_ID_EN =
   process.env.TELEGRAM_NEWS_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
 const TELEGRAM_NEWS_CHAT_ID_RU = process.env.TELEGRAM_NEWS_CHAT_ID_RU;
@@ -602,71 +605,32 @@ exports.handler = async (event) => {
 
     const topics = await fetchNewsTopics();
 
-    // Загружаем состояние для дедупа
+    // Каналы по языкам
+    const CHANNELS = {
+      ru: TELEGRAM_NEWS_CHAT_ID_RU,
+      en: TELEGRAM_NEWS_CHAT_ID_EN,
+      de: TELEGRAM_NEWS_CHAT_ID_DE,
+    };
+
+    // Загружаем состояние для дедупа (по языкам)
     const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
-    let lastNewsSource = null;
-    let recentTitleKeys = {};
+    const stateByLang = {};
     
-    try {
-      if (FIREBASE_DB_URL) {
-        const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state.json`;
-        const stateResp = await fetch(stateUrl);
-        if (stateResp.ok) {
-          const state = await stateResp.json() || {};
-          lastNewsSource = state.lastNewsSource || null;
-          recentTitleKeys = state.recentTitleKeys || {};
+    for (const lang of ["ru", "en", "de"]) {
+      try {
+        if (FIREBASE_DB_URL) {
+          const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state_${lang}.json`;
+          const stateResp = await fetch(stateUrl);
+          if (stateResp.ok) {
+            stateByLang[lang] = await stateResp.json() || {};
+          } else {
+            stateByLang[lang] = { lastNewsSource: null, recentTitleKeys: {} };
+          }
         }
+      } catch (e) {
+        log(`Failed to load news state for ${lang}:`, e.message);
+        stateByLang[lang] = { lastNewsSource: null, recentTitleKeys: {} };
       }
-    } catch (e) {
-      log("Failed to load news state:", e.message);
-    }
-
-    // Фильтруем и сортируем с приоритетами
-    const freshTopics = topics
-      .filter((t) => !t.telegramPostedAt)
-      .map((t) => {
-        // Приоритет по свежести (больше createdAt = выше приоритет)
-        let priority = t.createdAt || 0;
-        
-        // Штраф если источник повторяется
-        const sourceId = t.sourceId || "";
-        if (lastNewsSource && sourceId === lastNewsSource) {
-          priority -= 86400000; // Штраф 24 часа
-        }
-        
-        // Штраф если заголовок похож на недавние
-        const titleKey = safeKey(t.title || "");
-        if (recentTitleKeys[titleKey]) {
-          priority -= 43200000; // Штраф 12 часов
-        }
-        
-        return { ...t, _priority: priority };
-      })
-      .sort((a, b) => b._priority - a._priority)
-      .slice(0, 1); // Ограничение: максимум 1 новость за запуск
-
-    if (!freshTopics.length) {
-      // Heartbeat: успешное выполнение без новых тем
-      await writeHeartbeat(component, {
-        lastRunAt: startTime,
-        lastOkAt: Date.now(),
-        metrics: {
-          fetchedTopicsCount: topics.length,
-          sentToTelegramCount: 0,
-        },
-      });
-      await writeEvent(component, "info", "No new topics to post", {
-        fetchedTopics: topics.length,
-      });
-      
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          ok: true,
-          processed: 0,
-          message: "No new topics to post",
-        }),
-      };
     }
 
     const perLanguage = {
@@ -675,151 +639,155 @@ exports.handler = async (event) => {
       de: { sent: 0, errors: [] },
     };
 
-    // Бренд-вставка каждые 3 поста (максимум 1 за запуск)
-    const BRAND_INSERT_INTERVAL = 3;
-    const BRAND_IMAGE_URL = "https://novaciv.space/og-image.png";
-
-    let postCount = 0;
-    let brandInsertSent = false; // Флаг для максимум 1 вставки за запуск
-
-    for (const topic of freshTopics) {
-      postCount++;
-      
-      // Определяем, нужно ли отправлять бренд-вставку перед этим постом
-      // После каждых 3 постов, но максимум 1 раз за запуск
-      const shouldSendBrandInsert = !brandInsertSent && postCount > 1 && (postCount - 1) % BRAND_INSERT_INTERVAL === 0;
-      
-      if (shouldSendBrandInsert) {
-        brandInsertSent = true; // Помечаем, что вставка уже отправлена
-        // Отправляем бренд-вставку во все каналы
-        const brandTasks = [];
-        
-        if (TELEGRAM_NEWS_CHAT_ID_RU) {
-          brandTasks.push(
-            sendPhotoToTelegram(
-              TELEGRAM_NEWS_CHAT_ID_RU,
-              BRAND_IMAGE_URL,
-              getBrandCaption("ru"),
-              buildBrandKeyboard("ru")
-            ).catch((err) => {
-              log("Brand insert error (RU):", err.message);
-            })
-          );
-        }
-        
-        if (TELEGRAM_NEWS_CHAT_ID_EN) {
-          brandTasks.push(
-            sendPhotoToTelegram(
-              TELEGRAM_NEWS_CHAT_ID_EN,
-              BRAND_IMAGE_URL,
-              getBrandCaption("en"),
-              buildBrandKeyboard("en")
-            ).catch((err) => {
-              log("Brand insert error (EN):", err.message);
-            })
-          );
-        }
-        
-        if (TELEGRAM_NEWS_CHAT_ID_DE) {
-          brandTasks.push(
-            sendPhotoToTelegram(
-              TELEGRAM_NEWS_CHAT_ID_DE,
-              BRAND_IMAGE_URL,
-              getBrandCaption("de"),
-              buildBrandKeyboard("de")
-            ).catch((err) => {
-              log("Brand insert error (DE):", err.message);
-            })
-          );
-        }
-        
-        await Promise.all(brandTasks);
-        // Небольшая задержка между бренд-вставкой и новостью
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      
-      // Отправляем новость (новый красивый формат)
-      const message = buildNewsMessage(topic);
-      const keyboard = buildNewsKeyboard(topic);
-      const imageUrl = topic.imageUrl || "";
-
-      const tasks = [];
-      const titleShort = (topic.title || "").slice(0, 50);
-
-      // Отправляем как текстовое сообщение (HTML формат, с preview)
-      if (TELEGRAM_NEWS_CHAT_ID_RU && topic.lang === "ru") {
-        tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_RU, message, keyboard).then(async (res) => {
-            if (res && res.ok) {
-              perLanguage.ru.sent += 1;
-              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "ru" });
-            } else if (res && !res.skipped) perLanguage.ru.errors.push(res);
-          }),
-        );
+    // Обрабатываем каждый язык отдельно
+    for (const targetLang of ["ru", "en", "de"]) {
+      const chatId = CHANNELS[targetLang];
+      if (!chatId) {
+        log(`No chat ID for ${targetLang}, skipping`);
+        continue;
       }
 
-      if (TELEGRAM_NEWS_CHAT_ID_EN && topic.lang === "en") {
-        tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_EN, message, keyboard).then(async (res) => {
-            if (res && res.ok) {
-              perLanguage.en.sent += 1;
-              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "en" });
-            } else if (res && !res.skipped) perLanguage.en.errors.push(res);
-          }),
-        );
-      }
+      // Ищем свежую topic на целевом языке
+      let topicToPost = topics
+        .filter((t) => 
+          t.section === "news" && 
+          t.lang === targetLang && 
+          !t.telegramPostedAt &&
+          !t.translatedFrom // Не переведённые копии
+        )
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
 
-      if (TELEGRAM_NEWS_CHAT_ID_DE && topic.lang === "de") {
-        tasks.push(
-          sendTextToTelegram(TELEGRAM_NEWS_CHAT_ID_DE, message, keyboard).then(async (res) => {
-            if (res && res.ok) {
-              perLanguage.de.sent += 1;
-              await writeEvent(component, "info", `news sent: ${titleShort}`, { lang: "de" });
-            } else if (res && !res.skipped) perLanguage.de.errors.push(res);
-          }),
-        );
-      }
+      // Если не найдена - fallback: берём EN (или любой доступный) и переводим
+      if (!topicToPost) {
+        log(`[news-cron] No ${targetLang} topic found, trying fallback translation`);
+        
+        // Ищем доступную topic (предпочитаем EN)
+        const fallbackTopic = topics
+          .filter((t) => 
+            t.section === "news" && 
+            !t.telegramPostedAt &&
+            !t.translatedFrom &&
+            (t.lang === "en" || t.lang === targetLang) // Предпочитаем EN, но можно и свою
+          )
+          .sort((a, b) => {
+            // EN в приоритете
+            if (a.lang === "en" && b.lang !== "en") return -1;
+            if (b.lang === "en" && a.lang !== "en") return 1;
+            return (b.createdAt || 0) - (a.createdAt || 0);
+          })[0];
 
-      await Promise.all(tasks);
-      
-      // Помечаем тему как отправленную
-      await markTopicAsPosted(topic.id);
-      
-      // Обновляем состояние для дедупа
-      try {
-        if (FIREBASE_DB_URL) {
-          const sourceId = topic.sourceId || "";
-          const titleKey = safeKey(topic.title || "");
-          const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state.json`;
-          const now = Date.now();
-          
-          // Обновляем lastNewsSource
-          lastNewsSource = sourceId;
-          
-          // Добавляем titleKey в recent (храним последние 48 часов)
-          recentTitleKeys[titleKey] = now;
-          // Удаляем старые (старше 48 часов)
-          const cutoff = now - 48 * 60 * 60 * 1000;
-          for (const key in recentTitleKeys) {
-            if (recentTitleKeys[key] < cutoff) {
-              delete recentTitleKeys[key];
+        if (fallbackTopic && fallbackTopic.lang !== targetLang) {
+          // Переводим все поля
+          try {
+            // Функция перевода (аналогично fetch-news)
+            const translateField = async (text, targetLang) => {
+              if (!OPENAI_API_KEY || !text) return text;
+              
+              let targetDescription;
+              if (targetLang === "ru") {
+                targetDescription = "Russian";
+              } else if (targetLang === "de") {
+                targetDescription = "German";
+              } else {
+                targetDescription = "the target language";
+              }
+
+              const userPrompt = `
+Target language: ${targetDescription} (code: ${targetLang})
+
+Translate the following text from ${fallbackTopic.lang === "ru" ? "Russian" : fallbackTopic.lang === "de" ? "German" : "English"} into the target language.
+Preserve meaning and tone.
+
+----
+${text}
+----
+`.trim();
+
+              const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${OPENAI_API_KEY}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: OPENAI_MODEL,
+                  messages: [
+                    { role: "system", content: "You are a precise translator. Return only the translation, no explanations." },
+                    { role: "user", content: userPrompt },
+                  ],
+                  max_tokens: 300,
+                  temperature: 0.3,
+                }),
+              });
+
+              if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`OpenAI translation error: HTTP ${response.status} – ${text}`);
+              }
+
+              const data = await response.json();
+              return data.choices?.[0]?.message?.content?.trim() || text;
+            };
+
+            const translated = await translateField(fallbackTopic.sense || "", targetLang);
+            const translatedWhy = await translateField(fallbackTopic.why || "", targetLang);
+            const translatedView = await translateField(fallbackTopic.view || "", targetLang);
+            const translatedQuestion = await translateField(fallbackTopic.question || "", targetLang);
+            const translatedTitle = await translateField(fallbackTopic.title || "", targetLang);
+
+            // Создаём новую topic-копию
+            const translatedTopic = {
+              ...fallbackTopic,
+              id: `${fallbackTopic.id}_translated_${targetLang}_${Date.now()}`,
+              lang: targetLang,
+              sourceLang: fallbackTopic.lang,
+              translatedFrom: true,
+              sourceTopicId: fallbackTopic.id,
+              title: typeof translatedTitle === "string" ? translatedTitle : fallbackTopic.title,
+              sense: typeof translated === "string" ? translated : fallbackTopic.sense,
+              why: typeof translatedWhy === "string" ? translatedWhy : fallbackTopic.why,
+              view: typeof translatedView === "string" ? translatedView : fallbackTopic.view,
+              question: typeof translatedQuestion === "string" ? translatedQuestion : fallbackTopic.question,
+              telegramPostedAt: null, // Не помечаем как posted
+            };
+
+            // Сохраняем переведённую topic в Firebase
+            if (FIREBASE_DB_URL) {
+              try {
+                const saveUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+                const saveResp = await fetch(saveUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(translatedTopic),
+                });
+                if (saveResp.ok) {
+                  const savedData = await saveResp.json();
+                  translatedTopic.id = savedData.name || translatedTopic.id;
+                  log(`[news-cron] Created translated topic for ${targetLang}`);
+                }
+              } catch (e) {
+                log(`[news-cron] Failed to save translated topic:`, e.message);
+              }
             }
+
+            topicToPost = translatedTopic;
+            await writeEvent(component, "info", `Fallback translation used for ${targetLang}`, {
+              sourceLang: fallbackTopic.lang,
+              sourceTopicId: fallbackTopic.id,
+            });
+          } catch (e) {
+            log(`[news-cron] Translation failed for ${targetLang}:`, e.message);
+            continue; // Пропускаем этот язык
           }
-          
-          await fetch(stateUrl, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              lastNewsSource,
-              recentTitleKeys,
-              updatedAt: now,
-            }),
-          });
+        } else if (!fallbackTopic) {
+          log(`[news-cron] No fallback topic available for ${targetLang}`);
+          continue; // Пропускаем этот язык
         }
-      } catch (e) {
-        log("Failed to update news state:", e.message);
       }
-    }
+
+      if (!topicToPost) {
+        continue; // Пропускаем этот язык
+      }
 
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;
@@ -860,16 +828,6 @@ exports.handler = async (event) => {
     };
   } catch (err) {
     console.error("news-cron error:", err);
-    
-    // Heartbeat метрика при ошибке (старая, для совместимости)
-    await writeHealthMetrics({
-      ts: startTime,
-      runId,
-      fetchedTopics: 0,
-      processed: 0,
-      totalSent: 0,
-      perLanguage: { ru: { sent: 0 }, en: { sent: 0 }, de: { sent: 0 } },
-    });
     
     // Heartbeat: ошибка
     const errorMsg = String(err && err.message ? err.message : err);

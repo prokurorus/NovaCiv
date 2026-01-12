@@ -19,62 +19,13 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { RSS_SOURCES } = require("../lib/rssSourcesByLang");
 
+// Максимум новых RSS-элементов за один запуск (на язык)
+const MAX_NEW_ITEMS_PER_LANG = 5;
 
-// Максимум новых RSS-элементов за один запуск
-const MAX_NEW_ITEMS_PER_RUN = 2;
-
-// Где храним метаданные о уже обработанных новостях
-const NEWS_META_PATH = "/newsMeta/en.json";
-
-// Источники с привязкой к языкам каналов
-const SOURCES = [
-  // Русскоязычные зарубежные / независимые
-  {
-    id: "bbc_russian",
-    url: "https://feeds.bbci.co.uk/russian/rss.xml",
-    languages: ["ru"],
-  },
-  {
-    id: "dw_russian_all",
-    url: "https://rss.dw.com/rdf/rss-ru-all",
-    languages: ["ru"],
-  },
-  {
-    id: "meduza_news",
-    url: "https://meduza.io/rss/news",
-    languages: ["ru"],
-  },
-
-  // Англоязычные мировые
-  {
-    id: "bbc_world",
-    url: "https://feeds.bbci.co.uk/news/world/rss.xml",
-    languages: ["en"],
-  },
-  {
-    id: "dw_english_world",
-    url: "https://rss.dw.com/rdf/rss-en-world",
-    languages: ["en"],
-  },
-  {
-    id: "guardian_world",
-    url: "https://www.theguardian.com/world/rss",
-    languages: ["en"],
-  },
-
-  // Немецкие общенациональные
-  {
-    id: "tagesschau",
-    url: "https://www.tagesschau.de/xml/rss2",
-    languages: ["de"],
-  },
-  {
-    id: "dw_german_all",
-    url: "https://rss.dw.com/rdf/rss-de-all",
-    languages: ["de"],
-  },
-];
+// Где храним метаданные о уже обработанных новостях (по языкам)
+const NEWS_META_BASE_PATH = "/newsMeta";
 
 // Вывод по языкам (только форум; Telegram теперь отдельной функцией)
 const LANG_OUTPUTS = [
@@ -229,16 +180,17 @@ function parseRss(xml, sourceId, languages) {
   return items;
 }
 
-async function fetchRssSource(source) {
-  const res = await fetch(source.url);
+async function fetchRssSource(sourceUrl, sourceName, sourceLang) {
+  const res = await fetch(sourceUrl);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(
-      `RSS fetch failed for ${source.id}: HTTP ${res.status} – ${text}`,
+      `RSS fetch failed for ${sourceName}: HTTP ${res.status} – ${text}`,
     );
   }
   const xml = await res.text();
-  const items = parseRss(xml, source.id, source.languages || []);
+  const sourceId = safeKey(sourceName);
+  const items = parseRss(xml, sourceId, [sourceLang]);
   return items;
 }
 
@@ -272,11 +224,12 @@ function makeNewsKey(item) {
 
 const emptyMeta = { processedKeys: {}, titleKeys: {} };
 
-async function loadNewsMeta() {
+async function loadNewsMeta(lang) {
   if (!FIREBASE_DB_URL) return emptyMeta;
 
+  const metaPath = `${NEWS_META_BASE_PATH}/${lang}.json`;
   try {
-    const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`);
+    const res = await fetch(`${FIREBASE_DB_URL}${metaPath}`);
     if (!res.ok) {
       return emptyMeta;
     }
@@ -295,12 +248,12 @@ async function loadNewsMeta() {
 
     return { processedKeys, titleKeys };
   } catch (e) {
-    console.error("Error loading news meta:", e);
+    console.error(`Error loading news meta for ${lang}:`, e);
     return emptyMeta;
   }
 }
 
-async function saveNewsMeta(meta) {
+async function saveNewsMeta(lang, meta) {
   if (!FIREBASE_DB_URL) return;
   
   // Санитизация всех ключей в processedKeys и titleKeys
@@ -323,8 +276,9 @@ async function saveNewsMeta(meta) {
     }
   }
   
+  const metaPath = `${NEWS_META_BASE_PATH}/${lang}.json`;
   try {
-    const res = await fetch(`${FIREBASE_DB_URL}${NEWS_META_PATH}`, {
+    const res = await fetch(`${FIREBASE_DB_URL}${metaPath}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(sanitizedMeta),
@@ -332,19 +286,19 @@ async function saveNewsMeta(meta) {
     if (!res.ok) {
       const text = await res.text();
       await writeFirebaseError("fetch-news", new Error(`Failed to write news meta: ${res.status}`), {
-        path: NEWS_META_PATH,
+        path: metaPath,
         op: "write",
         status: res.status,
         firebaseError: text.slice(0, 200),
       });
-      console.error("Failed to write news meta:", res.status, text);
+      console.error(`Failed to write news meta for ${lang}:`, res.status, text);
     }
   } catch (e) {
     await writeFirebaseError("fetch-news", e, {
-      path: NEWS_META_PATH,
+      path: metaPath,
       op: "write",
     });
-    console.error("Error writing news meta:", e);
+    console.error(`Error writing news meta for ${lang}:`, e);
   }
 }
 
@@ -383,7 +337,7 @@ async function saveNewsToForumLang(item, analyticData, langCode) {
   // Сохраняем структурированные данные (sense, why, view, question)
   // Для обратной совместимости также сохраняем как content
   const content = typeof analyticData === "string" 
-    ? analyticText 
+    ? analyticData 
     : JSON.stringify(analyticData);
   
   const payload = {
@@ -399,11 +353,13 @@ async function saveNewsToForumLang(item, analyticData, langCode) {
     createdAtServer: now,
     authorNickname: "NovaCiv News",
     lang: langCode,
-    sourceId: safeKey(item.sourceId || ""),
+    sourceId: safeKey(item.sourceId || item.sourceName || ""),
+    sourceName: item.sourceName || "",
     originalGuid: item.guid || "",
     originalLink: item.link || "",
     pubDate: item.pubDate || "",
     imageUrl: item.imageUrl || "",
+    analysisLang: "en", // Анализ всегда на EN
   };
 
   try {
@@ -734,25 +690,6 @@ exports.handler = async (event) => {
   }
 
   try {
-    const meta = await loadNewsMeta();
-    const processedKeys = { ...(meta.processedKeys || {}) };
-    const titleKeys = { ...(meta.titleKeys || {}) };
-
-    // 1) Тянем все источники
-    console.log(`rss sources count = ${SOURCES.length}`);
-    const allItems = [];
-    let sourcesOk = 0;
-    let sourcesFailed = 0;
-    for (const src of SOURCES) {
-      try {
-        const items = await fetchRssSource(src);
-        allItems.push(...items);
-        sourcesOk++;
-      } catch (err) {
-        console.error("RSS fetch error:", src.id, err);
-        sourcesFailed++;
-      }
-    }
 
     // 2) Сортируем по дате (сначала новые)
     allItems.sort((a, b) => {
@@ -803,110 +740,6 @@ exports.handler = async (event) => {
       };
     }
 
-    let successCount = 0;
-    const titles = [];
-
-    for (const entry of toProcess) {
-      const { item, key, titleKey } = entry;
-
-      try {
-        const analyticEn = await analyzeNewsItemEn(item);
-
-        const textsByLang = {
-          en: analyticEn,
-        };
-
-        for (const cfg of LANG_OUTPUTS) {
-          const code = cfg.code;
-
-          // Если у источника нет этого языка — пропускаем
-          if (
-            Array.isArray(item.targetLangs) &&
-            item.targetLangs.length > 0 &&
-            !item.targetLangs.includes(code)
-          ) {
-            continue;
-          }
-
-          // Перевод, если нужен
-          if (!textsByLang[code]) {
-            const translated = await translateText(analyticEn, code);
-            textsByLang[code] = translated;
-          }
-
-          const textForLang = textsByLang[code];
-
-          // Сохраняем только в форум
-          if (cfg.saveToForum) {
-            await saveNewsToForumLang(item, textForLang, code);
-          }
-        }
-
-        processedKeys[key] = {
-          processedAt: Date.now(),
-          sourceId: item.sourceId || null,
-          link: item.link || null,
-          title: item.title || null,
-        };
-
-        if (titleKey) {
-          titleKeys[titleKey] = {
-            processedAt: Date.now(),
-            sourceId: item.sourceId || null,
-            link: item.link || null,
-          };
-        }
-
-
-        // --- Закрыли цикл LANG_OUTPUTS ‼️ ---
-        // Теперь финализируем обработку этой новости
-
-        processedKeys[key] = {
-          processedAt: Date.now(),
-          sourceId: item.sourceId || null,
-          link: item.link || null,
-          title: item.title || null,
-        };
-
-        if (titleKey) {
-          titleKeys[titleKey] = {
-            processedAt: Date.now(),
-            sourceId: item.sourceId || null,
-            link: item.link || null,
-          };
-        }
-
-        successCount += 1;
-        titles.push(item.title || "(no title)");
-
-      } catch (err) {
-        console.error("Failed to process news item:", item.title, err);
-      }
-    }
-
-    await saveNewsMeta({ processedKeys, titleKeys });
-
-    console.log(`created topics = ${successCount}`);
-
-    // Heartbeat: успешное выполнение
-    await writeHeartbeat(component, {
-      lastRunAt: startTime,
-      lastOkAt: Date.now(),
-      metrics: { createdTopicsCount: successCount },
-    });
-    await writeEvent(component, "info", `Processed ${successCount} news items`, {
-      successCount,
-      titlesCount: titles.length,
-    });
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        ok: true,
-        processed: successCount,
-        titles,
-      }),
-    };
   } catch (err) {
     console.error("fetch-news fatal error:", err);
     

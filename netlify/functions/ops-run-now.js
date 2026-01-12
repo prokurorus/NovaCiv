@@ -52,6 +52,9 @@ exports.handler = async (event) => {
     };
   }
 
+  // Режим dry-run: без Telegram, только heartbeat + events
+  const isDryRun = qs.dry === "1" || qs.dry === "true";
+  
   // Режим maintenance: запуск db-audit и db-audit-fix
   const isMaintenance = qs.maintenance === "1" || qs.maintenance === "true";
   if (isMaintenance) {
@@ -218,11 +221,15 @@ exports.handler = async (event) => {
 
   try {
     // 1) Запускаем fetch-news
-    log("Step 1: Running fetch-news...");
-    await writeEvent("ops-run-now", "info", "Starting fetch-news", {});
+    log(`Step 1: Running fetch-news${isDryRun ? " (dry-run)" : ""}...`);
+    await writeEvent("ops-run-now", "info", `Starting fetch-news${isDryRun ? " (dry-run)" : ""}`, { dryRun: isDryRun });
     
     try {
       const fetchNewsEvent = createMockEvent("POST");
+      // В dry-run режиме устанавливаем флаг
+      if (isDryRun) {
+        fetchNewsEvent.queryStringParameters = { ...fetchNewsEvent.queryStringParameters, dry: "1" };
+      }
       const fetchNewsResult = await fetchNewsHandler(fetchNewsEvent);
       
       let fetchNewsBody = {};
@@ -258,11 +265,15 @@ exports.handler = async (event) => {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // 2) Запускаем news-cron
-    log("Step 2: Running news-cron...");
-    await writeEvent("ops-run-now", "info", "Starting news-cron", {});
+    log(`Step 2: Running news-cron${isDryRun ? " (dry-run)" : ""}...`);
+    await writeEvent("ops-run-now", "info", `Starting news-cron${isDryRun ? " (dry-run)" : ""}`, { dryRun: isDryRun });
     
     try {
       const newsCronEvent = createMockEvent("GET");
+      // В dry-run режиме устанавливаем флаг
+      if (isDryRun) {
+        newsCronEvent.queryStringParameters = { ...newsCronEvent.queryStringParameters, dry: "1" };
+      }
       const newsCronResult = await newsCronHandler(newsCronEvent);
       
       let newsCronBody = {};

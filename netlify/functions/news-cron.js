@@ -335,7 +335,7 @@ async function fetchNewsTopics() {
         (errorStr.includes("Index not defined") || 
          errorStr.includes("index") && errorStr.toLowerCase().includes("not found"));
       
-    if (isIndexError) {
+      if (isIndexError) {
       // ВРЕМЕННЫЙ Fallback: запрос без индекса, фильтрация в JS
       // TODO: Применить индекс в Firebase Rules (см. docs/firebase.rules.required.json)
       // После применения индекса этот fallback не должен срабатывать
@@ -394,7 +394,7 @@ async function fetchNewsTopics() {
       return filteredItems;
     }
       
-      throw new Error(
+    throw new Error(
         `Firebase topics fetch failed: ${resp.status} ${resp.statusText}`,
       );
     }
@@ -824,6 +824,10 @@ ${text}
       if (!topicToPost) {
         continue; // Пропускаем этот язык
       }
+
+      // TODO: Отправка сообщения в Telegram должна быть здесь
+      // Пока пропускаем, так как логика отправки не реализована
+    }
 
     const totalSent =
       perLanguage.ru.sent + perLanguage.en.sent + perLanguage.de.sent;

@@ -1,6 +1,13 @@
 import React, { useEffect, useState, useRef, ErrorInfo, ReactNode } from "react";
 import Header from "../components/Header";
 
+// ============================================
+// === ADMIN BUILD MARKER ===
+// Git SHA: ca75353
+// This is the REAL production entrypoint for /admin
+// Route: src/App.tsx line 594 → renders <Admin /> from src/pages/Admin.tsx
+// ============================================
+
 // Error Boundary Component
 class AdminErrorBoundary extends React.Component<
   { children: ReactNode },
@@ -488,6 +495,16 @@ function AdminInner() {
       <Header />
       <main className="min-h-screen bg-white">
         <div className="max-w-4xl mx-auto py-10 px-4 space-y-6">
+          {/* === ADMIN BUILD MARKER === */}
+          <div className="bg-yellow-100 border-2 border-yellow-400 rounded-xl p-4 text-center">
+            <div className="text-lg font-bold text-yellow-900 mb-1">
+              === ADMIN BUILD MARKER ===
+            </div>
+            <div className="text-sm text-yellow-800 font-mono">
+              Git SHA: ca75353 | Source: src/pages/Admin.tsx
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-zinc-900">

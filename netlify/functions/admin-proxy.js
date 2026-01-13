@@ -77,18 +77,88 @@ exports.handler = async (event, context) => {
 
     // Forward to VPS endpoint
     const vpsUrl = `${VPS_ENDPOINT}/admin/domovoy`;
+    const startTime = Date.now();
     
-    console.log(`[admin-proxy] Forwarding to VPS: ${vpsUrl.replace(/\/\/.*@/, "//***@")}`); // Hide credentials in logs
+    // Log start (no secrets)
+    console.log(`[admin-proxy] Starting request to VPS: ${vpsUrl.replace(/\/\/.*@/, "//***@")}`);
     
-    const response = await fetch(vpsUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Admin-Token": ADMIN_API_TOKEN, // Token added server-side, never exposed to browser
-      },
-      body: JSON.stringify(requestData),
-    });
-
+    // Create AbortController for 10s timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    
+    let response;
+    let elapsedMs;
+    
+    try {
+      response = await fetch(vpsUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Token": ADMIN_API_TOKEN, // Token added server-side, never exposed to browser
+        },
+        body: JSON.stringify(requestData),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      elapsedMs = Date.now() - startTime;
+      
+    } catch (e) {
+      clearTimeout(timeoutId);
+      elapsedMs = Date.now() - startTime;
+      
+      // Handle timeout
+      if (e.name === "AbortError" || e.message?.includes("aborted")) {
+        console.log(`[admin-proxy] Timeout after ${elapsedMs}ms: ${vpsUrl.replace(/\/\/.*@/, "//***@")}`);
+        return {
+          statusCode: 504,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ok: false,
+            error: "vps_timeout",
+            message: "VPS did not respond within 10s",
+            debugHint: "Check VPS reachability / port / firewall",
+            elapsedMs,
+            vpsEndpoint: vpsUrl.replace(/\/\/.*@/, "//***@"),
+          }),
+        };
+      }
+      
+      // Handle connection errors
+      const errorCode = e.code || e.errno || e.message?.toUpperCase();
+      const isConnectionError = 
+        errorCode === "ECONNREFUSED" ||
+        errorCode === "ENOTFOUND" ||
+        errorCode === "EHOSTUNREACH" ||
+        errorCode === "ETIMEDOUT" ||
+        e.message?.includes("ECONNREFUSED") ||
+        e.message?.includes("ENOTFOUND") ||
+        e.message?.includes("EHOSTUNREACH") ||
+        e.message?.includes("ETIMEDOUT") ||
+        e.message?.includes("getaddrinfo");
+      
+      if (isConnectionError) {
+        console.log(`[admin-proxy] Connection error after ${elapsedMs}ms: ${errorCode || "unknown"} - ${vpsUrl.replace(/\/\/.*@/, "//***@")}`);
+        return {
+          statusCode: 502,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ok: false,
+            error: "vps_unreachable",
+            message: "Cannot reach VPS endpoint",
+            debugHint: "Port 3001 blocked or wrong URL",
+            elapsedMs,
+            vpsEndpoint: vpsUrl.replace(/\/\/.*@/, "//***@"),
+            code: errorCode || "unknown",
+          }),
+        };
+      }
+      
+      // Other errors
+      console.log(`[admin-proxy] Fetch error after ${elapsedMs}ms: ${errorCode || "unknown"}`);
+      throw e; // Re-throw to be caught by outer catch
+    }
+    
     // Get response text
     const responseText = await response.text();
     
@@ -113,7 +183,8 @@ exports.handler = async (event, context) => {
     };
     
   } catch (e) {
-    console.error("[admin-proxy] Handler error:", e);
+    const elapsedMs = Date.now() - (startTime || Date.now());
+    console.log(`[admin-proxy] Handler error after ${elapsedMs}ms: ${e.code || e.message || "unknown"}`);
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
@@ -122,6 +193,7 @@ exports.handler = async (event, context) => {
         error: "Internal Server Error",
         message: e.message || "Unknown error",
         debugHint: "Check function logs and VPS endpoint connectivity",
+        elapsedMs,
       }),
     };
   }

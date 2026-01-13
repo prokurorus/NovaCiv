@@ -6,15 +6,10 @@
 
 const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
-// Импортируем handlers функций (динамически, чтобы esbuild не бандлил их)
-let fetchNewsHandler, newsCronHandler, domovoyAutoPostHandler;
-try {
-  fetchNewsHandler = require("./fetch-news").handler;
-  newsCronHandler = require("./news-cron").handler;
-  domovoyAutoPostHandler = require("./domovoy-auto-post").handler;
-} catch (e) {
-  log("Warning: Failed to load handlers:", e.message);
-}
+// Импортируем handlers функций
+const fetchNewsHandler = require("./fetch-news").handler;
+const newsCronHandler = require("./news-cron").handler;
+const domovoyAutoPostHandler = require("./domovoy-auto-post").handler;
 
 const { writeHeartbeat, writeEvent } = require("../lib/opsPulse");
 
@@ -60,7 +55,7 @@ exports.handler = async (event) => {
   // Режим dry-run: без Telegram, только heartbeat + events
   const isDryRun = qs.dry === "1" || qs.dry === "true";
   
-  // Режим maintenance: запуск db-audit и db-audit-fix + миграция feed метаданных
+  // Режим maintenance: запуск db-audit и db-audit-fix
   const isMaintenance = qs.maintenance === "1" || qs.maintenance === "true";
   if (isMaintenance) {
     log("Maintenance mode: running db-audit and fixes...");
@@ -71,134 +66,23 @@ exports.handler = async (event) => {
       // В Netlify Functions используем require с относительным путём
       const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
       
-      // Миграция feed метаданных: заполняем postedAt для старых записей
-      log("Step 0: Migrating feed metadata (postedAt, channel)...");
-      try {
-        const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
-        const topicsResp = await fetch(topicsUrl);
-        
-        if (topicsResp.ok) {
-          const topicsData = await topicsResp.json() || {};
-          let migratedCount = 0;
-          let channelFixedCount = 0;
-          
-          for (const [topicId, topic] of Object.entries(topicsData)) {
-            if (!topic || typeof topic !== "object") continue;
-            
-            const updates = {};
-            let needsUpdate = false;
-            
-            // Если posted=true но нет postedAt - заполняем
-            if (topic.posted === true && !topic.postedAt) {
-              updates.postedAt = topic.createdAt || topic.createdAtServer || Date.now();
-              needsUpdate = true;
-            }
-            
-            // Если нет channel - заполняем по section
-            if (!topic.channel) {
-              if (topic.section === "news") {
-                updates.channel = "news";
-                needsUpdate = true;
-              } else if (topic.section === "domovoy" || (topic.postKind && topic.postKind.startsWith("domovoy:"))) {
-                updates.channel = "domovoy";
-                // Также исправляем section если нужно
-                if (topic.section !== "domovoy") {
-                  updates.section = "domovoy";
-                }
-                needsUpdate = true;
-              }
-            }
-            
-            // Если есть telegramPostedAt но нет posted/postedAt - мигрируем
-            if (topic.telegramPostedAt && !topic.posted) {
-              updates.posted = true;
-              updates.postedAt = topic.telegramPostedAt;
-              if (!updates.channel) {
-                updates.channel = topic.section === "domovoy" || (topic.postKind && topic.postKind.startsWith("domovoy:")) ? "domovoy" : "news";
-              }
-              needsUpdate = true;
-            }
-            
-            if (needsUpdate) {
-              const safeTopicId = topicId.replace(/[.#$[\]/]/g, "_").slice(0, 120);
-              const updateUrl = `${FIREBASE_DB_URL}/forum/topics/${safeTopicId}.json`;
-              
-              try {
-                const updateResp = await fetch(updateUrl, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify(updates),
-                });
-                
-                if (updateResp.ok) {
-                  if (updates.postedAt) migratedCount++;
-                  if (updates.channel) channelFixedCount++;
-                } else {
-                  log(`Failed to migrate topic ${topicId}: ${updateResp.status}`);
-                }
-              } catch (e) {
-                log(`Error migrating topic ${topicId}:`, e.message);
-              }
-            }
-          }
-          
-          log(`Migration completed: ${migratedCount} topics got postedAt, ${channelFixedCount} topics got channel`);
-          await writeEvent("ops-run-now", "info", "Feed metadata migration completed", {
-            migratedCount,
-            channelFixedCount,
-          });
-        } else {
-          log(`Failed to fetch topics for migration: ${topicsResp.status}`);
-        }
-      } catch (migrationError) {
-        log("Migration error:", migrationError.message);
-        await writeEvent("ops-run-now", "warn", "Feed metadata migration failed", {
-          error: String(migrationError && migrationError.message ? migrationError.message : migrationError),
-        });
-      }
-      
-      // TEMPORARILY DISABLED: Dynamic require() may cause esbuild issues
-      // TODO: Re-enable after fixing syntax error
-      log("Step 1: db-audit temporarily disabled for debugging");
-      const auditReport = {
-        status: "OK",
-        warnings: [],
-        errors: [],
-        keyIssues: {},
-        schemaIssues: {},
-      };
-      
       // Путь к tools/ из netlify/functions/
-      // const path = require("path");
-      // const projectRoot = path.resolve(__dirname, "../..");
-      // 
-      // // Загружаем модули (удаляем кэш для свежего импорта)
-      // const auditPath = path.join(projectRoot, "tools/db-audit.js");
-      // const fixPath = path.join(projectRoot, "tools/db-audit-fix.js");
-      // 
-      // delete require.cache[auditPath];
-      // delete require.cache[fixPath];
-      // 
-      // let audit, fix;
-      // try {
-      //   const auditModule = require(auditPath);
-      //   audit = auditModule.audit;
-      // } catch (requireError) {
-      //   log("Failed to require db-audit:", requireError.message);
-      //   throw new Error(`Failed to load db-audit module: ${requireError.message}`);
-      // }
-      // 
-      // try {
-      //   const fixModule = require(fixPath);
-      //   fix = fixModule.fix;
-      // } catch (requireError) {
-      //   log("Failed to require db-audit-fix:", requireError.message);
-      //   throw new Error(`Failed to load db-audit-fix module: ${requireError.message}`);
-      // }
-      // 
-      // // 1) Запускаем audit
-      // log("Step 1: Running db-audit...");
-      // const auditReport = await audit();
+      const path = require("path");
+      const projectRoot = path.resolve(__dirname, "../..");
+      
+      // Загружаем модули (удаляем кэш для свежего импорта)
+      const auditPath = path.join(projectRoot, "tools/db-audit.js");
+      const fixPath = path.join(projectRoot, "tools/db-audit-fix.js");
+      
+      delete require.cache[auditPath];
+      delete require.cache[fixPath];
+      
+      const { audit } = require(auditPath);
+      const { fix } = require(fixPath);
+      
+      // 1) Запускаем audit
+      log("Step 1: Running db-audit...");
+      const auditReport = await audit();
       
       // Сохраняем отчёт в Firebase через HTTP API
       try {
@@ -221,50 +105,48 @@ exports.handler = async (event) => {
       const needsFix = hasKeyIssues || hasSchemaIssues || auditReport.status === "WARN" || auditReport.status === "FAIL";
       
       let fixResults = null;
-      // TEMPORARILY DISABLED: Dynamic require() may cause esbuild issues
-      log("Step 2: db-audit-fix temporarily disabled for debugging");
-      // if (needsFix) {
-      //   log("Step 2: Issues found, running db-audit-fix...");
-      //   await writeEvent("ops-run-now", "info", "Running db-audit-fix", {
-      //     keyIssues: hasKeyIssues,
-      //     schemaIssues: hasSchemaIssues,
-      //   });
-      //   
-      //   try {
-      //     fixResults = await fix();
-      //     log("db-audit-fix completed:", fixResults);
-      //     
-      //     // Повторный audit после фиксов
-      //     log("Step 3: Running post-fix audit...");
-      //     const postFixReport = await audit();
-      //     
-      //     // Обновляем отчёт через HTTP API
-      //     try {
-      //       if (FIREBASE_DB_URL) {
-      //         const reportUrl = `${FIREBASE_DB_URL}/ops/dbAudit/latest.json`;
-      //         await fetch(reportUrl, {
-      //           method: "PUT",
-      //           headers: { "Content-Type": "application/json" },
-      //           body: JSON.stringify({
-      //             ...postFixReport,
-      //             preFixStatus: auditReport.status,
-      //             fixesApplied: fixResults,
-      //           }),
-      //         });
-      //         log("Post-fix audit report saved");
-      //       }
-      //     } catch (e) {
-      //       log("Failed to save post-fix report:", e.message);
-      //     }
-      //   } catch (fixError) {
-      //     log("db-audit-fix error:", fixError.message);
-      //     await writeEvent("ops-run-now", "error", "db-audit-fix failed", {
-      //       error: String(fixError && fixError.message ? fixError.message : fixError),
-      //     });
-      //   }
-      // } else {
-      //   log("No issues found, skipping db-audit-fix");
-      // }
+      if (needsFix) {
+        log("Step 2: Issues found, running db-audit-fix...");
+        await writeEvent("ops-run-now", "info", "Running db-audit-fix", {
+          keyIssues: hasKeyIssues,
+          schemaIssues: hasSchemaIssues,
+        });
+        
+        try {
+          fixResults = await fix();
+          log("db-audit-fix completed:", fixResults);
+          
+          // Повторный audit после фиксов
+          log("Step 3: Running post-fix audit...");
+          const postFixReport = await audit();
+          
+          // Обновляем отчёт через HTTP API
+          try {
+            if (FIREBASE_DB_URL) {
+              const reportUrl = `${FIREBASE_DB_URL}/ops/dbAudit/latest.json`;
+              await fetch(reportUrl, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  ...postFixReport,
+                  preFixStatus: auditReport.status,
+                  fixesApplied: fixResults,
+                }),
+              });
+              log("Post-fix audit report saved");
+            }
+          } catch (e) {
+            log("Failed to save post-fix report:", e.message);
+          }
+        } catch (fixError) {
+          log("db-audit-fix error:", fixError.message);
+          await writeEvent("ops-run-now", "error", "db-audit-fix failed", {
+            error: String(fixError && fixError.message ? fixError.message : fixError),
+          });
+        }
+      } else {
+        log("No issues found, skipping db-audit-fix");
+      }
       
       // 3) Записываем событие "maintenance done"
       await writeEvent("ops-run-now", "info", "Maintenance done", {

@@ -307,13 +307,12 @@ module.exports = { audit };
 
 // Если запущен напрямую - выполняем
 if (require.main === module) {
-  (async function() {
-    try {
-      const report = await audit();
+  audit()
+    .then((report) => {
       process.exit(report.status === "FAIL" ? 1 : 0);
-    } catch (error) {
+    })
+    .catch((error) => {
       console.error("[db-audit] FATAL ERROR:", error.message);
       process.exit(1);
-    }
-  })();
+    });
 }

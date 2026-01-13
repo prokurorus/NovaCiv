@@ -98,17 +98,14 @@ async function loadRecentDomovoyTopics(limit = 40) {
 async function loadCommentsForTopic(topicId) {
   const safeTopicId = safeKey(topicId);
   const url = `${FIREBASE_DB_URL}/forum/comments/${safeTopicId}.json`;
-  let data;
-  try {
-    data = await fetchJson(url);
-  } catch (e) {
+  const data = await fetchJson(url).catch(async (e) => {
     await writeFirebaseError("domovoy-auto-reply", e, {
       path: `forum/comments/${safeTopicId}`,
       op: "read",
     });
     log("loadCommentsForTopic error", topicId, e.message);
-    data = null;
-  }
+    return null;
+  });
 
   if (!data || typeof data !== "object") return [];
 

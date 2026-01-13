@@ -12,17 +12,15 @@
   status = 200
 
 [functions]
-  included_files = ["media/**", "tools/**", "server/**", "netlify/lib/**"]
+  included_files = ["media/**"]
   external_node_modules = ["ffmpeg-static", "openai"]
   node_bundler = "esbuild"
 
 [functions."news-cron"]
   schedule = "0 * * * *"
-  included_files = ["netlify/lib/**"]
 
 [functions."fetch-news"]
   schedule = "30 * * * *"
-  included_files = ["netlify/lib/**"]
 
 [functions."video-worker"]
   schedule = "*/15 * * * *"
@@ -35,7 +33,3 @@
 
 [functions."domovoy-auto-reply"]
   schedule = "*/10 * * * *"
-
-[functions."ops-run-now"]
-  node_bundler = "esbuild"
-  included_files = ["tools/**", "server/**"]

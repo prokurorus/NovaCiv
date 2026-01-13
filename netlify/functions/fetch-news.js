@@ -16,7 +16,6 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
-const OPS_CRON_SECRET = process.env.OPS_CRON_SECRET;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
@@ -185,26 +184,17 @@ function parseRss(xml, sourceId, languages) {
 }
 
 async function fetchRssSource(sourceUrl, sourceName, sourceLang) {
-  try {
-    const res = await fetch(sourceUrl);
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        `RSS fetch failed for ${sourceName}: HTTP ${res.status} – ${text.slice(0, 200)}`,
-      );
-    }
-    const xml = await res.text();
-    const sourceId = safeKey(sourceName);
-    const items = parseRss(xml, sourceId, [sourceLang]);
-    return items;
-  } catch (err) {
-    // Если это уже наша ошибка - пробрасываем дальше
-    if (err.message && err.message.includes("RSS fetch failed")) {
-      throw err;
-    }
-    // Иначе оборачиваем
-    throw new Error(`RSS fetch error for ${sourceName}: ${err.message || String(err)}`);
+  const res = await fetch(sourceUrl);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `RSS fetch failed for ${sourceName}: HTTP ${res.status} – ${text}`,
+    );
   }
+  const xml = await res.text();
+  const sourceId = safeKey(sourceName);
+  const items = parseRss(xml, sourceId, [sourceLang]);
+  return items;
 }
 
 // Безопасная санитизация ключей Firebase
@@ -782,10 +772,6 @@ exports.handler = async (event) => {
   console.log("fetch-news start");
   const startTime = Date.now();
   const component = "fetch-news";
-  
-  // DEBUG режим: проверяем параметр ?debug=1
-  const qs = event.queryStringParameters || {};
-  const isDebug = qs.debug === "1" || qs.debug === "true";
 
   // Записываем начало выполнения
   await writeHeartbeat(component, {
@@ -809,46 +795,28 @@ exports.handler = async (event) => {
   } else if (invocation.type === "netlify_run_now") {
     console.log("invocation type: netlify_run_now");
     console.log("auth skipped (ALLOW_NETLIFY_RUN_NOW_BYPASS=true)");
-    } else {
-      console.log("invocation type: http");
-      // Проверка токена только для HTTP/manual вызовов
-      // qs уже объявлен выше
-      // Поддерживаем оба токена для обратной совместимости
-      const validToken = NEWS_CRON_SECRET || OPS_CRON_SECRET;
-      if (validToken) {
-        const providedToken = qs.token;
-        if (!providedToken || (providedToken !== NEWS_CRON_SECRET && providedToken !== OPS_CRON_SECRET)) {
-          console.log("auth gate blocked (no token or token mismatch)");
-          return {
-            statusCode: 403,
-            body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
-          };
-        }
+  } else {
+    console.log("invocation type: http");
+    // Проверка токена только для HTTP/manual вызовов
+    const qs = event.queryStringParameters || {};
+    if (NEWS_CRON_SECRET) {
+      if (!qs.token || qs.token !== NEWS_CRON_SECRET) {
+        console.log("auth gate blocked (no token or token mismatch)");
+        return {
+          statusCode: 403,
+          body: JSON.stringify({ ok: false, error: "Forbidden: invalid token" }),
+        };
       }
-      console.log("auth gate passed");
     }
-
-  // Явная проверка переменных окружения
-  if (!FIREBASE_DB_URL) {
-    const errorMsg = "FIREBASE_DB_URL is not set";
-    await writeEvent(component, "error", errorMsg);
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        ok: false,
-        error: errorMsg,
-      }),
-    };
+    console.log("auth gate passed");
   }
-  
-  if (!OPENAI_API_KEY) {
-    const errorMsg = "OPENAI_API_KEY is not set";
-    await writeEvent(component, "error", errorMsg);
+
+  if (!OPENAI_API_KEY || !FIREBASE_DB_URL) {
     return {
       statusCode: 200,
       body: JSON.stringify({
         ok: false,
-        error: errorMsg,
+        error: "OPENAI_API_KEY или FIREBASE_DB_URL не заданы на сервере.",
       }),
     };
   }
@@ -1202,30 +1170,8 @@ exports.handler = async (event) => {
   } catch (err) {
     console.error("fetch-news fatal error:", err);
     
-    // DEBUG режим: возвращаем полный стек
-    const qs = event.queryStringParameters || {};
-    const isDebug = qs.debug === "1" || qs.debug === "true";
-    
-    const errorMsg = String(err && err.message ? err.message : err);
-    const errorStack = err && err.stack ? String(err.stack) : "";
-    
-    // Определяем где произошла ошибка
-    let errorWhere = "unknown";
-    if (errorStack) {
-      if (errorStack.includes("fetchRssSource") || errorStack.includes("RSS")) {
-        errorWhere = "rss fetch";
-      } else if (errorStack.includes("analyzeNewsItemEn") || errorStack.includes("OpenAI")) {
-        errorWhere = "openai analysis";
-      } else if (errorStack.includes("saveNewsToForumLang") || errorStack.includes("Firebase")) {
-        errorWhere = "firebase write";
-      } else if (errorStack.includes("translateText")) {
-        errorWhere = "openai translation";
-      } else if (errorStack.includes("loadNewsMeta") || errorStack.includes("saveNewsMeta")) {
-        errorWhere = "news meta";
-      }
-    }
-    
     // Heartbeat: ошибка
+    const errorMsg = String(err && err.message ? err.message : err);
     await writeHeartbeat(component, {
       lastRunAt: startTime,
       lastErrorAt: Date.now(),
@@ -1233,20 +1179,7 @@ exports.handler = async (event) => {
     });
     await writeEvent(component, "error", "Fatal error in fetch-news", {
       error: errorMsg,
-      where: errorWhere,
     });
-    
-    if (isDebug) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          ok: false,
-          error: errorMsg,
-          stack: errorStack,
-          where: errorWhere,
-        }),
-      };
-    }
     
     return {
       statusCode: 500,

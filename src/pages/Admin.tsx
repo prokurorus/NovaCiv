@@ -113,15 +113,33 @@ export default function Admin() {
     setResponse("");
 
     try {
-      // Netlify Identity автоматически добавляет Authorization header
-      // для запросов к /.netlify/functions/*
+      // Получаем токен из Netlify Identity
+      const currentUser = window.netlifyIdentity?.currentUser();
+      if (!currentUser) {
+        throw new Error("Пользователь не авторизован");
+      }
+
+      // Получаем токен доступа
+      const token = currentUser.token?.access_token;
+      if (!token) {
+        throw new Error("Токен доступа не найден");
+      }
+
       const res = await fetch("/.netlify/functions/admin-domovoy", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({ text: text.trim() }),
       });
+
+      // Проверяем, что ответ - JSON, а не HTML
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${text.slice(0, 200)}`);
+      }
 
       const data = await res.json();
 
@@ -129,7 +147,7 @@ export default function Admin() {
         throw new Error(data.error || "Ошибка запроса");
       }
 
-      setResponse(data.answer || "Ответ получен, но пуст.");
+      setResponse(data.reply || data.answer || "Ответ получен, но пуст.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {

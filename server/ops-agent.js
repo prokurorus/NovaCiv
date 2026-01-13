@@ -685,7 +685,6 @@ async function processIssue(issue) {
   try {
     // Выполняем команду
     logger.log(`[ops-agent] Executing command: ${command}`);
-    // Pass issue to handler if it needs it (e.g., logs:tail)
     const result = await commandConfig.handler(issue);
 
     // Форматируем результат

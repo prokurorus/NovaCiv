@@ -282,6 +282,54 @@ function sanitizeOutput(output) {
   return sanitized;
 }
 
+/**
+ * Reads canonical context files (read-only)
+ * Returns: { projectState: string|nil, projectContext: string|nil, snapshotPathInfo: object|nil }
+ */
+function getCanonicalContext() {
+  const result = {
+    projectState: null,
+    projectContext: null,
+    snapshotPathInfo: null
+  };
+
+  // Read docs/PROJECT_STATE.md
+  try {
+    const projectStatePath = path.join(PROJECT_DIR, "docs", "PROJECT_STATE.md");
+    if (fs.existsSync(projectStatePath)) {
+      result.projectState = fs.readFileSync(projectStatePath, "utf8");
+    }
+  } catch (e) {
+    // Ignore - file not found or read error
+  }
+
+  // Read docs/PROJECT_CONTEXT.md
+  try {
+    const projectContextPath = path.join(PROJECT_DIR, "docs", "PROJECT_CONTEXT.md");
+    if (fs.existsSync(projectContextPath)) {
+      result.projectContext = fs.readFileSync(projectContextPath, "utf8");
+    }
+  } catch (e) {
+    // Ignore - file not found or read error
+  }
+
+  // Check snapshot files existence (non-canonical, but useful info)
+  try {
+    const snapshotMd = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
+    const snapshotJson = path.join(PROJECT_DIR, "_state", "system_snapshot.json");
+    result.snapshotPathInfo = {
+      mdPath: snapshotMd,
+      jsonPath: snapshotJson,
+      mdExists: fs.existsSync(snapshotMd),
+      jsonExists: fs.existsSync(snapshotJson)
+    };
+  } catch (e) {
+    // Ignore
+  }
+
+  return result;
+}
+
 // --- Обработчики команд --- //
 
 async function handleReportStatus() {

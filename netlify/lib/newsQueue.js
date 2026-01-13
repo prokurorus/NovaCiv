@@ -20,10 +20,11 @@ async function enqueueNewsJob({ requestedBy, dry = false, lang = null }) {
 
   const jobId = `news-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const job = {
-    createdAt: Date.now(),
+    createdAt: new Date().toISOString(),
     requestedBy,
     dry: dry === true || dry === "1" || dry === "true",
-    ...(lang ? { lang } : {}),
+    lang: lang || null,
+    status: "pending",
   };
 
   try {

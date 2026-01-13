@@ -503,6 +503,9 @@ function AdminInner() {
             <div className="text-sm text-yellow-800 font-mono">
               Git SHA: ca75353 | Source: src/pages/Admin.tsx
             </div>
+            <div className="text-sm text-yellow-700 mt-2 font-semibold">
+              DEPLOY PROOF: if you see this, GitHub → Netlify pipeline is correct
+            </div>
           </div>
 
           <div className="flex items-center justify-between">

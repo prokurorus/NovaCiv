@@ -99,8 +99,29 @@ const COMMAND_WHITELIST = {
     handler: handleSnapshot,
     needsGit: false,
     needsPr: false
+  },
+  "onebigstep:health": {
+    description: "Comprehensive health check: git, pm2, snapshot files, cron, health endpoints",
+    handler: handleOneBigStepHealth,
+    needsGit: false,
+    needsPr: false
+  },
+  "snapshot:run": {
+    description: "Execute snapshot_system.sh and return generated file paths",
+    handler: handleSnapshotRun,
+    needsGit: false,
+    needsPr: false
+  },
+  "logs:tail": {
+    description: "Tail logs from allowed PM2 processes (syntax: logs:tail <process-name>)",
+    handler: handleLogsTail,
+    needsGit: false,
+    needsPr: false
   }
 };
+
+// Process name allowlist for logs:tail
+const ALLOWED_PM2_PROCESSES = ["nova-ops-agent", "nova-video"];
 
 // Кэш обработанных Issues (чтобы не обрабатывать повторно)
 const processedIssues = new Set();
@@ -426,6 +447,211 @@ async function handleSnapshot() {
   }
 }
 
+async function handleOneBigStepHealth() {
+  const sections = [];
+  
+  try {
+    // Git branch and short commit hash
+    try {
+      const gitBranch = executeCommand("git rev-parse --abbrev-ref HEAD");
+      const gitCommit = executeCommand("git rev-parse --short HEAD");
+      const branch = (gitBranch.output || "").trim() || "unknown";
+      const commit = (gitCommit.output || "").trim() || "unknown";
+      sections.push(`## Git\n- **Branch:** ${branch}\n- **Commit:** ${commit}`);
+    } catch (e) {
+      sections.push(`## Git\n❌ Failed: ${e.message}`);
+    }
+    
+    // Git status (clean/dirty only, no file names)
+    try {
+      const gitStatus = executeCommand("git status --porcelain");
+      const isClean = !gitStatus.output || gitStatus.output.trim() === "";
+      sections.push(`- **Status:** ${isClean ? "clean" : "dirty"}`);
+    } catch (e) {
+      sections.push(`- **Status:** unknown`);
+    }
+    
+    // PM2 status (names + status only)
+    try {
+      // Try pm2 list --json first (standard PM2 command)
+      let pm2Status = executeCommand("pm2 list --json");
+      if (!pm2Status.success || !pm2Status.output) {
+        // Fallback to pm2 status
+        pm2Status = executeCommand("pm2 status");
+        sections.push(`## PM2 Status\n\`\`\`\n${sanitizeOutput(pm2Status.output || "")}\n\`\`\``);
+      } else {
+        try {
+          const pm2Data = JSON.parse(pm2Status.output);
+          const processes = pm2Data.map(p => ({
+            name: p.name || "unknown",
+            status: p.pm2_env?.status || "unknown"
+          }));
+          const processList = processes.map(p => `- ${p.name}: ${p.status}`).join("\n");
+          sections.push(`## PM2 Processes\n${processList}`);
+        } catch (e) {
+          // Fallback to pm2 status if JSON parsing fails
+          const pm2StatusSimple = executeCommand("pm2 status");
+          sections.push(`## PM2 Status\n\`\`\`\n${sanitizeOutput(pm2StatusSimple.output || "")}\n\`\`\``);
+        }
+      }
+    } catch (e) {
+      sections.push(`## PM2 Status\n❌ Failed: ${e.message}`);
+    }
+    
+    // Snapshot files existence and mtime
+    try {
+      const snapshotMd = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
+      const snapshotJson = path.join(PROJECT_DIR, "_state", "system_snapshot.json");
+      const mdExists = fs.existsSync(snapshotMd);
+      const jsonExists = fs.existsSync(snapshotJson);
+      
+      let snapshotInfo = "## Snapshot Files\n";
+      if (mdExists) {
+        const mdStats = fs.statSync(snapshotMd);
+        const mdMtime = new Date(mdStats.mtime).toISOString();
+        snapshotInfo += `- **system_snapshot.md:** exists, mtime: ${mdMtime}\n`;
+      } else {
+        snapshotInfo += `- **system_snapshot.md:** not found\n`;
+      }
+      
+      if (jsonExists) {
+        const jsonStats = fs.statSync(snapshotJson);
+        const jsonMtime = new Date(jsonStats.mtime).toISOString();
+        snapshotInfo += `- **system_snapshot.json:** exists, mtime: ${jsonMtime}\n`;
+      } else {
+        snapshotInfo += `- **system_snapshot.json:** not found\n`;
+      }
+      
+      sections.push(snapshotInfo);
+    } catch (e) {
+      sections.push(`## Snapshot Files\n❌ Failed: ${e.message}`);
+    }
+    
+    // Snapshot cron check
+    try {
+      const cronList = executeCommand("crontab -l");
+      if (cronList.success && cronList.output) {
+        const hasSnapshot = cronList.output.includes("snapshot_system.sh");
+        if (hasSnapshot) {
+          // Extract only the snapshot line
+          const lines = cronList.output.split("\n");
+          const snapshotLine = lines.find(line => line.includes("snapshot_system.sh") && !line.trim().startsWith("#"));
+          sections.push(`## Snapshot Cron\n\`\`\`\n${snapshotLine || "found (line not extracted)"}\n\`\`\``);
+        } else {
+          sections.push(`## Snapshot Cron\n❌ Not found in crontab`);
+        }
+      } else {
+        sections.push(`## Snapshot Cron\n❌ Crontab not accessible`);
+      }
+    } catch (e) {
+      sections.push(`## Snapshot Cron\n❌ Failed: ${e.message}`);
+    }
+    
+    // Health endpoints check (optional)
+    try {
+      const healthNewsPath = path.join(PROJECT_DIR, "netlify", "functions", "health-news.js");
+      const healthDomovoyPath = path.join(PROJECT_DIR, "netlify", "functions", "health-domovoy.js");
+      const healthNewsExists = fs.existsSync(healthNewsPath);
+      const healthDomovoyExists = fs.existsSync(healthDomovoyPath);
+      
+      if (healthNewsExists || healthDomovoyExists) {
+        const endpoints = [];
+        if (healthNewsExists) endpoints.push("health-news");
+        if (healthDomovoyExists) endpoints.push("health-domovoy");
+        sections.push(`## Health Endpoints\n- **Configured:** ${endpoints.join(", ")}`);
+      } else {
+        sections.push(`## Health Endpoints\n- **Status:** not configured`);
+      }
+    } catch (e) {
+      sections.push(`## Health Endpoints\n- **Status:** not configured (check failed: ${e.message})`);
+    }
+    
+    return sections.join("\n\n");
+  } catch (e) {
+    return `❌ Health check failed: ${e.message}`;
+  }
+}
+
+async function handleSnapshotRun() {
+  try {
+    const snapshotScript = path.join(PROJECT_DIR, "runbooks", "snapshot_system.sh");
+    
+    if (!fs.existsSync(snapshotScript)) {
+      return `❌ Snapshot script not found: ${snapshotScript}`;
+    }
+    
+    // Execute snapshot script
+    const result = executeCommand(`bash "${snapshotScript}"`);
+    
+    const exitCode = result.success ? 0 : 1;
+    const status = exitCode === 0 ? "SUCCESS" : "FAILED/TAINTED";
+    
+    // Check for generated files
+    const snapshotMd = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
+    const snapshotJson = path.join(PROJECT_DIR, "_state", "system_snapshot.json");
+    const mdExists = fs.existsSync(snapshotMd);
+    const jsonExists = fs.existsSync(snapshotJson);
+    
+    let output = `## Snapshot Run\n- **Status:** ${status}\n- **Exit Code:** ${exitCode}\n\n`;
+    
+    if (mdExists) {
+      output += `- **Generated:** ${snapshotMd}\n`;
+    } else {
+      output += `- **Missing:** ${snapshotMd}\n`;
+    }
+    
+    if (jsonExists) {
+      output += `- **Generated:** ${snapshotJson}\n`;
+    } else {
+      output += `- **Missing:** ${snapshotJson}\n`;
+    }
+    
+    // Add sanitized output if available
+    if (result.output || result.error) {
+      output += `\n### Output\n\`\`\`\n${sanitizeOutput(result.output || result.error || "")}\n\`\`\``;
+    }
+    
+    return output;
+  } catch (e) {
+    return `❌ Snapshot run failed: ${e.message}`;
+  }
+}
+
+async function handleLogsTail(issue) {
+  try {
+    // Parse process name from issue body or title
+    const title = issue?.title || "";
+    const body = issue?.body || "";
+    const fullText = `${title} ${body}`;
+    
+    // Extract process name after "logs:tail"
+    const match = fullText.match(/logs:tail\s+(\S+)/i);
+    if (!match || !match[1]) {
+      return `❌ Usage: \`logs:tail <process-name>\`\n\nAllowed processes: ${ALLOWED_PM2_PROCESSES.join(", ")}`;
+    }
+    
+    const processName = match[1].trim();
+    
+    // Check allowlist
+    if (!ALLOWED_PM2_PROCESSES.includes(processName)) {
+      return `❌ Process "${processName}" not allowed.\n\nAllowed processes: ${ALLOWED_PM2_PROCESSES.join(", ")}`;
+    }
+    
+    // Execute pm2 logs command
+    const result = executeCommand(`pm2 logs ${processName} --lines 120 --nostream`);
+    
+    if (!result.success && !result.output) {
+      return `❌ Failed to get logs for "${processName}": ${result.error || "unknown error"}`;
+    }
+    
+    const sanitized = sanitizeOutput(result.output || result.error || "");
+    
+    return `## Logs: ${processName}\n\`\`\`\n${sanitized}\n\`\`\``;
+  } catch (e) {
+    return `❌ Logs tail failed: ${e.message}`;
+  }
+}
+
 // --- Главный цикл --- //
 
 async function processIssue(issue) {
@@ -459,7 +685,7 @@ async function processIssue(issue) {
   try {
     // Выполняем команду
     logger.log(`[ops-agent] Executing command: ${command}`);
-    const result = await commandConfig.handler();
+    const result = await commandConfig.handler(issue);
 
     // Форматируем результат
     const comment = `✅ Command \`${command}\` completed successfully\n\n${result}`;

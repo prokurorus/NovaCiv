@@ -29,6 +29,9 @@ bash scripts/setup-ops-agent.sh
 - `youtube:refresh-test` - Тест YouTube токена
 - `worker:restart` - Перезапуск PM2 worker
 - `pipeline:run-test-job` - Создать тестовую задачу
+- `onebigstep:health` - Comprehensive health check (git, pm2, snapshot files, cron, health endpoints)
+- `snapshot:run` - Execute snapshot_system.sh and return generated file paths
+- `logs:tail <process-name>` - Tail logs from allowed PM2 processes (nova-ops-agent, nova-video)
 
 ## PM2 команды
 

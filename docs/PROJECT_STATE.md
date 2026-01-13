@@ -11,6 +11,7 @@
 
 - **nova-ops-agent** (PM2) — GitHub Ops Agent, processes Issues with "ops" label
 - **nova-video** (PM2) — Video Worker, processes video jobs from Firebase `videoJobs` queue
+- **nova-admin-domovoy** (PM2) — Admin Domovoy API service, handles admin questions with full project memory (VPS-only, no split-brain)
 - **Netlify scheduled functions** — fetch-news, news-cron, domovoy-auto-post, domovoy-auto-reply, video-worker
 
 ### What is explicitly NOT running in production
@@ -38,8 +39,53 @@
 **Current prod processes:**
 - `nova-ops-agent` — online
 - `nova-video` — online
+- `nova-admin-domovoy` — online (VPS-only admin brain service)
 
 **Explicitly state:** `nova-news-worker` must NOT run on prod.
+
+### Admin Domovoy Service
+
+**Service:** `nova-admin-domovoy`  
+**Script:** `server/admin-domovoy-api.js`  
+**Port:** 3001 (default, configurable via `ADMIN_DOMOVOY_PORT`)  
+**Endpoint:** `POST http://77.42.36.198:3001/admin/domovoy` (VPS IP)  
+**PM2 Config:** `ecosystem.config.cjs` (includes nova-admin-domovoy entry)
+
+**Architecture (NO SPLIT-BRAIN):**
+- **Netlify = UI + RBAC gate only**
+  - `/admin` page (frontend UI)
+  - `/.netlify/functions/admin-proxy` (RBAC gate + proxy, NO AI)
+  - `/.netlify/functions/admin-domovoy` (DISABLED, returns 410 Gone)
+- **VPS = single brain only**
+  - `server/admin-domovoy-api.js` (ONLY AI service)
+  - Loads memory from server-only files
+  - Calls OpenAI GPT-4o-mini
+  - Returns answers with full project awareness
+- **No duplicate logic, no ambiguity, no split-brain**
+
+**How it works:**
+1. Frontend `/admin` page calls `/.netlify/functions/admin-proxy` (Netlify proxy)
+2. Proxy checks Netlify Identity admin role (RBAC gate)
+3. Proxy forwards request to VPS endpoint `http://77.42.36.198:3001/admin/domovoy` with `X-Admin-Token` header (token never exposed to browser)
+4. VPS service loads memory from:
+   - `docs/ADMIN_ASSISTANT.md` (memory anchor)
+   - `docs/PROJECT_CONTEXT.md`
+   - `docs/PROJECT_STATE.md`
+   - `docs/START_HERE.md` (if space allows)
+   - `docs/RUNBOOKS.md` (if space allows)
+   - `runbooks/SOURCE_OF_TRUTH.md` (if space allows)
+   - `/root/NovaCiv/_state/system_snapshot.md` (tail 250 lines, if space allows)
+5. Service calls OpenAI GPT-4o-mini with full context (max 120k chars)
+6. Response includes answer + debug info (files loaded, snapshot mtime, memory bytes)
+
+**Security:**
+- Token-based auth (`X-Admin-Token` header)
+- Token stored only in VPS `.env` and Netlify env (server-side)
+- Token never exposed to browser (proxy handles forwarding)
+- All outputs sanitized (secrets filtered)
+- Netlify AI endpoint disabled (410 Gone) to prevent accidental use
+
+**Deployment:** See `runbooks/ADMIN_DOMOVOY_VPS.md`
 
 ---
 

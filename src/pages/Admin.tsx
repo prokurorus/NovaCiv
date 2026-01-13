@@ -94,6 +94,7 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>([]);
   const [debugInfo, setDebugInfo] = useState<{
     url: string;
     status: number | null;
@@ -317,14 +318,19 @@ function AdminInner() {
         throw new Error("Токен не готов, попробуйте перелогиниться");
       }
 
-      const requestUrl = "/.netlify/functions/admin-domovoy";
+      const requestUrl = "/.netlify/functions/admin-proxy";
+      const requestBody = {
+        text: text.trim(),
+        history: conversationHistory.slice(-20), // Last 20 messages
+      };
+      
       const res = await fetch(requestUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
         },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify(requestBody),
       });
 
       // Получаем raw response text для debug
@@ -383,7 +389,17 @@ function AdminInner() {
       if (!answerText) {
         throw new Error("Ответ получен, но пуст.");
       }
+      
+      // Update conversation history (keep last 20 messages)
+      const newHistory = [
+        ...conversationHistory,
+        { role: "user" as const, content: text.trim() },
+        { role: "assistant" as const, content: answerText },
+      ].slice(-20);
+      setConversationHistory(newHistory);
+      
       setResponse(answerText);
+      setText(""); // Clear input after successful submission
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {

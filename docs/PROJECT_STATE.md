@@ -1,184 +1,120 @@
 # Project State — NovaCiv
 
 **Last verified:** 2026-01-11  
-**Last synchronized:** 2026-01-11  
 **Status:** Active
 
-**Sync note:** All active code paths are now aligned with GitHub main. Documentation (Source of Truth, RTDB model, runbooks, snapshot logic) synchronized from server to GitHub.
+---
+
+## A. System Overview
+
+### What exists in production (VPS)
+
+- **nova-ops-agent** (PM2) — GitHub Ops Agent, processes Issues with "ops" label
+- **nova-video** (PM2) — Video Worker, processes video jobs from Firebase `videoJobs` queue
+- **Netlify scheduled functions** — fetch-news, news-cron, domovoy-auto-post, domovoy-auto-reply, video-worker
+
+### What is explicitly NOT running in production
+
+- **nova-news-worker** — Must NOT run on prod. News processing is handled by Netlify scheduled functions only.
 
 ---
 
-## 🎯 Entry Points
+## B. Source of Truth & Policies
 
-**Для начала работы с системой:**
-1. Прочитайте [REPO_MAP.md](./REPO_MAP.md) — структура проекта
-2. Прочитайте [RUNBOOKS.md](./RUNBOOKS.md) — операционные процедуры
-3. Прочитайте [runbooks/SOURCE_OF_TRUTH.md](../runbooks/SOURCE_OF_TRUTH.md) — регламент синхронизации
-4. Проверьте snapshot: `cat /root/NovaCiv/_state/system_snapshot.md`
+**GitHub main is source of truth.** All code changes: PC → commit/push → GitHub.
 
----
+**VPS is pull-only.** Server only does `git pull + pm2 restart` (via `deploy_pull_only.sh`), no manual code edits.
 
-## 🔒 Source of Truth
+**"Dirty repo = incident"** — Any `git status != clean` on VPS violates pull-only mode and requires immediate remediation.
 
-**Source of Truth = GitHub main**
+**No manual edits on VPS except .env/server configs** — Only `.env`, PM2 configs, cron, and infrastructure settings are allowed.
 
-Все изменения кода: делаются на ПК → commit/push → GitHub.
-
-Сервер: только `git pull + pm2 restart` (через `deploy_pull_only.sh`), без ручных правок кода.
-
-На сервере вручную допускаются только: `.env`, системные конфиги, инфраструктурные настройки.
-
-**Подробности:** см. [runbooks/SOURCE_OF_TRUTH.md](../runbooks/SOURCE_OF_TRUTH.md)
+**Details:** [runbooks/SOURCE_OF_TRUTH.md](../runbooks/SOURCE_OF_TRUTH.md)
 
 ---
 
-## 📍 Repere Points (Ключевые точки)
+## C. Production Processes (PM2)
 
-### Repository
-- **Root path:** `/root/NovaCiv`
-- **Branch:** `main` (pull-only режим)
-- **Remote:** GitHub (source of truth)
+**Current prod processes:**
+- `nova-ops-agent` — online
+- `nova-video` — online
 
-### Server Processes (PM2)
-- **nova-ops-agent** — GitHub Ops Agent (обрабатывает issues с меткой "ops")
-- **nova-video** — Video Worker (обрабатывает видео для YouTube)
-
-### Cron Jobs
-- **snapshot_system.sh** — каждые 30 минут (`*/30 * * * *`)
-  - Путь: `/root/NovaCiv/runbooks/snapshot_system.sh`
-  - Лог: `/var/log/novaciv_snapshot.log`
-
-### Health Endpoints
-- **health-news:** `/.netlify/functions/health-news?token=<NEWS_CRON_SECRET>`
-- **health-domovoy:** `/.netlify/functions/health-domovoy?token=<NEWS_CRON_SECRET>`
-
-### Firebase Database Nodes
-- **videoJobs** — очередь видео-задач для обработки и загрузки на YouTube
-- **config** — конфигурационные флаги (feature flags)
-- **newsMeta/en.json** — метаданные обработанных новостей (processedKeys, titleKeys)
-- **forum/topics** — темы форума (включая новости и посты Домового)
-- **forum/comments** — комментарии к темам
-- **health/news/** — heartbeat метрики для новостного pipeline
-- **health/domovoy/** — heartbeat метрики для Домового pipeline
-
-### Netlify Scheduled Functions
-Все scheduled functions настроены в `netlify.toml`:
-
-- **fetch-news** — `0 */3 * * *` (каждые 3 часа)
-  - Скачивает новости из RSS источников
-  - Обрабатывает через OpenAI
-  - Сохраняет в Firebase (`forum/topics`, `newsMeta/en.json`)
-  - Пишет метрики в `/health/news/fetchNewsLastRun`
-
-- **news-cron** — `0 * * * *` (каждый час)
-  - Читает новые темы из `forum/topics` (section: "news")
-  - Отправляет в Telegram каналы (RU/EN/DE)
-  - Пишет метрики в `/health/news/newsCronLastRun`
-
-- **domovoy-auto-post** — `0 0 * * *` (раз в сутки)
-  - Генерирует философский пост через OpenAI
-  - Сохраняет в Firebase (`forum/topics`)
-  - Отправляет в Telegram канал по языку
-  - Пишет метрики в `/health/domovoy/autoPostLastRun`
-
-- **domovoy-auto-reply** — `*/10 * * * *` (каждые 10 минут)
-  - Сканирует комментарии в темах Домового
-  - Генерирует ответы через OpenAI
-  - Сохраняет в Firebase (`forum/comments`)
-  - Пишет метрики в `/health/domovoy/autoReplyLastRun`
-
-- **video-worker** — `*/15 * * * *` (каждые 15 минут)
-  - Обрабатывает видео-задачи из `videoJobs`
+**Explicitly state:** `nova-news-worker` must NOT run on prod.
 
 ---
 
-## 🔄 Main Flows
+## D. Project Memory
 
-### News Pipeline
-1. **fetch-news** (Netlify scheduled) → скачивает RSS → обрабатывает через OpenAI → сохраняет в Firebase
-2. **news-cron** (Netlify scheduled) → читает новые темы → отправляет в Telegram (RU/EN/DE)
+**Repo docs:**
+- `docs/PROJECT_STATE.md` — current system state (this file)
+- `docs/OPS.md` — operator console, Firebase monitoring, smoke tests
+- `docs/RUNBOOKS.md` — operational procedures, deployment, troubleshooting
+- `docs/REPO_MAP.md` — repository structure map
+- `runbooks/SOURCE_OF_TRUTH.md` — pull-only sync policy and procedures
 
-### Domovoy Pipeline
-1. **domovoy-auto-post** (Netlify scheduled) → генерирует пост → сохраняет в Firebase → отправляет в Telegram
-2. **domovoy-auto-reply** (Netlify scheduled) → сканирует комментарии → генерирует ответы → сохраняет в Firebase
-
-### Video Pipeline
-1. Создание задачи → Firebase (`videoJobs`)
-2. **video-worker** (Netlify scheduled) → обрабатывает задачу → загружает на YouTube
-
-### Ops Pipeline
-1. GitHub Issue с меткой "ops" → **nova-ops-agent** (PM2) → выполняет команду → комментирует в Issue
+**Server memory:**
+- `/root/NovaCiv/_state/system_snapshot.md` — human-readable system snapshot (generated every 30 min)
+- `/root/NovaCiv/_state/system_snapshot.json` — structured system snapshot (generated every 30 min)
 
 ---
 
-## 🔧 Toggles & Configuration
+## E. Snapshot Mechanism
 
-### Feature Flags Contract (Firebase `config/features/`)
+**Script:** `runbooks/snapshot_system.sh`
 
-**Где живут:** Firebase Realtime Database → `config/features/`
+**Cron:** Every 30 minutes (`*/30 * * * *`)
 
-**Кто читает:** 
-- `server/video-worker.js` (nova-video PM2 process)
-- `server/config/feature-flags.js` (функция чтения флагов)
+**Outputs:**
+- `/root/NovaCiv/_state/system_snapshot.md`
+- `/root/NovaCiv/_state/system_snapshot.json`
 
-**Примеры:**
-- `youtubeUploadEnabled` (boolean) — включение/выключение загрузки видео на YouTube
-- `telegramEnabled` (boolean) — включение/выключение отправки в Telegram
+**Log:** `/var/log/novaciv_snapshot.log`
 
-**Важные правила:**
-- Изменение флагов = runtime-операция (через Firebase Console), не требует деплоя
-- Флаги не должны дублироваться в коде или `.env`
-- При ошибке чтения Firebase используются безопасные дефолты:
-  - `youtubeUploadEnabled: false`
-  - `telegramEnabled: true`
-
-**Подробности:** см. [docs/DATA_MODEL_RTDB.md](./DATA_MODEL_RTDB.md#configfeatures)
-
-### Environment Variables
-См. `.env.example` для списка переменных окружения:
-- `FIREBASE_DB_URL` — URL Firebase Realtime Database
-- `FIREBASE_SERVICE_ACCOUNT_JSON` — сервисный аккаунт Firebase (JSON)
-- `OPENAI_API_KEY` — ключ OpenAI API
-- `TELEGRAM_BOT_TOKEN` — токен Telegram бота
-- `TELEGRAM_NEWS_CHAT_ID_RU` — ID чата для новостей (RU)
-- `TELEGRAM_NEWS_CHAT_ID_EN` — ID чата для новостей (EN)
-- `TELEGRAM_NEWS_CHAT_ID_DE` — ID чата для новостей (DE)
-- `NEWS_CRON_SECRET` — секрет для health endpoints
-- `ALLOW_NETLIFY_RUN_NOW_BYPASS` — флаг для тестирования Netlify "Run now" без токена (по умолчанию false/не задано)
-  - Если `true`, позволяет "Run now" в Netlify Dashboard обходить проверку токена
-  - Работает только для вызовов с referer содержащим `app.netlify.com` или `app.netlify.app`
-  - Scheduled вызовы (cron) всегда обходят проверку токена независимо от этого флага
-- `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` — YouTube OAuth
-- И другие (см. `.env.example`)
-
-**ВАЖНО:** Все секреты хранятся в `.env` файле на сервере, НЕ в Git.
+**"Tainted" behavior:** Snapshot checks for secret patterns (API keys, tokens, private keys). If detected, output is marked "tainted" and sanitized, script exits with error code for monitoring.
 
 ---
 
-## ⚠️ Known Issues
+## F. Ops-agent Control Plane
 
-(Обновляется по мере обнаружения)
+**Trigger:** GitHub Issues with label "ops"
 
-- Нет известных критических проблем на текущий момент
+**Whitelist commands:**
+- `snapshot` — get last system snapshot (sanitized)
+- `report:status` — show PM2 status, git status, disk space
+- `video:validate` — validate video pipeline config
+- `youtube:refresh-test` — test YouTube token refresh
+- `worker:restart` — restart PM2 worker
+- `pipeline:run-test-job` — create test pipeline job
 
----
-
-## 📊 Monitoring
-
-### Health Checks
-- **News pipeline:** `node scripts/check-health-news.mjs`
-- **Domovoy pipeline:** `node scripts/check-health-domovoy.mjs`
-- **GitHub Actions:** `.github/workflows/pipeline-health.yml` (каждые 30 минут)
-
-### Logs
-- **PM2 logs:** `pm2 logs` или `pm2 logs <process-name>`
-- **Snapshot log:** `/var/log/novaciv_snapshot.log`
-- **Netlify Functions:** Netlify Dashboard → Functions → Logs
-
-### Metrics
-- **Firebase:** `/health/news/*` и `/health/domovoy/*` (heartbeat метрики)
-- **PM2:** `pm2 status`, `pm2 describe <process-name>`
+**Output sanitization guarantee:** All command outputs are sanitized before posting to GitHub Issues (secrets filtered, tokens redacted).
 
 ---
 
-*Документ обновляется при изменениях в системе.*
+## G. Health/Diagnostics Entry Points
+
+**When something breaks, check in this order:**
+
+1. **Snapshot** — `cat /root/NovaCiv/_state/system_snapshot.md` (or via ops-agent: `snapshot`)
+2. **Report status** — via ops-agent: `report:status` (or `pm2 status`, `git status`)
+3. **PM2 logs** — `pm2 logs nova-ops-agent`, `pm2 logs nova-video`
+
+**Additional:**
+- Health endpoints: `/.netlify/functions/health-news`, `/.netlify/functions/health-domovoy`
+- Firebase metrics: `/health/news/*`, `/health/domovoy/*` (heartbeat timestamps)
+
+---
+
+## H. Known Current Status (as of 2026-01-11)
+
+**VPS on main** — Server repository is on `main` branch, pull-only mode active.
+
+**PM2:**
+- `nova-ops-agent` — online
+- `nova-video` — online
+- `nova-news-worker` — absent/not running (expected)
+
+**Past symptom:** Earlier "dirty package-lock.json" on VPS was a violation of pull-only policy. Going forward, any dirty repo state is treated as an incident requiring immediate remediation per Source of Truth policy.
+
+---
+
+*Document updated to reflect audit findings and current production state.*

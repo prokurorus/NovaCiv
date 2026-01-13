@@ -1,5 +1,54 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, ErrorInfo, ReactNode } from "react";
 import Header from "../components/Header";
+
+// Error Boundary Component
+class AdminErrorBoundary extends React.Component<
+  { children: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[Admin] Error boundary caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <>
+          <Header />
+          <main className="min-h-screen bg-white">
+            <div className="max-w-4xl mx-auto py-10 px-4">
+              <div className="text-center space-y-4">
+                <h1 className="text-2xl font-semibold text-zinc-900">
+                  Ошибка загрузки админ-панели
+                </h1>
+                <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                  {this.state.error?.message || "Неизвестная ошибка"}
+                </div>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
+                >
+                  Перезагрузить страницу
+                </button>
+              </div>
+            </div>
+          </main>
+        </>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // Типы для Netlify Identity
 interface NetlifyIdentityUser {
@@ -30,7 +79,7 @@ declare global {
   }
 }
 
-export default function Admin() {
+function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdminRole, setHasAdminRole] = useState(false);
@@ -215,6 +264,19 @@ export default function Admin() {
     return cleanup;
   }, []);
 
+  const handleOpenLogin = () => {
+    if (!window.netlifyIdentity) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[Admin] netlifyIdentity not available");
+      }
+      return;
+    }
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Admin] Opening Identity modal");
+    }
+    window.netlifyIdentity.open();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -260,7 +322,15 @@ export default function Admin() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Ошибка запроса");
+        const errorMsg = data.error || data.message || "Ошибка запроса";
+        const statusMsg = res.status === 401 
+          ? "Не авторизован. Проверьте вход через Netlify Identity."
+          : res.status === 403
+          ? "Доступ запрещён. Требуется роль admin."
+          : res.status === 500
+          ? "Ошибка сервера. Проверьте логи функции."
+          : errorMsg;
+        throw new Error(`${statusMsg} (HTTP ${res.status})`);
       }
 
       setResponse(data.reply || data.answer || "Ответ получен, но пуст.");
@@ -286,7 +356,7 @@ export default function Admin() {
                   </div>
                   <div className="flex gap-3 justify-center">
                     <button
-                      onClick={() => window.netlifyIdentity?.open()}
+                      onClick={handleOpenLogin}
                       className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
                     >
                       Войти
@@ -322,7 +392,7 @@ export default function Admin() {
               </p>
               <div className="flex gap-3 justify-center">
                 <button
-                  onClick={() => window.netlifyIdentity?.open()}
+                  onClick={handleOpenLogin}
                   className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
                 >
                   Войти (GitHub / Email)
@@ -436,8 +506,30 @@ export default function Admin() {
               </div>
             </div>
           )}
+
+          {/* Debug area (non-secret) */}
+          {error && (
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm">
+              <div className="font-semibold text-yellow-800 mb-2">Debug Info:</div>
+              <div className="text-yellow-700 font-mono text-xs">
+                {error.includes("401") && "Status: 401 Unauthorized - Check JWT token"}
+                {error.includes("403") && "Status: 403 Forbidden - Admin role required"}
+                {error.includes("500") && "Status: 500 Server Error - Check function logs"}
+                {!error.includes("401") && !error.includes("403") && !error.includes("500") && `Error: ${error}`}
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </>
+  );
+}
+
+// Export with error boundary
+export default function Admin() {
+  return (
+    <AdminErrorBoundary>
+      <AdminInner />
+    </AdminErrorBoundary>
   );
 }

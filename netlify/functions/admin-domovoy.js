@@ -6,69 +6,99 @@
 
 const fs = require("fs");
 const path = require("path");
+const { requireAdmin } = require("./_lib/auth");
 
 // ---------- ENV ----------
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // ---------- Глобальные переменные для контекста ----------
-let projectState = null;
-let projectContext = null;
+let memoryCache = null;
 
-// ---------- Загрузка PROJECT_STATE.md ----------
-function loadProjectState() {
-  if (projectState) return projectState;
-
+// ---------- Вспомогательная функция для загрузки файлов ----------
+function loadFile(filePath) {
   try {
-    const rootDir = process.cwd();
-    const statePath = path.join(rootDir, "docs", "PROJECT_STATE.md");
-    projectState = fs.readFileSync(statePath, "utf8");
-    console.log("[admin-domovoy] Loaded PROJECT_STATE.md");
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf8");
+      console.log(`[admin-domovoy] Loaded from:`, filePath);
+      return content;
+    }
   } catch (e) {
-    console.error("[admin-domovoy] Failed to load PROJECT_STATE.md:", e);
-    projectState = projectState || "";
+    console.warn(`[admin-domovoy] Failed to load ${filePath}:`, e.message);
   }
-
-  return projectState;
+  return null;
 }
 
-// ---------- Загрузка PROJECT_CONTEXT.md ----------
-function loadProjectContext() {
-  if (projectContext) return projectContext;
-
-  try {
-    const rootDir = process.cwd();
-    const contextPath = path.join(rootDir, "docs", "PROJECT_CONTEXT.md");
-    projectContext = fs.readFileSync(contextPath, "utf8");
-    console.log("[admin-domovoy] Loaded PROJECT_CONTEXT.md");
-  } catch (e) {
-    console.error("[admin-domovoy] Failed to load PROJECT_CONTEXT.md:", e);
-    projectContext = projectContext || "";
-  }
-
-  return projectContext;
-}
-
-// ---------- Проверка роли admin через Netlify Identity ----------
-function checkAdminRole(context) {
-  // Netlify Identity предоставляет информацию о пользователе через context.clientContext.user
-  // Это автоматически заполняется, когда запрос содержит валидный JWT токен
-  const user = context?.clientContext?.user;
+// ---------- Построение Memory Pack для админа ----------
+function buildMemoryPack() {
+  if (memoryCache !== null) return memoryCache;
   
-  if (!user) {
-    console.log("[admin-domovoy] No user found in context.clientContext");
-    return false;
+  const rootDir = process.cwd();
+  const functionDir = __dirname;
+  
+  // Определяем базовый путь к docs и runbooks
+  const docsBase = fs.existsSync(path.join(rootDir, "docs"))
+    ? path.join(rootDir, "docs")
+    : path.join(functionDir, "..", "..", "docs");
+  
+  const runbooksBase = fs.existsSync(path.join(rootDir, "runbooks"))
+    ? path.join(rootDir, "runbooks")
+    : path.join(functionDir, "..", "..", "runbooks");
+  
+  const memoryFiles = [];
+  const MAX_TOTAL_CHARS = 120000; // Hard limit
+  
+  // Приоритет 1: Критичные файлы (всегда включаем)
+  const criticalFiles = [
+    { path: path.join(docsBase, "PROJECT_STATE.md"), name: "PROJECT_STATE.md" },
+    { path: path.join(docsBase, "PROJECT_CONTEXT.md"), name: "PROJECT_CONTEXT.md" },
+  ];
+  
+  // Приоритет 2: Важные файлы (включаем если есть место)
+  const importantFiles = [
+    { path: path.join(docsBase, "START_HERE.md"), name: "START_HERE.md" },
+    { path: path.join(docsBase, "OPS.md"), name: "OPS.md" },
+    { path: path.join(docsBase, "RUNBOOKS.md"), name: "RUNBOOKS.md" },
+    { path: path.join(runbooksBase, "README.md"), name: "runbooks/README.md" },
+    { path: path.join(runbooksBase, "SOURCE_OF_TRUTH.md"), name: "runbooks/SOURCE_OF_TRUTH.md" },
+  ];
+  
+  let totalChars = 0;
+  
+  // Загружаем критичные файлы
+  for (const file of criticalFiles) {
+    const content = loadFile(file.path);
+    if (content) {
+      memoryFiles.push({ name: file.name, content });
+      totalChars += content.length;
+    }
   }
-
-  // Проверяем роль admin
-  // Роли должны быть в app_metadata.roles (используется Netlify Identity)
-  const userRoles = user.app_metadata?.roles || user.user_metadata?.roles || [];
-  const hasAdminRole = Array.isArray(userRoles) && userRoles.includes("admin");
-
-  if (!hasAdminRole) {
-    console.log("[admin-domovoy] User does not have admin role. Email:", user.email, "Roles:", userRoles);
+  
+  // Загружаем важные файлы до лимита
+  for (const file of importantFiles) {
+    if (totalChars >= MAX_TOTAL_CHARS) break;
+    
+    const content = loadFile(file.path);
+    if (content) {
+      const remaining = MAX_TOTAL_CHARS - totalChars;
+      if (content.length <= remaining) {
+        memoryFiles.push({ name: file.name, content });
+        totalChars += content.length;
+      } else {
+        // Обрезаем если слишком большой
+        memoryFiles.push({ 
+          name: file.name, 
+          content: content.slice(0, remaining) + "\n\n[... truncated ...]" 
+        });
+        totalChars = MAX_TOTAL_CHARS;
+        break;
+      }
+    }
   }
-
-  return hasAdminRole;
+  
+  memoryCache = memoryFiles;
+  console.log(`[admin-domovoy] Memory pack built: ${memoryFiles.length} files, ${totalChars} chars`);
+  
+  return memoryCache;
 }
 
 // ---------- Основной handler ----------
@@ -85,21 +115,9 @@ exports.handler = async (event, context) => {
     }
 
     // Проверка авторизации и роли admin
-    const user = context?.clientContext?.user;
-    if (!user) {
-      return {
-        statusCode: 401,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ok: false, error: "Unauthorized: authentication required" }),
-      };
-    }
-
-    if (!checkAdminRole(context)) {
-      return {
-        statusCode: 403,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ok: false, error: "Forbidden: admin role required" }),
-      };
+    const authError = requireAdmin(context);
+    if (authError) {
+      return authError;
     }
 
     // Проверка API ключа
@@ -126,27 +144,58 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Загрузка PROJECT_STATE.md и PROJECT_CONTEXT.md
-    const stateContent = loadProjectState();
-    const contextContent = loadProjectContext();
+    // Загрузка полного Memory Pack
+    let memoryPack;
+    
+    try {
+      memoryPack = buildMemoryPack();
+    } catch (e) {
+      console.error("[admin-domovoy] Memory pack loading error:", e);
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: false,
+          error: "context_missing",
+          details: `Failed to load memory pack: ${e.message}`,
+        }),
+      };
+    }
+    
+    // Проверка, что memory pack не пустой
+    if (!memoryPack || memoryPack.length === 0) {
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: false,
+          error: "context_missing",
+          details: "Memory pack is empty or not found",
+        }),
+      };
+    }
+    
+    // Формируем контекст из всех файлов
+    const contextBlocks = memoryPack.map(file => 
+      `=== ${file.name} ===\n\n${file.content}\n\n`
+    ).join("\n---\n\n");
 
     // Формирование промпта для OpenAI
     const systemPrompt = `Ты — административный помощник для проекта NovaCiv.
-Ты в ADMIN_MODE, пользователь администратор, разрешены тех. вопросы.
-Твоя задача — отвечать на вопросы администратора на основе контекста проекта.
-Отвечай кратко, структурированно и по делу.
-Это read-only режим: никаких действий, только информация.
-Не выдумывай статус, если нет в PROJECT_STATE/CONTEXT — говори "нет данных".`;
+Ты в ADMIN_MODE, пользователь — администратор с полным доступом к проектной памяти.
+Твоя задача — отвечать на вопросы администратора на основе полного контекста проекта.
 
-    const userPrompt = `Текущее состояние системы (PROJECT_STATE.md):
+ПРАВИЛА:
+- Отвечай кратко, структурированно и по делу
+- Это read-only режим: никаких действий, только информация
+- НИКОГДА не печатай секреты, токены, ключи, пароли
+- Если информации нет в предоставленном контексте, честно скажи, что данных нет, но не выдумывай
+- Можешь обсуждать: ops, код, инфраструктуру, runbooks, серверные процессы, политики
+- Держи ответы короткими и actionable`;
 
-${stateContent}
+    const userPrompt = `Полная проектная память (Memory Pack):
 
----
-
-Контекст проекта (PROJECT_CONTEXT.md):
-
-${contextContent}
+${contextBlocks}
 
 ---
 
@@ -184,11 +233,12 @@ ${text}`;
         errorText.slice(0, 200),
       );
       return {
-        statusCode: 500,
+        statusCode: 502,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ok: false,
-          error: "OpenAI request failed",
+          error: "openai_failed",
+          details: `OpenAI API returned status ${completion.status}`,
         }),
       };
     }
@@ -211,6 +261,7 @@ ${text}`;
       body: JSON.stringify({
         ok: false,
         error: "Internal Server Error",
+        details: e.message || "Unknown error",
       }),
     };
   }

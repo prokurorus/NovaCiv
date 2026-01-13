@@ -448,19 +448,36 @@ exports.handler = async (event) => {
         ? body.question.trim()
         : userTextFromHistory;
 
-    // PUBLIC_MODE guard: блокируем админские темы
+    // PUBLIC_MODE guard: строгая блокировка админских тем
     const normalizedUserText = userText.toLowerCase();
     const adminKeywords = [
-      "admin", "админ", "девопс", "devops", "auth", "авторизация",
-      "secrets", "секреты", "deploy", "деплой", "netlify", "github",
-      "roles", "роли", "tokens", "токены", "functions", "функции"
+      "admin", "админ", "админка", "админ-панель", "админ панель",
+      "девопс", "devops", "ops-agent", "ops agent", "ops-agent.js",
+      "auth", "авторизация", "jwt", "token", "токен",
+      "secrets", "секреты", "secret", "секрет",
+      "deploy", "деплой", "deployment", "деплоймент",
+      "netlify", "github", "git", "repo", "репозиторий",
+      "roles", "роли", "role", "роль",
+      "tokens", "токены", "credentials", "credentials",
+      "functions", "функции", "function", "функция",
+      "pm2", "server", "сервер", "vps",
+      "project_state", "project_context", "project state", "project context",
+      "runbooks", "runbook", "операционные книги",
+      "ops.md", "ops", "операции", "операционный",
+      "source_of_truth", "source of truth",
+      "nova-ops-agent", "nova-video", "nova-news-worker",
+      "firebase", "firebase service account", "service account",
+      "openai_api_key", "openai api key", "api key",
+      "youtube", "telegram", "bot token"
     ];
     const isAdminTopic = adminKeywords.some(keyword => normalizedUserText.includes(keyword));
     
     if (isAdminTopic) {
       return {
         statusCode: 200,
-        body: JSON.stringify({ answer: "Этот вопрос доступен только в /admin." }),
+        body: JSON.stringify({ 
+          answer: "Это внутренние вопросы администрирования. Пожалуйста, обратитесь через админ-панель (/admin)."
+        }),
       };
     }
 
@@ -522,6 +539,12 @@ exports.handler = async (event) => {
 — опираться на Манифест и Устав,
 — не обещать невозможного,
 — не подменять волю Граждан.
+
+КРИТИЧЕСКИ ВАЖНО:
+— Ты НЕ имеешь доступа к админской памяти (PROJECT_STATE.md, PROJECT_CONTEXT.md, runbooks)
+— Ты НЕ можешь обсуждать: админ-панель, ops-agent, сервер, деплой, токены, секреты, инфраструктуру
+— Если тебя спрашивают об админских/операционных темах — вежливо откажись и направь в /admin
+— Ты публичный помощник, только философия NovaCiv, Манифест и Устав
 
 Если тебя спрашивают о чём-то вне философии и Устава — отвечай как разумный помощник, признавая границы своих знаний.
 `;

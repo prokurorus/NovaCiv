@@ -28,25 +28,24 @@
 
 
     <!-- Netlify Identity -->
-    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js" onload="initNetlifyIdentity()"></script>
+    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js" defer></script>
     <script>
-      // Инициализация Netlify Identity после загрузки скрипта
-      function initNetlifyIdentity() {
-        // Гарантируем, что window.netlifyIdentity существует перед init()
-        if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
-          window.netlifyIdentity.on("init", function (user) {
+      document.addEventListener('DOMContentLoaded', () => {
+        const tick = () => {
+          if (!window.netlifyIdentity) {
+            return setTimeout(tick, 50);
+          }
+          window.netlifyIdentity.on('init', (user) => {
             if (!user) {
-              window.netlifyIdentity.on("login", function () {
+              window.netlifyIdentity.on('login', () => {
                 document.location.reload();
               });
             }
           });
           window.netlifyIdentity.init();
-        } else {
-          // Если скрипт ещё не загружен, ждём немного и пробуем снова
-          setTimeout(initNetlifyIdentity, 100);
-        }
-      }
+        };
+        tick();
+      });
     </script>
 
     <!-- React -->

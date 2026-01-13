@@ -139,3 +139,31 @@ h2 {
   animation: chat-fade-in-up 0.18s ease-out;
 }
 
+/* ===== Netlify Identity Modal Visibility Fix ===== */
+/* Ensures the Netlify Identity modal appears above all other content */
+
+.netlify-identity-widget,
+.netlify-identity-modal,
+.netlify-identity-widget iframe {
+  z-index: 2147483647 !important;
+  position: fixed !important;
+}
+
+.netlify-identity-modal {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Ensure parent containers don't hide the modal */
+body,
+#root,
+html {
+  overflow-x: visible !important;
+}
+
+/* Prevent any stacking context issues */
+.netlify-identity-widget {
+  isolation: isolate;
+  contain: layout style paint;
+}

@@ -21,8 +21,10 @@ module.exports = {
     {
       name: "nova-admin-domovoy",
       script: "server/admin-domovoy-api.js",
+      cwd: "/root/NovaCiv",
       env: {
         NODE_ENV: "production",
+        PROJECT_DIR: "/root/NovaCiv",
       },
       // PM2 will load .env from /root/NovaCiv/.env automatically
       // Required env vars: ADMIN_API_TOKEN, OPENAI_API_KEY, ADMIN_DOMOVOY_PORT (optional, default 3001)

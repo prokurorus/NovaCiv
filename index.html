@@ -27,6 +27,28 @@
 
 
 
+    <!-- Netlify Identity -->
+    <script src="https://identity.netlify.com/v1/netlify-identity-widget.js" onload="initNetlifyIdentity()"></script>
+    <script>
+      // Инициализация Netlify Identity после загрузки скрипта
+      function initNetlifyIdentity() {
+        // Гарантируем, что window.netlifyIdentity существует перед init()
+        if (typeof window.netlifyIdentity !== 'undefined' && window.netlifyIdentity) {
+          window.netlifyIdentity.on("init", function (user) {
+            if (!user) {
+              window.netlifyIdentity.on("login", function () {
+                document.location.reload();
+              });
+            }
+          });
+          window.netlifyIdentity.init();
+        } else {
+          // Если скрипт ещё не загружен, ждём немного и пробуем снова
+          setTimeout(initNetlifyIdentity, 100);
+        }
+      }
+    </script>
+
     <!-- React -->
     <script type="module" src="/src/main.tsx"></script>
   </body>

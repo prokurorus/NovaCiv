@@ -39,6 +39,9 @@ export default function Admin() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const initCalledRef = useRef(false);
+  const initEventFiredRef = useRef(false);
+  const timersRef = useRef<Array<NodeJS.Timeout>>([]);
+  const stillLoadingRef = useRef(true);
 
   // Сильная очистка при выходе
   const performLogout = () => {
@@ -104,6 +107,87 @@ export default function Admin() {
   };
 
   useEffect(() => {
+    // Сброс состояния загрузки
+    stillLoadingRef.current = true;
+    initEventFiredRef.current = false;
+    
+    // Очистка всех таймеров при размонтировании
+    const cleanup = () => {
+      timersRef.current.forEach(timer => clearTimeout(timer));
+      timersRef.current = [];
+    };
+
+    const initIdentity = () => {
+      if (!window.netlifyIdentity || initCalledRef.current) return;
+      
+      initCalledRef.current = true;
+
+      // 1) Регистрируем обработчики ПЕРВЫМИ, до вызова init()
+      window.netlifyIdentity.on("init", (user) => {
+        initEventFiredRef.current = true;
+        stillLoadingRef.current = false;
+        setUser(user);
+        setIsLoading(false);
+        
+        if (user) {
+          checkRoleWithRetry(user);
+        } else {
+          setHasAdminRole(false);
+          // Если пользователь не залогинен, открываем модал
+          window.netlifyIdentity?.open();
+        }
+      });
+
+      window.netlifyIdentity.on("login", (user) => {
+        setUser(user);
+        setIsLoading(false);
+        window.netlifyIdentity?.close();
+        
+        if (user) {
+          checkRoleWithRetry(user);
+        } else {
+          setHasAdminRole(false);
+        }
+        
+        // Принудительная перезагрузка для обновления claims
+        window.location.href = "/admin";
+      });
+
+      window.netlifyIdentity.on("logout", () => {
+        setUser(null);
+        setHasAdminRole(false);
+      });
+
+      // 2) Вызываем init() ровно один раз
+      window.netlifyIdentity.init();
+
+      // 3) Детерминированный fallback через 700ms
+      const fallbackTimer = setTimeout(() => {
+        if (!initEventFiredRef.current && stillLoadingRef.current) {
+          const u = window.netlifyIdentity?.currentUser?.() || null;
+          setUser(u);
+          setIsLoading(false);
+          stillLoadingRef.current = false;
+          if (!u) {
+            window.netlifyIdentity?.open();
+          } else {
+            checkRoleWithRetry(u);
+          }
+        }
+      }, 700);
+      timersRef.current.push(fallbackTimer);
+
+      // 4) Жёсткий таймаут безопасности через 2500ms
+      const hardTimeout = setTimeout(() => {
+        if (stillLoadingRef.current) {
+          setIsLoading(false);
+          stillLoadingRef.current = false;
+          setError("Identity не инициализировался. Проверьте блокировщики/сеть.");
+        }
+      }, 2500);
+      timersRef.current.push(hardTimeout);
+    };
+
     if (!window.netlifyIdentity) {
       // Ждём загрузки скрипта
       const checkInterval = setInterval(() => {
@@ -112,66 +196,24 @@ export default function Admin() {
           initIdentity();
         }
       }, 50);
+      timersRef.current.push(checkInterval as unknown as NodeJS.Timeout);
 
       // Таймаут на случай, если скрипт не загрузится
-      setTimeout(() => {
+      const scriptTimeout = setTimeout(() => {
         clearInterval(checkInterval);
         if (!window.netlifyIdentity) {
+          stillLoadingRef.current = false;
           setIsLoading(false);
           setError("Netlify Identity не загружен. Убедитесь, что скрипт подключен.");
         }
       }, 5000);
-
-      return () => clearInterval(checkInterval);
+      timersRef.current.push(scriptTimeout);
     } else if (!initCalledRef.current) {
       initIdentity();
     }
+
+    return cleanup;
   }, []);
-
-  const initIdentity = () => {
-    if (!window.netlifyIdentity || initCalledRef.current) return;
-    
-    initCalledRef.current = true;
-
-    // Инициализируем один раз
-    window.netlifyIdentity.init();
-
-    // Обработчик init - источник истины
-    window.netlifyIdentity.on("init", (user) => {
-      setUser(user);
-      setIsLoading(false);
-      
-      if (user) {
-        checkRoleWithRetry(user);
-      } else {
-        setHasAdminRole(false);
-        // Если пользователь не залогинен, открываем модал
-        window.netlifyIdentity?.open();
-      }
-    });
-
-    // Обработчик login
-    window.netlifyIdentity.on("login", (user) => {
-      setUser(user);
-      setIsLoading(false);
-      window.netlifyIdentity?.close();
-      
-      if (user) {
-        checkRoleWithRetry(user);
-      } else {
-        setHasAdminRole(false);
-      }
-      
-      // Принудительная перезагрузка для обновления claims
-      window.location.href = "/admin";
-    });
-
-    // Обработчик logout
-    window.netlifyIdentity.on("logout", () => {
-      setUser(null);
-      setHasAdminRole(false);
-    });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,7 +277,30 @@ export default function Admin() {
         <Header />
         <main className="min-h-screen bg-white">
           <div className="max-w-4xl mx-auto py-10 px-4">
-            <div className="text-center">Загрузка...</div>
+            <div className="text-center space-y-4">
+              <div>Загрузка...</div>
+              {error && (
+                <>
+                  <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                    {error}
+                  </div>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => window.netlifyIdentity?.open()}
+                      className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
+                    >
+                      Войти
+                    </button>
+                    <button
+                      onClick={performLogout}
+                      className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+                    >
+                      Сбросить вход
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </main>
       </>

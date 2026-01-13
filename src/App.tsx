@@ -11,6 +11,7 @@ import NewsPage from "./pages/News";
 import Join from "./pages/Join";
 import ForumPage from "./pages/ForumPage";
 import TopicPage from "./pages/TopicPage";
+import Admin from "./pages/Admin";
 import { useStats } from "./hooks/useStats";
 import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
@@ -589,7 +590,17 @@ if (pathname.startsWith("/forum/")) {
   );
 }
 
-  // 7) На всякий случай — всё остальное ведём на "Наше видение"
+  // 8) Админ-панель
+  if (pathname === "/admin") {
+    return (
+      <>
+        <Admin />
+        <AssistantWidget />
+      </>
+    );
+  }
+
+  // 9) На всякий случай — всё остальное ведём на "Наше видение"
   return (
     <>
       <Header />

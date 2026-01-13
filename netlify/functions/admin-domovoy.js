@@ -128,6 +128,8 @@ exports.handler = async (event, context) => {
         body: JSON.stringify({
           ok: false,
           error: "OPENAI_API_KEY is not configured",
+          message: "OpenAI API key is missing in environment variables",
+          debugHint: "Set OPENAI_API_KEY in Netlify environment variables",
         }),
       };
     }
@@ -140,7 +142,11 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 400,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ok: false, error: "Text is required" }),
+        body: JSON.stringify({
+          ok: false,
+          error: "Text is required",
+          message: "Request body must include 'text' field",
+        }),
       };
     }
 
@@ -157,7 +163,8 @@ exports.handler = async (event, context) => {
         body: JSON.stringify({
           ok: false,
           error: "context_missing",
-          details: `Failed to load memory pack: ${e.message}`,
+          message: `Failed to load memory pack: ${e.message}`,
+          debugHint: "Check docs/ and runbooks/ exist in included_files",
         }),
       };
     }
@@ -170,7 +177,8 @@ exports.handler = async (event, context) => {
         body: JSON.stringify({
           ok: false,
           error: "context_missing",
-          details: "Memory pack is empty or not found",
+          message: "Memory pack is empty or not found",
+          debugHint: "Check docs/PROJECT_CONTEXT.md exists",
         }),
       };
     }
@@ -238,31 +246,46 @@ ${text}`;
         body: JSON.stringify({
           ok: false,
           error: "openai_failed",
-          details: `OpenAI API returned status ${completion.status}`,
+          message: `OpenAI API returned status ${completion.status}`,
+          debugHint: "Check OPENAI_API_KEY and API quota",
         }),
       };
     }
 
     const data = await completion.json();
-    const reply =
+    const answer =
       data.choices?.[0]?.message?.content ||
       "Не удалось получить ответ от OpenAI.";
+
+    if (!answer || answer.trim().length === 0) {
+      return {
+        statusCode: 502,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: false,
+          error: "openai_empty_response",
+          message: "OpenAI returned an empty response",
+          debugHint: "Check OpenAI API response structure",
+        }),
+      };
+    }
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ok: true, reply }),
+      body: JSON.stringify({ ok: true, answer }),
     };
   } catch (e) {
     console.error("[admin-domovoy] Handler error:", e);
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ok: false,
-        error: "Internal Server Error",
-        details: e.message || "Unknown error",
-      }),
-    };
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: false,
+          error: "Internal Server Error",
+          message: e.message || "Unknown error",
+          debugHint: "Check function logs for details",
+        }),
+      };
   }
 };

@@ -87,6 +87,12 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [debugInfo, setDebugInfo] = useState<{
+    url: string;
+    status: number | null;
+    rawResponse: string;
+    jsonKeys: string[];
+  } | null>(null);
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
@@ -284,6 +290,7 @@ function AdminInner() {
     setIsSubmitting(true);
     setError("");
     setResponse("");
+    setDebugInfo(null);
 
     try {
       const currentUser = window.netlifyIdentity?.currentUser();
@@ -303,7 +310,8 @@ function AdminInner() {
         throw new Error("Токен не готов, попробуйте перелогиниться");
       }
 
-      const res = await fetch("/.netlify/functions/admin-domovoy", {
+      const requestUrl = "/.netlify/functions/admin-domovoy";
+      const res = await fetch(requestUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -312,16 +320,46 @@ function AdminInner() {
         body: JSON.stringify({ text: text.trim() }),
       });
 
+      // Получаем raw response text для debug
+      const rawResponseText = await res.text();
+      const rawResponseTruncated = rawResponseText.slice(0, 2000);
+
       // Проверяем, что ответ - JSON, а не HTML
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${text.slice(0, 200)}`);
+        setDebugInfo({
+          url: requestUrl,
+          status: res.status,
+          rawResponse: rawResponseTruncated,
+          jsonKeys: [],
+        });
+        throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${rawResponseText.slice(0, 200)}`);
       }
 
-      const data = await res.json();
+      let data;
+      try {
+        data = JSON.parse(rawResponseText);
+      } catch (parseErr) {
+        setDebugInfo({
+          url: requestUrl,
+          status: res.status,
+          rawResponse: rawResponseTruncated,
+          jsonKeys: [],
+        });
+        throw new Error(`Не удалось распарсить JSON: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`);
+      }
 
-      if (!res.ok) {
+      // Capture debug info
+      const jsonKeys = Object.keys(data);
+      setDebugInfo({
+        url: requestUrl,
+        status: res.status,
+        rawResponse: rawResponseTruncated,
+        jsonKeys,
+      });
+
+      // Handle error responses (ok: false or non-200 status)
+      if (!res.ok || data.ok === false) {
         const errorMsg = data.error || data.message || "Ошибка запроса";
         const statusMsg = res.status === 401 
           ? "Не авторизован. Проверьте вход через Netlify Identity."
@@ -333,7 +371,12 @@ function AdminInner() {
         throw new Error(`${statusMsg} (HTTP ${res.status})`);
       }
 
-      setResponse(data.reply || data.answer || "Ответ получен, но пуст.");
+      // Handle success response - prefer answer, then output, then text, then reply
+      const answerText = data.answer || data.output || data.text || data.reply || "";
+      if (!answerText) {
+        throw new Error("Ответ получен, но пуст.");
+      }
+      setResponse(answerText);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {
@@ -496,7 +539,13 @@ function AdminInner() {
             </button>
           </form>
 
-          {response && (
+          {isSubmitting && (
+            <div className="mt-6 p-6 bg-zinc-50 border border-zinc-200 rounded-xl">
+              <div className="text-zinc-600">ожидаю...</div>
+            </div>
+          )}
+
+          {response && !isSubmitting && (
             <div className="mt-6 p-6 bg-zinc-50 border border-zinc-200 rounded-xl">
               <h2 className="text-sm font-semibold text-zinc-700 mb-3">
                 Ответ:
@@ -508,14 +557,17 @@ function AdminInner() {
           )}
 
           {/* Debug area (non-secret) */}
-          {error && (
+          {debugInfo && (
             <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm">
               <div className="font-semibold text-yellow-800 mb-2">Debug Info:</div>
-              <div className="text-yellow-700 font-mono text-xs">
-                {error.includes("401") && "Status: 401 Unauthorized - Check JWT token"}
-                {error.includes("403") && "Status: 403 Forbidden - Admin role required"}
-                {error.includes("500") && "Status: 500 Server Error - Check function logs"}
-                {!error.includes("401") && !error.includes("403") && !error.includes("500") && `Error: ${error}`}
+              <div className="text-yellow-700 font-mono text-xs space-y-1">
+                <div><strong>URL:</strong> {debugInfo.url}</div>
+                <div><strong>HTTP Status:</strong> {debugInfo.status}</div>
+                <div><strong>JSON Keys:</strong> {debugInfo.jsonKeys.length > 0 ? debugInfo.jsonKeys.join(", ") : "none"}</div>
+                <div><strong>Raw Response (truncated):</strong></div>
+                <div className="bg-white p-2 rounded border border-yellow-300 overflow-auto max-h-32">
+                  {debugInfo.rawResponse || "(empty)"}
+                </div>
               </div>
             </div>
           )}

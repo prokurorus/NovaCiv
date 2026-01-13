@@ -448,6 +448,22 @@ exports.handler = async (event) => {
         ? body.question.trim()
         : userTextFromHistory;
 
+    // PUBLIC_MODE guard: блокируем админские темы
+    const normalizedUserText = userText.toLowerCase();
+    const adminKeywords = [
+      "admin", "админ", "девопс", "devops", "auth", "авторизация",
+      "secrets", "секреты", "deploy", "деплой", "netlify", "github",
+      "roles", "роли", "tokens", "токены", "functions", "функции"
+    ];
+    const isAdminTopic = adminKeywords.some(keyword => normalizedUserText.includes(keyword));
+    
+    if (isAdminTopic) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ answer: "Этот вопрос доступен только в /admin." }),
+      };
+    }
+
     // 1. Попробовать выдать цитату Устава
     const citation = tryHandleCitation(userText, incomingMessages);
     if (citation) {

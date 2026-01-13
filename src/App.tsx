@@ -592,12 +592,7 @@ if (pathname.startsWith("/forum/")) {
 
   // 8) Админ-панель
   if (pathname === "/admin") {
-    return (
-      <>
-        <Admin />
-        <AssistantWidget />
-      </>
-    );
+    return <Admin />;
   }
 
   // 9) На всякий случай — всё остальное ведём на "Наше видение"

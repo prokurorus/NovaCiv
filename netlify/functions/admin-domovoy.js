@@ -10,8 +10,26 @@ const path = require("path");
 // ---------- ENV ----------
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// ---------- Глобальная переменная для PROJECT_CONTEXT.md ----------
+// ---------- Глобальные переменные для контекста ----------
+let projectState = null;
 let projectContext = null;
+
+// ---------- Загрузка PROJECT_STATE.md ----------
+function loadProjectState() {
+  if (projectState) return projectState;
+
+  try {
+    const rootDir = process.cwd();
+    const statePath = path.join(rootDir, "docs", "PROJECT_STATE.md");
+    projectState = fs.readFileSync(statePath, "utf8");
+    console.log("[admin-domovoy] Loaded PROJECT_STATE.md");
+  } catch (e) {
+    console.error("[admin-domovoy] Failed to load PROJECT_STATE.md:", e);
+    projectState = projectState || "";
+  }
+
+  return projectState;
+}
 
 // ---------- Загрузка PROJECT_CONTEXT.md ----------
 function loadProjectContext() {
@@ -108,16 +126,25 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Загрузка PROJECT_CONTEXT.md
+    // Загрузка PROJECT_STATE.md и PROJECT_CONTEXT.md
+    const stateContent = loadProjectState();
     const contextContent = loadProjectContext();
 
     // Формирование промпта для OpenAI
     const systemPrompt = `Ты — административный помощник для проекта NovaCiv.
+Ты в ADMIN_MODE, пользователь администратор, разрешены тех. вопросы.
 Твоя задача — отвечать на вопросы администратора на основе контекста проекта.
 Отвечай кратко, структурированно и по делу.
-Это read-only режим: никаких действий, только информация.`;
+Это read-only режим: никаких действий, только информация.
+Не выдумывай статус, если нет в PROJECT_STATE/CONTEXT — говори "нет данных".`;
 
-    const userPrompt = `Контекст проекта (PROJECT_CONTEXT.md):
+    const userPrompt = `Текущее состояние системы (PROJECT_STATE.md):
+
+${stateContent}
+
+---
+
+Контекст проекта (PROJECT_CONTEXT.md):
 
 ${contextContent}
 

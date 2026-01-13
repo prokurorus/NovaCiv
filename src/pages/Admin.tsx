@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Header from "../components/Header";
 
 // Типы для Netlify Identity
 interface NetlifyIdentityUser {
   id: string;
   email: string;
+  jwt?: (refresh?: boolean) => Promise<string | null>;
+  token?: {
+    access_token?: string;
+  };
   user_metadata?: {
     roles?: string[];
   };
@@ -29,56 +33,81 @@ declare global {
 export default function Admin() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasAdminRole, setHasAdminRole] = useState(false);
   const [text, setText] = useState("");
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const initCalledRef = useRef(false);
+
+  // Сильная очистка при выходе
+  const performLogout = () => {
+    if (window.netlifyIdentity) {
+      window.netlifyIdentity.logout();
+    }
+
+    // Очищаем localStorage ключи Identity (защитная очистка)
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        const lowerKey = key.toLowerCase();
+        const hasGotrue = lowerKey.includes("gotrue");
+        const hasNetlify = lowerKey.includes("netlify");
+        const hasAuth = lowerKey.includes("auth") || lowerKey.includes("identity") || lowerKey.includes("user") || lowerKey.includes("token");
+        
+        // Удаляем если содержит gotrue ИЛИ (netlify И auth/identity/user/token), НО не трогаем novaciv-*
+        if (!key.startsWith("novaciv-") && (hasGotrue || (hasNetlify && hasAuth))) {
+          keysToRemove.push(key);
+        }
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+
+    // Перенаправление на /admin чтобы открыть логин
+    window.location.href = "/admin";
+  };
+
+  // Проверка роли с повторными попытками
+  const checkRoleWithRetry = (userToCheck: NetlifyIdentityUser | null, retryCount = 0) => {
+    if (!userToCheck) {
+      setHasAdminRole(false);
+      return;
+    }
+    
+    const roles = userToCheck.app_metadata?.roles || userToCheck.user_metadata?.roles || [];
+    const isAdmin = Array.isArray(roles) && roles.includes("admin");
+    
+    if (isAdmin) {
+      setHasAdminRole(true);
+      return;
+    }
+    
+    // Если роли отсутствуют, пытаемся перечитать (до 3 раз с интервалом 300ms)
+    if (roles.length === 0 && retryCount < 3) {
+      setTimeout(() => {
+        const currentUser = window.netlifyIdentity?.currentUser();
+        if (currentUser) {
+          const retriedRoles = currentUser.app_metadata?.roles || currentUser.user_metadata?.roles || [];
+          if (retriedRoles.length > 0) {
+            setHasAdminRole(Array.isArray(retriedRoles) && retriedRoles.includes("admin"));
+          } else {
+            checkRoleWithRetry(currentUser, retryCount + 1);
+          }
+        } else {
+          setHasAdminRole(false);
+        }
+      }, 300);
+    } else {
+      setHasAdminRole(false);
+    }
+  };
 
   useEffect(() => {
-    // Функция инициализации и проверки
-    const initIdentity = () => {
-      if (window.netlifyIdentity) {
-        // Проверка текущего пользователя
-        const currentUser = window.netlifyIdentity.currentUser();
-        setUser(currentUser);
-        setIsLoading(false);
-
-        // Если пользователь не залогинен, автоматически открываем окно входа
-        if (!currentUser) {
-          window.netlifyIdentity.open();
-        }
-
-        // Подписка на изменения
-        window.netlifyIdentity.on("login", (user) => {
-          setUser(user);
-          setIsLoading(false);
-          window.netlifyIdentity.close();
-        });
-
-        window.netlifyIdentity.on("logout", () => {
-          setUser(null);
-        });
-      } else {
-        // Если скрипт ещё не загружен, ждём немного и пробуем снова
-        const timer = setTimeout(() => {
-          if (window.netlifyIdentity) {
-            initIdentity();
-          } else {
-            setIsLoading(false);
-            setError("Netlify Identity не загружен. Убедитесь, что скрипт подключен.");
-          }
-        }, 100);
-        return () => clearTimeout(timer);
-      }
-    };
-
-    // Пробуем инициализировать сразу или после небольшой задержки
-    if (window.netlifyIdentity) {
-      initIdentity();
-    } else {
+    if (!window.netlifyIdentity) {
       // Ждём загрузки скрипта
       const checkInterval = setInterval(() => {
-        if (window.netlifyIdentity) {
+        if (window.netlifyIdentity && !initCalledRef.current) {
           clearInterval(checkInterval);
           initIdentity();
         }
@@ -94,14 +123,54 @@ export default function Admin() {
       }, 5000);
 
       return () => clearInterval(checkInterval);
+    } else if (!initCalledRef.current) {
+      initIdentity();
     }
   }, []);
 
-  const checkAdminRole = (user: NetlifyIdentityUser | null): boolean => {
-    if (!user) return false;
-    // Приоритет app_metadata.roles (используется Netlify Identity)
-    const roles = user.app_metadata?.roles || user.user_metadata?.roles || [];
-    return Array.isArray(roles) && roles.includes("admin");
+  const initIdentity = () => {
+    if (!window.netlifyIdentity || initCalledRef.current) return;
+    
+    initCalledRef.current = true;
+
+    // Инициализируем один раз
+    window.netlifyIdentity.init();
+
+    // Обработчик init - источник истины
+    window.netlifyIdentity.on("init", (user) => {
+      setUser(user);
+      setIsLoading(false);
+      
+      if (user) {
+        checkRoleWithRetry(user);
+      } else {
+        setHasAdminRole(false);
+        // Если пользователь не залогинен, открываем модал
+        window.netlifyIdentity?.open();
+      }
+    });
+
+    // Обработчик login
+    window.netlifyIdentity.on("login", (user) => {
+      setUser(user);
+      setIsLoading(false);
+      window.netlifyIdentity?.close();
+      
+      if (user) {
+        checkRoleWithRetry(user);
+      } else {
+        setHasAdminRole(false);
+      }
+      
+      // Принудительная перезагрузка для обновления claims
+      window.location.href = "/admin";
+    });
+
+    // Обработчик logout
+    window.netlifyIdentity.on("logout", () => {
+      setUser(null);
+      setHasAdminRole(false);
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -113,16 +182,21 @@ export default function Admin() {
     setResponse("");
 
     try {
-      // Получаем токен из Netlify Identity
       const currentUser = window.netlifyIdentity?.currentUser();
       if (!currentUser) {
         throw new Error("Пользователь не авторизован");
       }
 
-      // Получаем токен доступа
-      const token = currentUser.token?.access_token;
+      // Получаем токен: предпочитаем jwt(), иначе token.access_token
+      let token: string | null = null;
+      if (currentUser.jwt) {
+        token = await currentUser.jwt(true);
+      } else if (currentUser.token?.access_token) {
+        token = currentUser.token.access_token;
+      }
+
       if (!token) {
-        throw new Error("Токен доступа не найден");
+        throw new Error("Токен не готов, попробуйте перелогиниться");
       }
 
       const res = await fetch("/.netlify/functions/admin-domovoy", {
@@ -181,12 +255,20 @@ export default function Admin() {
               <p className="text-zinc-600">
                 Необходима авторизация через Netlify Identity
               </p>
-              <button
-                onClick={() => window.netlifyIdentity?.open()}
-                className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
-              >
-                Войти
-              </button>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => window.netlifyIdentity?.open()}
+                  className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
+                >
+                  Войти (GitHub / Email)
+                </button>
+                <button
+                  onClick={performLogout}
+                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+                >
+                  Сбросить вход
+                </button>
+              </div>
             </div>
           </div>
         </main>
@@ -194,7 +276,7 @@ export default function Admin() {
     );
   }
 
-  if (!checkAdminRole(user)) {
+  if (!hasAdminRole) {
     return (
       <>
         <Header />
@@ -211,7 +293,7 @@ export default function Admin() {
                 Вы вошли как: {user.email}
               </p>
               <button
-                onClick={() => window.netlifyIdentity?.logout()}
+                onClick={performLogout}
                 className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
               >
                 Выйти
@@ -238,7 +320,7 @@ export default function Admin() {
               </p>
             </div>
             <button
-              onClick={() => window.netlifyIdentity?.logout()}
+              onClick={performLogout}
               className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
             >
               Выйти ({user.email})

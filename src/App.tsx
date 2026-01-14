@@ -18,7 +18,6 @@ import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { Language } from "./types/language";
 import AssistantWidget from "./components/AssistantWidget";
 import Header from "./components/Header";
-import { trackPageView, analytics } from "./lib/analytics";
 
 /* ---------- Карточка андроида (левая колонка) ---------- */
 
@@ -433,11 +432,6 @@ function MainScreen() {
 export default function App() {
   const [entered, setEntered] = React.useState(false);
   const pathname = window.location.pathname;
-
-  // Track page view on route change
-  React.useEffect(() => {
-    trackPageView(pathname);
-  }, [pathname]);
 
   // 1) Главная: сначала «вход в сознание», после нажатия — «Наше видение»
   if (pathname === "/") {

@@ -59,6 +59,9 @@ function jsonResponse(statusCode, payload, extraDebug) {
 
 // ---------- Main handler ----------
 exports.handler = async (event, context) => {
+  // Start timing as early as possible in handler scope
+  const startTime = Date.now();
+
   try {
     // Check method
     if (event.httpMethod !== "POST") {
@@ -90,27 +93,34 @@ exports.handler = async (event, context) => {
     try {
       requestData = JSON.parse(body);
     } catch (e) {
-      return jsonResponse(400, {
-        ok: false,
-        error: "Invalid JSON",
-        message: "Request body must be valid JSON",
-      });
+      const elapsedMs = Date.now() - startTime;
+      return jsonResponse(
+        400,
+        {
+          ok: false,
+          error: "Invalid JSON",
+          message: "Request body must be valid JSON",
+          elapsedMs,
+        },
+        {
+          where: "admin-proxy",
+        },
+      );
     }
 
     // Forward to VPS endpoint
     const vpsUrl = buildUpstreamUrl();
-    const startTime = Date.now();
-    
+
     // Log start (no secrets)
     console.log(`[admin-proxy] Starting request to VPS: ${sanitizeUrlForLogs(vpsUrl)}`);
-    
+
     // Create AbortController for 10s timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
-    
+
     let response;
     let elapsedMs;
-    
+
     try {
       response = await fetch(vpsUrl, {
         method: "POST",
@@ -121,14 +131,13 @@ exports.handler = async (event, context) => {
         body: JSON.stringify(requestData),
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
       elapsedMs = Date.now() - startTime;
-      
     } catch (e) {
       clearTimeout(timeoutId);
       elapsedMs = Date.now() - startTime;
-      
+
       // Handle timeout
       if (e.name === "AbortError" || e.message?.includes("aborted")) {
         console.log(`[admin-proxy] Timeout after ${elapsedMs}ms: ${sanitizeUrlForLogs(vpsUrl)}`);
@@ -145,13 +154,14 @@ exports.handler = async (event, context) => {
           {
             upstreamStatus: null,
             upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+            where: "admin-proxy",
           },
         );
       }
-      
+
       // Handle connection errors
       const errorCode = e.code || e.errno || e.message?.toUpperCase();
-      const isConnectionError = 
+      const isConnectionError =
         errorCode === "ECONNREFUSED" ||
         errorCode === "ENOTFOUND" ||
         errorCode === "EHOSTUNREACH" ||
@@ -161,10 +171,12 @@ exports.handler = async (event, context) => {
         e.message?.includes("EHOSTUNREACH") ||
         e.message?.includes("ETIMEDOUT") ||
         e.message?.includes("getaddrinfo");
-      
+
       if (isConnectionError) {
         console.log(
-          `[admin-proxy] Connection error after ${elapsedMs}ms: ${errorCode || "unknown"} - ${sanitizeUrlForLogs(vpsUrl)}`
+          `[admin-proxy] Connection error after ${elapsedMs}ms: ${errorCode || "unknown"} - ${sanitizeUrlForLogs(
+            vpsUrl,
+          )}`,
         );
         return jsonResponse(
           502,
@@ -180,32 +192,40 @@ exports.handler = async (event, context) => {
           {
             upstreamStatus: null,
             upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+            where: "admin-proxy",
           },
         );
       }
-      
+
       // Other errors
       console.log(`[admin-proxy] Fetch error after ${elapsedMs}ms: ${errorCode || "unknown"}`);
       throw e; // Re-throw to be caught by outer catch
     }
-    
+
     // Get response text
     const responseText = await response.text();
-    
+
     // Try to parse as JSON
     let responseData;
     try {
       responseData = JSON.parse(responseText);
     } catch (e) {
-      // If not JSON, return raw text with appropriate status
-      return {
-        statusCode: response.status || 502,
-        headers: {
-          "Content-Type": "text/plain",
-          "X-Domovoy-Origin": "proxy",
+      // If not JSON, return JSON error with upstream body snippet
+      const upstreamBodySnippet = (responseText || "").slice(0, 300);
+      return jsonResponse(
+        response.status || 502,
+        {
+          ok: false,
+          error: "upstream_non_json",
+          message: "Upstream did not return valid JSON",
+          upstreamBodySnippet,
         },
-        body: responseText,
-      };
+        {
+          upstreamStatus: response.status,
+          upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+          where: "admin-proxy",
+        },
+      );
     }
 
     // Attach proxy debug / upstream info (preserve any existing debug.origin from VPS)
@@ -224,20 +244,24 @@ exports.handler = async (event, context) => {
       },
       body: JSON.stringify(bodyWithDebug),
     };
-    
   } catch (e) {
-    const elapsedMs = Date.now() - (startTime || Date.now());
+    const elapsedMs = Date.now() - startTime;
+    const rawStack = e && e.stack ? String(e.stack) : "";
+    const trimmedStack = rawStack.split("\n").slice(0, 6).join("\n");
+
     console.log(`[admin-proxy] Handler error after ${elapsedMs}ms: ${e.code || e.message || "unknown"}`);
     return jsonResponse(
       500,
       {
         ok: false,
-        error: "Internal Server Error",
+        error: "proxy_error",
         message: e.message || "Unknown error",
         debugHint: "Check function logs and VPS endpoint connectivity",
         elapsedMs,
       },
       {
+        where: "admin-proxy",
+        stack: trimmedStack,
         upstreamStatus: null,
         upstreamUrl: sanitizeUrlForLogs(buildUpstreamUrl()),
       },

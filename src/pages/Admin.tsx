@@ -374,13 +374,28 @@ function AdminInner() {
       // Handle error responses (ok: false or non-200 status)
       if (!res.ok || data.ok === false) {
         const errorMsg = data.error || data.message || "Ошибка запроса";
-        const statusMsg = res.status === 401 
-          ? "Не авторизован. Проверьте вход через Netlify Identity."
-          : res.status === 403
-          ? "Доступ запрещён. Требуется роль admin."
-          : res.status === 500
-          ? "Ошибка сервера. Проверьте логи функции."
-          : errorMsg;
+        let statusMsg: string;
+        if (res.status === 401) {
+          if (data.error === "unauthorized") {
+            statusMsg = "Токен не совпадает между Netlify и VPS. Проверьте ADMIN_API_TOKEN в обеих системах.";
+          } else {
+            statusMsg = "Не авторизован. Проверьте вход через Netlify Identity.";
+          }
+        } else if (res.status === 403) {
+          statusMsg = "Доступ запрещён. Требуется роль admin.";
+        } else if (res.status === 500) {
+          statusMsg = "Ошибка сервера. Проверьте логи функции.";
+        } else if (res.status === 502) {
+          statusMsg = data.error === "vps_unreachable" 
+            ? "VPS недоступен. Проверьте доступность и порт."
+            : data.error === "vps_timeout"
+            ? "Таймаут соединения с VPS (>10s). Проверьте сеть."
+            : errorMsg;
+        } else if (res.status === 504) {
+          statusMsg = "Таймаут от VPS. Проверьте доступность сервера.";
+        } else {
+          statusMsg = errorMsg;
+        }
         throw new Error(`${statusMsg} (HTTP ${res.status})`);
       }
 

@@ -429,11 +429,16 @@ const server = http.createServer(async (req, res) => {
       const data = JSON.parse(body || "{}");
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
-      const threadId = getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
+      
+      // For /admin/direct: force threadId = "ruslan-direct" (ignore incoming threadId)
+      // For /admin/domovoy: use incoming threadId or default to ruslan-main
+      const isDirectMode = isDirect;
+      const threadId = isDirectMode 
+        ? "ruslan-direct" 
+        : getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
       
       // For /admin/direct: use "direct" mode, no mode validation
       // For /admin/domovoy: validate mode (default to "ops" if missing or invalid)
-      const isDirectMode = isDirect;
       const modeRaw = data.mode;
       const validModes = ["ops", "strategy"];
       const mode = isDirectMode ? "direct" : (validModes.includes(modeRaw) ? modeRaw : "ops");

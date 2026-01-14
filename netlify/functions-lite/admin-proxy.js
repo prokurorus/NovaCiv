@@ -21,8 +21,6 @@
 //   - SENDGRID_API_KEY
 // ============================================================================
 
-const { requireAdmin } = require("./_lib/auth");
-
 // ---------- ENV ----------
 // Upstream base URL: ADMIN_DOMOVOY_API_URL (dedicated env var for admin-proxy)
 // We always call `${base}/admin/domovoy` (base should be host:port, without path).
@@ -57,6 +55,56 @@ function sanitizeUrlForLogs(url) {
   if (!url) return "";
   // Strip basic auth if present (no secrets in logs)
   return url.replace(/\/\/.*@/, "//***@");
+}
+
+/**
+ * Require admin authentication via token
+ * @param {Object} event - Netlify function event (contains headers)
+ * @returns {Object|null} Error response object if unauthorized, null if authorized
+ */
+function requireAdmin(event) {
+  const headers = event.headers || {};
+  
+  // Try x-admin-token header first (preferred)
+  let token = headers["x-admin-token"] || headers["X-Admin-Token"];
+  
+  // Fallback to Authorization: Bearer <token>
+  if (!token) {
+    const authHeader = headers["authorization"] || headers["Authorization"] || "";
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch) {
+      token = bearerMatch[1];
+    }
+  }
+  
+  // Check if token is provided
+  if (!token) {
+    return jsonResponse(401, {
+      ok: false,
+      error: "unauthorized",
+      message: "Authentication required. Please provide x-admin-token header or Authorization: Bearer token.",
+    });
+  }
+  
+  // Compare with ADMIN_API_TOKEN
+  const expectedToken = process.env.ADMIN_API_TOKEN;
+  if (!expectedToken) {
+    return jsonResponse(500, {
+      ok: false,
+      error: "server_error",
+      message: "ADMIN_API_TOKEN is not configured",
+    });
+  }
+  
+  if (token !== expectedToken) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "forbidden",
+      message: "Invalid admin token",
+    });
+  }
+  
+  return null;
 }
 
 function attachProxyDebug(payload, extraDebug) {
@@ -98,8 +146,8 @@ exports.handler = async (event, context) => {
       });
     }
 
-    // Check admin role (RBAC gate)
-    const authError = requireAdmin(context);
+    // Check admin authentication (token-based)
+    const authError = requireAdmin(event);
     if (authError) {
       return authError;
     }

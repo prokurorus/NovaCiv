@@ -58,11 +58,32 @@ function sanitizeUrlForLogs(url) {
 }
 
 /**
- * Require admin authentication via token
+ * Authorize admin access via Netlify Identity role OR token fallback
  * @param {Object} event - Netlify function event (contains headers)
+ * @param {Object} context - Netlify function context (contains clientContext.user)
  * @returns {Object|null} Error response object if unauthorized, null if authorized
  */
-function requireAdmin(event) {
+function authorizeAdmin(event, context) {
+  // First, check Netlify Identity context for admin role
+  const user = context?.clientContext?.user;
+  
+  if (user) {
+    // Check for admin role in various metadata locations
+    const appRoles = user.app_metadata?.roles || [];
+    const userRoles = user.user_metadata?.roles || [];
+    const appRole = user.app_metadata?.role; // singular string fallback
+    
+    const hasAdminRole = 
+      (Array.isArray(appRoles) && appRoles.includes("admin")) ||
+      (Array.isArray(userRoles) && userRoles.includes("admin")) ||
+      (typeof appRole === "string" && appRole === "admin");
+    
+    if (hasAdminRole) {
+      return null; // Authorized via Identity role
+    }
+  }
+  
+  // Fallback to token-based authentication
   const headers = event.headers || {};
   
   // Try x-admin-token header first (preferred)
@@ -79,10 +100,13 @@ function requireAdmin(event) {
   
   // Check if token is provided
   if (!token) {
-    return jsonResponse(401, {
+    return jsonResponse(403, {
       ok: false,
-      error: "unauthorized",
-      message: "Authentication required. Please provide x-admin-token header or Authorization: Bearer token.",
+      error: "forbidden",
+      message: "Access denied",
+      debug: {
+        origin: "admin-proxy",
+      },
     });
   }
   
@@ -100,11 +124,14 @@ function requireAdmin(event) {
     return jsonResponse(403, {
       ok: false,
       error: "forbidden",
-      message: "Invalid admin token",
+      message: "Access denied",
+      debug: {
+        origin: "admin-proxy",
+      },
     });
   }
   
-  return null;
+  return null; // Authorized via token
 }
 
 function attachProxyDebug(payload, extraDebug) {
@@ -146,8 +173,8 @@ exports.handler = async (event, context) => {
       });
     }
 
-    // Check admin authentication (token-based)
-    const authError = requireAdmin(event);
+    // Check admin authentication (Identity role OR token fallback)
+    const authError = authorizeAdmin(event, context);
     if (authError) {
       return authError;
     }

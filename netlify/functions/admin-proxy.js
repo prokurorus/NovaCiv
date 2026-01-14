@@ -8,20 +8,19 @@
 const { requireAdmin } = require("./_lib/auth");
 
 // ---------- ENV ----------
-// Upstream base URL resolution:
-// Prefer explicit VPS_ADMIN_DOMOVOY_URL, then DOMOVOY_API_URL, then fallback to VPS IP:PORT.
+// Upstream base URL: ADMIN_DOMOVOY_API_URL (dedicated env var for admin-proxy)
 // We always call `${base}/admin/domovoy` (base should be host:port, without path).
-const VPS_BASE =
-  process.env.VPS_ADMIN_DOMOVOY_URL ||
-  process.env.DOMOVOY_API_URL ||
-  "http://77.42.36.198:3001";
+// NO fallback to DOMOVOY_API_URL to avoid accidentally pointing to ai-domovoy.
+const ADMIN_DOMOVOY_API_URL = process.env.ADMIN_DOMOVOY_API_URL;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 
 // ---------- Helpers ----------
 function buildUpstreamUrl() {
-  const base = VPS_BASE || "";
+  if (!ADMIN_DOMOVOY_API_URL) {
+    return null; // Will trigger error response
+  }
   // Ensure no trailing slash before appending path
-  const normalizedBase = base.replace(/\/+$/, "");
+  const normalizedBase = ADMIN_DOMOVOY_API_URL.replace(/\/+$/, "");
   return `${normalizedBase}/admin/domovoy`;
 }
 
@@ -76,6 +75,17 @@ exports.handler = async (event, context) => {
       return authError;
     }
 
+    // Check ADMIN_DOMOVOY_API_URL is configured (required, no fallback)
+    if (!ADMIN_DOMOVOY_API_URL) {
+      return jsonResponse(500, {
+        ok: false,
+        error: "ADMIN_DOMOVOY_API_URL is not set",
+        debug: {
+          origin: "admin-proxy",
+        },
+      });
+    }
+
     // Check token configured
     if (!ADMIN_API_TOKEN) {
       return jsonResponse(500, {
@@ -83,6 +93,9 @@ exports.handler = async (event, context) => {
         error: "ADMIN_API_TOKEN is not configured",
         message: "Admin API token is missing in Netlify environment variables",
         debugHint: "Set ADMIN_API_TOKEN in Netlify environment variables (same value as VPS .env)",
+        debug: {
+          origin: "admin-proxy",
+        },
       });
     }
 
@@ -109,6 +122,16 @@ exports.handler = async (event, context) => {
 
     // Forward to VPS endpoint
     const vpsUrl = buildUpstreamUrl();
+    if (!vpsUrl) {
+      // This should not happen if ADMIN_DOMOVOY_API_URL check passed, but safety check
+      return jsonResponse(500, {
+        ok: false,
+        error: "ADMIN_DOMOVOY_API_URL is not set",
+        debug: {
+          origin: "admin-proxy",
+        },
+      });
+    }
 
     // Log start (no secrets)
     console.log(`[admin-proxy] Starting request to VPS: ${sanitizeUrlForLogs(vpsUrl)}`);

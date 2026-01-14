@@ -826,6 +826,9 @@ function AdminInner() {
                 {debugInfo.upstreamStatus !== undefined && debugInfo.upstreamStatus !== null && (
                   <div><strong>Upstream Status:</strong> {debugInfo.upstreamStatus}</div>
                 )}
+                {debugInfo.mode && (
+                  <div><strong>server mode:</strong> {debugInfo.mode}</div>
+                )}
                 <div><strong>JSON Keys:</strong> {debugInfo.jsonKeys.length > 0 ? debugInfo.jsonKeys.join(", ") : "none"}</div>
                 {debugInfo.threadId && (
                   <div><strong>Thread ID:</strong> {debugInfo.threadId}</div>

@@ -92,6 +92,7 @@ exports.handler = async (event, context) => {
     }
 
     // Check ADMIN_DOMOVOY_API_URL is configured (required, no fallback)
+    // This check happens before mode validation, so we can build URLs correctly
     if (!ADMIN_DOMOVOY_API_URL) {
       return jsonResponse(500, {
         ok: false,
@@ -138,12 +139,16 @@ exports.handler = async (event, context) => {
 
     // Validate and set mode (default to "ops" if missing or invalid)
     const modeRaw = requestData.mode;
-    const validModes = ["ops", "strategy"];
+    const validModes = ["ops", "strategy", "direct"];
     const mode = validModes.includes(modeRaw) ? modeRaw : "ops";
     requestData.mode = mode;
 
-    // Forward to VPS endpoint
-    const vpsUrl = buildUpstreamUrl();
+    // Build upstream URL based on mode
+    // For "direct" mode: use /admin/direct, otherwise use /admin/domovoy
+    const baseUrl = ADMIN_DOMOVOY_API_URL.replace(/\/+$/, "");
+    const vpsUrl = mode === "direct" 
+      ? `${baseUrl}/admin/direct`
+      : buildUpstreamUrl();
     if (!vpsUrl) {
       // This should not happen if ADMIN_DOMOVOY_API_URL check passed, but safety check
       return jsonResponse(500, {

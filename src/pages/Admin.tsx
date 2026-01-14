@@ -113,11 +113,11 @@ function AdminInner() {
     }
     return [];
   });
-  const [mode, setMode] = useState<"ops" | "strategy">(() => {
+  const [mode, setMode] = useState<"ops" | "strategy" | "direct">(() => {
     // Load from localStorage, default to "ops"
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("adminMode");
-      return saved === "strategy" ? "strategy" : "ops";
+      return saved === "strategy" ? "strategy" : saved === "direct" ? "direct" : "ops";
     }
     return "ops";
   });
@@ -378,7 +378,7 @@ function AdminInner() {
         text: text.trim(),
         history: conversationHistory.slice(-20), // Last 20 messages
         threadId: "ruslan-main",
-        mode: mode, // "ops" | "strategy"
+        mode: mode, // "ops" | "strategy" | "direct"
       };
       
       const res = await fetch(requestUrl, {
@@ -680,7 +680,7 @@ function AdminInner() {
                   Режим ответа
                 </label>
                 <div className="text-xs text-zinc-600">
-                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : "Стратегия"} | <span className="font-medium">Тред:</span> ruslan-main
+                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : mode === "strategy" ? "Стратегия" : "Диалог (прямой)"} | <span className="font-medium">Тред:</span> ruslan-main
                 </div>
               </div>
               <div className="flex gap-2">
@@ -714,15 +714,34 @@ function AdminInner() {
                 >
                   Стратегия
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("direct");
+                    localStorage.setItem("adminMode", "direct");
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
+                    mode === "direct"
+                      ? "bg-zinc-900 text-white"
+                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                  }`}
+                  disabled={isSubmitting}
+                >
+                  Диалог (прямой)
+                </button>
               </div>
               <div className="text-xs text-zinc-500 mt-1">
                 {mode === "ops" ? (
                   <>
                     <span className="font-medium">Оперативка:</span> Коротко и по делу: текущая проблема → причина → один следующий шаг. Без списков "поставь Grafana".
                   </>
-                ) : (
+                ) : mode === "strategy" ? (
                   <>
                     <span className="font-medium">Стратегия:</span> Идеи улучшений и планы. Использовать, когда нет пожара и хочется развитие.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium">Диалог (прямой):</span> Как обычный чат: меньше шаблонов и планов. Используй, когда хочешь обсуждать идеи и решения напрямую.
                   </>
                 )}
               </div>

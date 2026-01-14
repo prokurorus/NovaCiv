@@ -12,6 +12,21 @@
 // 5) Сохраняет как темы форума (section: "news") с lang: "en" | "ru" | "de".
 // 6) Отправляет пост в соответственные Telegram-каналы по языку источника.
 // 7) Обновляет /newsMeta/en.json, чтобы не было дублей.
+//
+// ============================================================================
+// ⚠️ VPS-ONLY FUNCTION (NOT deployed to Netlify)
+// ============================================================================
+// This function uses heavy env vars and is VPS-only:
+//   - FIREBASE_DB_URL
+//   - OPENAI_API_KEY
+//   - OPENAI_MODEL
+//   - NEWS_CRON_SECRET
+//   - TELEGRAM_BOT_TOKEN
+//   - TELEGRAM_NEWS_CHAT_ID_* (multiple)
+//
+// Netlify equivalent: None (moved to server/nova-news-worker.js on VPS)
+// Cron schedule: Removed from netlify.toml (VPS handles via PM2)
+// ============================================================================
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com

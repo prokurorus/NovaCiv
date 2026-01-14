@@ -9,6 +9,21 @@
 // 4) Отправляет пост в Telegram-канал по языку (TELEGRAM_NEWS_CHAT_ID_RU/EN/DE).
 // 5) Защищён токеном DOMOVOY_CRON_SECRET (?token=...).
 //
+// ============================================================================
+// ⚠️ VPS-ONLY FUNCTION (NOT deployed to Netlify)
+// ============================================================================
+// This function uses heavy env vars and is VPS-only:
+//   - FIREBASE_DB_URL
+//   - OPENAI_API_KEY
+//   - OPENAI_MODEL
+//   - DOMOVOY_CRON_SECRET
+//   - TELEGRAM_BOT_TOKEN
+//   - TELEGRAM_NEWS_CHAT_ID_* (multiple)
+//
+// Netlify equivalent: None (moved to VPS workers)
+// Cron schedule: Removed from netlify.toml (VPS handles via PM2)
+// ============================================================================
+//
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL; // https://...firebaseio.com
 const DOMOVOY_CRON_SECRET = process.env.DOMOVOY_CRON_SECRET || "";

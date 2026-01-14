@@ -1,6 +1,7 @@
 import React from "react";
 import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
+import { analytics } from "../lib/analytics";
 
 const LABELS: Record<Language, string> = {
   ru: "RU",
@@ -16,6 +17,7 @@ const LanguageSwitcher: React.FC = () => {
 
   const handleChange = (code: Language) => {
     if (code === language) return;
+    analytics.trackLanguageSwitch(language, code);
     setLanguage(code);
   };
 

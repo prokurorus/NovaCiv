@@ -3,7 +3,14 @@
   # COMMIT_REF is provided by Netlify, date comes from the build container.
   command = "VITE_COMMIT_REF=$COMMIT_REF VITE_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build"
   publish = "dist"
-  functions = "netlify/functions"
+  # ============================================================================
+  # MIGRATION: Using lightweight functions directory to reduce env var footprint
+  # ============================================================================
+  # Only admin-proxy is deployed to Netlify (minimal env vars: ADMIN_DOMOVOY_API_URL, ADMIN_API_TOKEN)
+  # All heavy functions (news, video, domovoy cron jobs) are VPS-only
+  # See MIGRATION.md for env var migration plan
+  # ============================================================================
+  functions = "netlify/functions-lite"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -17,24 +24,26 @@
   status = 200
 
 [functions]
-  included_files = ["media/**", "docs/**", "runbooks/**"]
-  external_node_modules = ["ffmpeg-static", "openai"]
+  # Minimal included files for lightweight functions
+  included_files = ["docs/**", "runbooks/**"]
+  # No external heavy deps needed (admin-proxy only uses fetch, no ffmpeg/openai)
+  # external_node_modules = []  # Removed: ["ffmpeg-static", "openai"] - not needed in functions-lite
   node_bundler = "esbuild"
 
-[functions."news-cron"]
-  schedule = "0 * * * *"
-
-[functions."fetch-news"]
-  schedule = "30 * * * *"
-
-[functions."video-worker"]
-  schedule = "*/15 * * * *"
-
-[functions."domovoy-auto-post"]
-  schedule = "0 0 * * *"
-
-[functions."domovoy-every-3h"]
-  schedule = "0 */3 * * *"
-
-[functions."domovoy-auto-reply"]
-  schedule = "*/10 * * * *"
+# ============================================================================
+# CRON SCHEDULES REMOVED (VPS-only functions)
+# ============================================================================
+# All scheduled functions have been moved to VPS to reduce Netlify env var usage.
+# These functions require heavy env vars (Firebase, OpenAI, Telegram, YouTube)
+# and are now handled by VPS workers (see server/ directory).
+#
+# Removed schedules:
+#   - news-cron, fetch-news (Firebase + OpenAI + Telegram)
+#   - video-worker (Firebase + YouTube + OpenAI)
+#   - domovoy-auto-post, domovoy-every-3h, domovoy-auto-reply (Firebase + OpenAI + Telegram)
+#
+# If you need to re-enable any of these on Netlify, ensure:
+#   1) Function exists in netlify/functions-lite
+#   2) Function uses ONLY minimal env vars (see MIGRATION.md)
+#   3) AWS Lambda 4KB env var limit is not exceeded
+# ============================================================================

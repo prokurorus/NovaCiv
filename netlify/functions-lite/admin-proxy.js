@@ -31,6 +31,19 @@ const ADMIN_DOMOVOY_API_URL = process.env.ADMIN_DOMOVOY_API_URL;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 
 // ---------- Helpers ----------
+function normalizeBaseUrl(raw) {
+  if (!raw) return null;
+  // Remove trailing slashes
+  let base = raw.replace(/\/+$/, "");
+  // Remove /admin/domovoy suffix if present
+  base = base.replace(/\/admin\/domovoy$/i, "");
+  // Remove /admin suffix if present (but keep the base if it's just /admin)
+  base = base.replace(/\/admin$/i, "");
+  // Remove trailing slashes again after suffix removal
+  base = base.replace(/\/+$/, "");
+  return base;
+}
+
 function buildUpstreamUrl() {
   if (!ADMIN_DOMOVOY_API_URL) {
     return null; // Will trigger error response
@@ -145,12 +158,8 @@ exports.handler = async (event, context) => {
 
     // Build upstream URL based on mode
     // For "direct" mode: use /admin/direct, otherwise use /admin/domovoy
-    const baseUrl = ADMIN_DOMOVOY_API_URL.replace(/\/+$/, "");
-    const vpsUrl = mode === "direct" 
-      ? `${baseUrl}/admin/direct`
-      : buildUpstreamUrl();
-    if (!vpsUrl) {
-      // This should not happen if ADMIN_DOMOVOY_API_URL check passed, but safety check
+    const base = normalizeBaseUrl(ADMIN_DOMOVOY_API_URL);
+    if (!base) {
       return jsonResponse(500, {
         ok: false,
         error: "ADMIN_DOMOVOY_API_URL is not set",
@@ -159,6 +168,8 @@ exports.handler = async (event, context) => {
         },
       });
     }
+    const endpoint = mode === "direct" ? "/admin/direct" : "/admin/domovoy";
+    const vpsUrl = `${base}${endpoint}`;
 
     // Log start (no secrets)
     console.log(`[admin-proxy] Starting request to VPS: ${sanitizeUrlForLogs(vpsUrl)}`);
@@ -312,7 +323,7 @@ exports.handler = async (event, context) => {
         where: "admin-proxy",
         stack: trimmedStack,
         upstreamStatus: null,
-        upstreamUrl: buildUpstreamUrl(), // Full URL including /admin/domovoy path
+        upstreamUrl: null, // Cannot build URL in error case
       },
     );
   }

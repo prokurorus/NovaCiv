@@ -1,0 +1,83 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # Lint and test job
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Build project
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+  # Deploy to VPS (only on main branch push)
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            set -e
+            cd /root/NovaCiv
+            echo "Pulling latest code..."
+            git pull origin main
+            echo "Installing dependencies..."
+            npm ci
+            echo "Restarting PM2 processes..."
+            pm2 restart all
+            pm2 save
+            echo "Deployment complete!"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            echo "PM2 Status:"
+            pm2 status
+            echo ""
+            echo "Checking processes..."
+            pm2 list
+          EOF

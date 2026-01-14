@@ -6,6 +6,20 @@
 // 2) Генерирует видео через media/scripts/pipeline.js (фон + TTS + ffmpeg)
 // 3) Отправляет видео в Telegram (если заданы переменные)
 // 4) Помечает задачу как "done" или "error"
+//
+// ============================================================================
+// ⚠️ VPS-ONLY FUNCTION (NOT deployed to Netlify)
+// ============================================================================
+// This function uses heavy env vars and is VPS-only:
+//   - FIREBASE_SERVICE_ACCOUNT_JSON (CRITICAL: ~2-3KB, largest env var)
+//   - FIREBASE_DB_URL / FIREBASE_DATABASE_URL
+//   - TELEGRAM_BOT_TOKEN
+//   - TELEGRAM_NEWS_CHAT_ID_* (multiple)
+//   - YOUTUBE_* (if video upload enabled)
+//
+// Netlify equivalent: None (moved to server/video-worker.js on VPS)
+// Cron schedule: Removed from netlify.toml (VPS handles via PM2)
+// ============================================================================
 
 const fs = require("fs");
 const path = require("path");

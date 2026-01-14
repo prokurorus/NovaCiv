@@ -155,6 +155,23 @@ function buildMemoryPack() {
   return { memoryFiles, filesLoaded, totalChars };
 }
 
+// ---------- Helper: JSON responses with origin tagging ----------
+function sendJson(res, statusCode, payload) {
+  const body = payload && typeof payload === "object" ? { ...payload } : {};
+  if (!body.debug || typeof body.debug !== "object") {
+    body.debug = {};
+  }
+  if (!body.debug.origin) {
+    body.debug.origin = "vps";
+  }
+
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "X-Domovoy-Origin": "vps",
+  });
+  res.end(JSON.stringify(body));
+}
+
 // ---------- HTTP Server ----------
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -163,16 +180,20 @@ const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Admin-Token");
   
   if (req.method === "OPTIONS") {
-    res.writeHead(200);
-    res.end();
+    res.writeHead(200, {
+      "X-Domovoy-Origin": "vps",
+    });
+    res.end("");
     return;
   }
   
   // Only POST /admin/domovoy
   const parsedUrl = url.parse(req.url, true);
   if (req.method !== "POST" || parsedUrl.pathname !== "/admin/domovoy") {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: "Not Found" }));
+    sendJson(res, 404, {
+      ok: false,
+      error: "Not Found",
+    });
     return;
   }
   
@@ -182,24 +203,22 @@ const server = http.createServer(async (req, res) => {
   const expectedToken = ADMIN_API_TOKEN ? ADMIN_API_TOKEN.trim() : null;
   
   if (!expectedToken || !token || token !== expectedToken) {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ 
-      ok: false, 
+    sendJson(res, 401, {
+      ok: false,
       error: "unauthorized",
-      message: "Invalid or missing X-Admin-Token header"
-    }));
+      message: "Invalid or missing X-Admin-Token header",
+    });
     return;
   }
   
   // Check OpenAI key
   if (!OPENAI_API_KEY) {
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
+    sendJson(res, 500, {
       ok: false,
       error: "OPENAI_API_KEY is not configured",
       message: "OpenAI API key is missing in environment variables",
       debugHint: "Set OPENAI_API_KEY in VPS .env file",
-    }));
+    });
     return;
   }
   
@@ -214,12 +233,11 @@ const server = http.createServer(async (req, res) => {
       const history = Array.isArray(data.history) ? data.history : [];
       
       if (!text) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+        sendJson(res, 400, {
           ok: false,
           error: "Text is required",
           message: "Request body must include 'text' field",
-        }));
+        });
         return;
       }
       
@@ -229,24 +247,22 @@ const server = http.createServer(async (req, res) => {
         memoryPack = buildMemoryPack();
       } catch (e) {
         console.error("[admin-domovoy-api] Memory pack loading error:", e);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+        sendJson(res, 500, {
           ok: false,
           error: "context_missing",
           message: `Failed to load memory pack: ${e.message}`,
           debugHint: "Check docs/ and runbooks/ exist in PROJECT_DIR",
-        }));
+        });
         return;
       }
       
       if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+        sendJson(res, 500, {
           ok: false,
           error: "context_missing",
           message: "Memory pack is empty or not found",
           debugHint: "Check docs/ADMIN_ASSISTANT.md exists",
-        }));
+        });
         return;
       }
       
@@ -316,13 +332,12 @@ ${text}`
           completion.status,
           errorText.slice(0, 200),
         );
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+        sendJson(res, 502, {
           ok: false,
           error: "openai_failed",
           message: `OpenAI API returned status ${completion.status}`,
           debugHint: "Check OPENAI_API_KEY and API quota",
-        }));
+        });
         return;
       }
       
@@ -332,13 +347,12 @@ ${text}`
         "Не удалось получить ответ от OpenAI.";
       
       if (!answer || answer.trim().length === 0) {
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
+        sendJson(res, 502, {
           ok: false,
           error: "openai_empty_response",
           message: "OpenAI returned an empty response",
           debugHint: "Check OpenAI API response structure",
-        }));
+        });
         return;
       }
       
@@ -355,8 +369,7 @@ ${text}`
       }
       
       // Success response
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
+      sendJson(res, 200, {
         ok: true,
         answer: answer,
         debug: {
@@ -364,17 +377,16 @@ ${text}`
           snapshotMtime: snapshotMtime,
           memoryBytes: memoryPack.totalChars,
         },
-      }));
+      });
       
     } catch (e) {
       console.error("[admin-domovoy-api] Handler error:", e);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
+      sendJson(res, 500, {
         ok: false,
         error: "Internal Server Error",
         message: e.message || "Unknown error",
         debugHint: "Check server logs for details",
-      }));
+      });
     }
   });
 });

@@ -400,6 +400,10 @@ const server = http.createServer(async (req, res) => {
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
       const threadId = getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
+      // Validate mode (default to "ops" if missing or invalid)
+      const modeRaw = data.mode;
+      const validModes = ["ops", "strategy"];
+      const mode = validModes.includes(modeRaw) ? modeRaw : "ops";
       
       if (!text) {
         sendJson(res, 400, {
@@ -462,7 +466,23 @@ const server = http.createServer(async (req, res) => {
       // Build messages array
       const messages = [];
       
-      // System prompt
+      // System prompt (mode-aware)
+      const modeInstructions = mode === "ops" 
+        ? `РЕЖИМ: ОПЕРАТИВКА
+- Отвечай КРАТКО и по делу
+- Формат: текущая проблема/симптом → причина → ОДИН следующий шаг
+- ЗАПРЕЩЕНО предлагать большие внедрения (Grafana/Jira/CI/CD), если пользователь явно не просит
+- Без длинных списков действий
+- Без автоматических разделов "Следующие действия"
+- Фокус: текущая ошибка/симптом → причина → 1 следующий шаг`
+        : `РЕЖИМ: СТРАТЕГИЯ
+- Можно предлагать идеи улучшений и планы
+- МАКСИМУМ 3 пункта улучшений
+- Привязка к текущей архитектуре NovaCiv
+- БЕЗ предложений "установить 10 инструментов"
+- Использовать, когда нет пожара и хочется развитие
+- Можно структурировать ответ с разделами, но кратко`;
+      
       messages.push({
         role: "system",
         content: `Ты — Admin Domovoy: OPS brain и системный хранитель проекта NovaCiv.
@@ -488,16 +508,15 @@ const server = http.createServer(async (req, res) => {
 - Если gitClean=false в OPS STATUS — говори "dirty" и предложи действия (без секретов)
 - OPS STATUS обновляется при каждом запросе, это актуальные данные
 
-ПРАВИЛА ОТВЕТОВ:
-- Отвечай как спокойный человеческий помощник, кратко и по делу
-- НЕ добавляй автоматически раздел "Следующие действия" или "Next actions"
-- Предоставляй "Следующие действия" ТОЛЬКО если пользователь явно просит план действий (например: "что делать дальше", "дай план", "runbook", "next steps")
+${modeInstructions}
+
+ПРАВИЛА ОТВЕТОВ (общие):
+- Отвечай как спокойный человеческий помощник
 - Используй OPS STATUS как источник истины для статуса VPS
 - Используй memory pack (docs + snapshot + RTDB history) для контекста
 - НИКОГДА не печатай секреты, токены, ключи, пароли
 - Если данных нет в memory pack — честно скажи, не выдумывай
-- Фокус: ops, статус системы, failure modes, recovery, архитектура
-- Стиль: человеческий, спокойный, конкретный, без лишнего структурирования
+- Стиль: человеческий, спокойный, конкретный
 
 КОГДА СПРАШИВАЮТ "кто я?":
 - Отвечай: "Ты Руслан, основатель и оператор проекта NovaCiv, владелец novaciv.space, управляешь GitHub/Netlify/VPS."
@@ -655,6 +674,7 @@ ${text}`
           filesLoaded: memoryPack.filesLoaded,
           memoryBytes: memoryPack.totalChars,
           threadId,
+          mode: mode, // Include mode in debug for verification
           pairCount: logResult && typeof logResult.pairCount === "number"
             ? logResult.pairCount
             : null,

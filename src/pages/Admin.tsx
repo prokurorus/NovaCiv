@@ -97,6 +97,14 @@ function AdminInner() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>([]);
+  const [mode, setMode] = useState<"ops" | "strategy">(() => {
+    // Load from localStorage, default to "ops"
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("adminMode");
+      return saved === "strategy" ? "strategy" : "ops";
+    }
+    return "ops";
+  });
   const [debugInfo, setDebugInfo] = useState<{
     url: string;
     status: number | null;
@@ -331,6 +339,7 @@ function AdminInner() {
         text: text.trim(),
         history: conversationHistory.slice(-20), // Last 20 messages
         threadId: "ruslan-main",
+        mode: mode, // "ops" | "strategy"
       };
       
       const res = await fetch(requestUrl, {
@@ -574,6 +583,56 @@ function AdminInner() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Mode selector */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-zinc-700">
+                Режим ответа
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("ops");
+                    localStorage.setItem("adminMode", "ops");
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
+                    mode === "ops"
+                      ? "bg-zinc-900 text-white"
+                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                  }`}
+                  disabled={isSubmitting}
+                >
+                  Оперативка
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("strategy");
+                    localStorage.setItem("adminMode", "strategy");
+                  }}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
+                    mode === "strategy"
+                      ? "bg-zinc-900 text-white"
+                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                  }`}
+                  disabled={isSubmitting}
+                >
+                  Стратегия
+                </button>
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">
+                {mode === "ops" ? (
+                  <>
+                    <span className="font-medium">Оперативка:</span> Коротко и по делу: текущая проблема → причина → один следующий шаг. Без списков "поставь Grafana".
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium">Стратегия:</span> Идеи улучшений и планы. Использовать, когда нет пожара и хочется развитие.
+                  </>
+                )}
+              </div>
+            </div>
+
             <div>
               <label
                 htmlFor="text"

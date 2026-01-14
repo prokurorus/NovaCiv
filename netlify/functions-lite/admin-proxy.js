@@ -136,6 +136,12 @@ exports.handler = async (event, context) => {
       );
     }
 
+    // Validate and set mode (default to "ops" if missing or invalid)
+    const modeRaw = requestData.mode;
+    const validModes = ["ops", "strategy"];
+    const mode = validModes.includes(modeRaw) ? modeRaw : "ops";
+    requestData.mode = mode;
+
     // Forward to VPS endpoint
     const vpsUrl = buildUpstreamUrl();
     if (!vpsUrl) {

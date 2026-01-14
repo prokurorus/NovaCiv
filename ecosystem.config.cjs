@@ -6,6 +6,8 @@ module.exports = {
     {
       name: "nova-ops-agent",
       script: "server/ops-agent.js",
+      out_file: "/root/NovaCiv/docs/nova-ops-agent.log",
+      error_file: "/root/NovaCiv/docs/nova-ops-agent-error.log",
       env: {
         NODE_ENV: "production",
       },

@@ -76,7 +76,35 @@
    - `runbooks/SOURCE_OF_TRUTH.md` (if space allows)
    - `/root/NovaCiv/_state/system_snapshot.md` (tail 250 lines, if space allows)
 5. Service calls OpenAI GPT-4o-mini with full context (max 120k chars)
-6. Response includes answer + debug info (files loaded, snapshot mtime, memory bytes)
+6. Response includes answer + debug info (files loaded, snapshot mtime, memory bytes, admin memory metadata)
+7. Conversation history and summaries are stored in Firebase RTDB under `adminConversations/{threadId}` (default threadId: `ruslan-main`)
+
+**Admin long-term memory (Firebase RTDB):**
+- Path: `adminConversations/{threadId}`
+- Messages: `messages/{messageId}` — `{ role: "user"|"assistant", text, ts, meta: { sha, origin } }`
+- Counters: `counters` — `{ pairCount, lastSummarizedPairCount }`
+- Summaries:
+  - `summaries/level1/{chunkId}` — `{ fromPair, toPair, summary, ts }`
+  - `summaries/level2/{chunkId}` — `{ fromChunk, toChunk, summary, ts }`
+- State: `state` — `{ lastMessageTs, lastSummaryTs }`
+
+**Memory pack composition (Admin Domovoy brain):**
+- Static project knowledge from repo:
+  - `docs/ADMIN_ASSISTANT.md`
+  - `docs/PROJECT_CONTEXT.md`
+  - `docs/PROJECT_STATE.md`
+  - `docs/START_HERE.md`
+  - `docs/RUNBOOKS.md`
+  - `runbooks/SOURCE_OF_TRUTH.md`
+  - `docs/MEMORY_BRIEF_ADMIN.md` (if present)
+- Runtime/system snapshot:
+  - `_state/system_snapshot.md` (tail ~250 lines, sanitized)
+- Admin conversation memory from Firebase RTDB:
+  - Newest level2 summaries, then newest level1 summaries
+  - Last ~20 conversation pairs (user+assistant), newest last
+
+The server logs a deterministic line when building context:
+`[admin-domovoy-api] Memory pack built: X files + Y summaries + Z recent pairs, N chars`.
 
 **Security:**
 - Token-based auth (`X-Admin-Token` header)

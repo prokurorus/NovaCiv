@@ -11,14 +11,23 @@ const path = require("path");
 const fs = require("fs");
 require("dotenv").config({ path: process.env.ENV_PATH || "/root/NovaCiv/.env" });
 
+const {
+  DEFAULT_THREAD_ID,
+  getEffectiveThreadId,
+  logUserMessage,
+  logAssistantMessageAndIncrementPair,
+  buildAdminMemoryContext,
+  checkAndSummarizeThread,
+} = require("./lib/adminConversations");
+
 // ---------- ENV ----------
 const PORT = process.env.ADMIN_DOMOVOY_PORT || 3001;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
 
-// ---------- Memory cache ----------
-let memoryCache = null;
+// ---------- Memory cache (static docs + snapshot) ----------
+let staticMemoryCache = null;
 
 // ---------- Helper: Load file safely ----------
 function loadFile(filePath) {
@@ -57,10 +66,10 @@ function sanitizeContent(content) {
   return sanitized;
 }
 
-// ---------- Build Memory Pack ----------
-function buildMemoryPack() {
-  if (memoryCache !== null) return memoryCache;
-  
+// ---------- Build static docs/snapshot memory ----------
+function buildStaticMemoryFiles() {
+  if (staticMemoryCache !== null) return staticMemoryCache;
+
   const docsBase = path.join(PROJECT_DIR, "docs");
   const runbooksBase = path.join(PROJECT_DIR, "runbooks");
   const stateBase = path.join(PROJECT_DIR, "_state");
@@ -148,11 +157,76 @@ function buildMemoryPack() {
     }
   }
   
-  memoryCache = memoryFiles;
-  const filesLoaded = memoryFiles.map(f => f.name);
-  console.log(`[admin-domovoy-api] Memory pack built: ${filesLoaded.length} files, ${totalChars} chars`);
-  
-  return { memoryFiles, filesLoaded, totalChars };
+  staticMemoryCache = {
+    memoryFiles,
+    filesLoaded: memoryFiles.map(f => f.name),
+    totalChars,
+  };
+
+  return staticMemoryCache;
+}
+
+// ---------- Build full Memory Pack (docs + snapshots + admin summaries/history) ----------
+async function buildMemoryPack(threadIdRaw) {
+  const staticPack = buildStaticMemoryFiles();
+
+  let adminContext = null;
+  try {
+    adminContext = await buildAdminMemoryContext({
+      threadId: threadIdRaw || DEFAULT_THREAD_ID,
+      maxPairs: 20,
+    });
+  } catch (e) {
+    console.warn(
+      "[admin-domovoy-api] Failed to build admin memory context from RTDB:",
+      e.message,
+    );
+  }
+
+  const memoryFiles = [...staticPack.memoryFiles];
+  let summaryCount = 0;
+  let recentPairCount = 0;
+  let lastSummaryTs = null;
+
+  if (adminContext) {
+    const { summaryText, recentPairsText } = adminContext;
+    summaryCount = adminContext.summaryCount || 0;
+    recentPairCount = adminContext.recentPairCount || 0;
+    lastSummaryTs = adminContext.lastSummaryTs || null;
+
+    if (summaryText && summaryText.trim().length > 0) {
+      memoryFiles.push({
+        name: "adminConversations/summaries",
+        content: summaryText,
+      });
+    }
+
+    if (recentPairsText && recentPairsText.trim().length > 0) {
+      memoryFiles.push({
+        name: "adminConversations/recentPairs",
+        content: recentPairsText,
+      });
+    }
+  }
+
+  const filesLoaded = memoryFiles.map((f) => f.name);
+  const totalChars = memoryFiles.reduce(
+    (sum, f) => sum + (typeof f.content === "string" ? f.content.length : 0),
+    0,
+  );
+
+  console.log(
+    `[admin-domovoy-api] Memory pack built: ${staticPack.filesLoaded.length} files + ${summaryCount} summaries + ${recentPairCount} recent pairs, ${totalChars} chars`,
+  );
+
+  return {
+    memoryFiles,
+    filesLoaded,
+    totalChars,
+    summaryCount,
+    recentPairCount,
+    lastSummaryTs,
+  };
 }
 
 // ---------- Helper: JSON responses with origin tagging ----------
@@ -231,6 +305,7 @@ const server = http.createServer(async (req, res) => {
       const data = JSON.parse(body || "{}");
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
+      const threadId = getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
       
       if (!text) {
         sendJson(res, 400, {
@@ -240,18 +315,34 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
+
+      // Log user message to RTDB (best-effort, non-fatal on error)
+      const requestTs = Date.now();
+      try {
+        await logUserMessage({
+          threadId,
+          text,
+          ts: requestTs,
+          origin: "admin-ui",
+        });
+      } catch (e) {
+        console.warn(
+          "[admin-domovoy-api] Failed to log user message to RTDB:",
+          e.message,
+        );
+      }
       
-      // Load memory pack
+      // Load memory pack (docs + snapshots + admin RTDB context)
       let memoryPack;
       try {
-        memoryPack = buildMemoryPack();
+        memoryPack = await buildMemoryPack(threadId);
       } catch (e) {
         console.error("[admin-domovoy-api] Memory pack loading error:", e);
         sendJson(res, 500, {
           ok: false,
           error: "context_missing",
           message: `Failed to load memory pack: ${e.message}`,
-          debugHint: "Check docs/ and runbooks/ exist in PROJECT_DIR",
+          debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
         });
         return;
       }
@@ -355,6 +446,66 @@ ${text}`
         });
         return;
       }
+
+      // Log assistant message and increment pairCount (best-effort)
+      let logResult = null;
+      try {
+        logResult = await logAssistantMessageAndIncrementPair({
+          threadId,
+          text: answer,
+          ts: Date.now(),
+          origin: "vps-admin",
+        });
+      } catch (e) {
+        console.warn(
+          "[admin-domovoy-api] Failed to log assistant message to RTDB:",
+          e.message,
+        );
+      }
+
+      // Trigger summarizer if thresholds are met (non-blocking failure)
+      let summarizerResult = null;
+      try {
+        if (OPENAI_API_KEY) {
+          const summarizerClient = async ({ role, content }) => {
+            const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${OPENAI_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "gpt-4o-mini",
+                messages: [{ role, content }],
+                temperature: 0.2,
+              }),
+            });
+            if (!resp.ok) {
+              const txt = await resp.text().catch(() => "");
+              console.warn(
+                "[admin-domovoy-api] Summarizer OpenAI error:",
+                resp.status,
+                txt.slice(0, 200),
+              );
+              return "";
+            }
+            const data = await resp.json();
+            return data.choices?.[0]?.message?.content || "";
+          };
+
+          summarizerResult = await checkAndSummarizeThread({
+            threadId,
+            minNewPairs: 100,
+            level1MergeThreshold: 10,
+            openAiClient: summarizerClient,
+          });
+        }
+      } catch (e) {
+        console.warn(
+          "[admin-domovoy-api] Hierarchical summarizer failed:",
+          e.message,
+        );
+      }
       
       // Get snapshot mtime if exists
       const snapshotPath = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
@@ -376,6 +527,14 @@ ${text}`
           filesLoaded: memoryPack.filesLoaded,
           snapshotMtime: snapshotMtime,
           memoryBytes: memoryPack.totalChars,
+          threadId,
+          pairCount: logResult && typeof logResult.pairCount === "number"
+            ? logResult.pairCount
+            : null,
+          lastSummaryTs: memoryPack.lastSummaryTs || null,
+          summariesIncluded: memoryPack.summaryCount,
+          recentPairsIncluded: memoryPack.recentPairCount,
+          summarizerRan: summarizerResult ? !!summarizerResult.ran : false,
         },
       });
       

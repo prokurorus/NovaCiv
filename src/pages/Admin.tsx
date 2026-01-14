@@ -102,6 +102,9 @@ function AdminInner() {
     status: number | null;
     rawResponse: string;
     jsonKeys: string[];
+    threadId?: string | null;
+    pairCount?: number | null;
+    lastSummaryTs?: string | null;
   } | null>(null);
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
@@ -324,6 +327,7 @@ function AdminInner() {
       const requestBody = {
         text: text.trim(),
         history: conversationHistory.slice(-20), // Last 20 messages
+        threadId: "ruslan-main",
       };
       
       const res = await fetch(requestUrl, {
@@ -366,11 +370,15 @@ function AdminInner() {
 
       // Capture debug info
       const jsonKeys = Object.keys(data);
+      const debug = (data && typeof data.debug === "object") ? data.debug : {};
       setDebugInfo({
         url: requestUrl,
         status: res.status,
         rawResponse: rawResponseTruncated,
         jsonKeys,
+        threadId: debug.threadId ?? null,
+        pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
+        lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
       });
 
       // Handle error responses (ok: false or non-200 status)
@@ -618,6 +626,15 @@ function AdminInner() {
                 <div><strong>URL:</strong> {debugInfo.url}</div>
                 <div><strong>HTTP Status:</strong> {debugInfo.status}</div>
                 <div><strong>JSON Keys:</strong> {debugInfo.jsonKeys.length > 0 ? debugInfo.jsonKeys.join(", ") : "none"}</div>
+                {debugInfo.threadId && (
+                  <div><strong>Thread ID:</strong> {debugInfo.threadId}</div>
+                )}
+                {typeof debugInfo.pairCount === "number" && (
+                  <div><strong>pairCount:</strong> {debugInfo.pairCount}</div>
+                )}
+                {debugInfo.lastSummaryTs && (
+                  <div><strong>lastSummaryTs:</strong> {debugInfo.lastSummaryTs}</div>
+                )}
                 <div><strong>Raw Response (truncated):</strong></div>
                 <div className="bg-white p-2 rounded border border-yellow-300 overflow-auto max-h-32">
                   {debugInfo.rawResponse || "(empty)"}

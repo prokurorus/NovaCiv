@@ -36,9 +36,8 @@ function attachProxyDebug(payload, extraDebug) {
   if (!body.debug || typeof body.debug !== "object") {
     body.debug = {};
   }
-  if (!body.debug.origin) {
-    body.debug.origin = "proxy";
-  }
+  // Always set origin to "admin-proxy" (never "proxy" or anything else)
+  body.debug.origin = "admin-proxy";
   if (extraDebug && typeof extraDebug === "object") {
     body.debug = { ...body.debug, ...extraDebug };
   }
@@ -153,7 +152,7 @@ exports.handler = async (event, context) => {
           },
           {
             upstreamStatus: null,
-            upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+            upstreamUrl: vpsUrl, // Full URL including /admin/domovoy path
             where: "admin-proxy",
           },
         );
@@ -191,7 +190,7 @@ exports.handler = async (event, context) => {
           },
           {
             upstreamStatus: null,
-            upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+            upstreamUrl: vpsUrl, // Full URL including /admin/domovoy path
             where: "admin-proxy",
           },
         );
@@ -222,16 +221,16 @@ exports.handler = async (event, context) => {
         },
         {
           upstreamStatus: response.status,
-          upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+          upstreamUrl: vpsUrl, // Full URL including /admin/domovoy path
           where: "admin-proxy",
         },
       );
     }
 
-    // Attach proxy debug / upstream info (preserve any existing debug.origin from VPS)
+    // Attach proxy debug / upstream info (always set origin to "admin-proxy")
     const debugMeta = {
       upstreamStatus: response.status,
-      upstreamUrl: sanitizeUrlForLogs(vpsUrl),
+      upstreamUrl: vpsUrl, // Full URL including /admin/domovoy path
     };
     const bodyWithDebug = attachProxyDebug(responseData, debugMeta);
 
@@ -263,7 +262,7 @@ exports.handler = async (event, context) => {
         where: "admin-proxy",
         stack: trimmedStack,
         upstreamStatus: null,
-        upstreamUrl: sanitizeUrlForLogs(buildUpstreamUrl()),
+        upstreamUrl: buildUpstreamUrl(), // Full URL including /admin/domovoy path
       },
     );
   }

@@ -105,6 +105,9 @@ function AdminInner() {
     threadId?: string | null;
     pairCount?: number | null;
     lastSummaryTs?: string | null;
+    origin?: string | null;
+    upstreamUrl?: string | null;
+    upstreamStatus?: number | null;
   } | null>(null);
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
@@ -379,6 +382,9 @@ function AdminInner() {
         threadId: debug.threadId ?? null,
         pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
         lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
+        origin: typeof debug.origin === "string" ? debug.origin : null,
+        upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
+        upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
       });
 
       // Handle error responses (ok: false or non-200 status)
@@ -625,6 +631,15 @@ function AdminInner() {
               <div className="text-yellow-700 font-mono text-xs space-y-1">
                 <div><strong>URL:</strong> {debugInfo.url}</div>
                 <div><strong>HTTP Status:</strong> {debugInfo.status}</div>
+                {debugInfo.origin && (
+                  <div><strong>Origin:</strong> {debugInfo.origin}</div>
+                )}
+                {debugInfo.upstreamUrl && (
+                  <div><strong>Upstream URL:</strong> {debugInfo.upstreamUrl}</div>
+                )}
+                {debugInfo.upstreamStatus !== undefined && debugInfo.upstreamStatus !== null && (
+                  <div><strong>Upstream Status:</strong> {debugInfo.upstreamStatus}</div>
+                )}
                 <div><strong>JSON Keys:</strong> {debugInfo.jsonKeys.length > 0 ? debugInfo.jsonKeys.join(", ") : "none"}</div>
                 {debugInfo.threadId && (
                   <div><strong>Thread ID:</strong> {debugInfo.threadId}</div>

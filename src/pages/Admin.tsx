@@ -3,7 +3,9 @@ import Header from "../components/Header";
 
 // ============================================
 // === ADMIN BUILD MARKER ===
-// Git SHA: ca75353
+// Git SHA + BUILD TIME are injected at Netlify build time via Vite env:
+//   import.meta.env.VITE_COMMIT_REF
+//   import.meta.env.VITE_BUILD_TIME
 // This is the REAL production entrypoint for /admin
 // Route: src/App.tsx line 594 → renders <Admin /> from src/pages/Admin.tsx
 // ============================================
@@ -532,7 +534,8 @@ function AdminInner() {
               === ADMIN BUILD MARKER ===
             </div>
             <div className="text-sm text-yellow-800 font-mono">
-              Git SHA: ca75353 | Source: src/pages/Admin.tsx
+              Git SHA: {import.meta.env.VITE_COMMIT_REF || "unknown"} | Build time:{" "}
+              {import.meta.env.VITE_BUILD_TIME || "unknown"} | Source: src/pages/Admin.tsx
             </div>
             <div className="text-sm text-yellow-700 mt-2 font-semibold">
               DEPLOY PROOF: if you see this, GitHub → Netlify pipeline is correct

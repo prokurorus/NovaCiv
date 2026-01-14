@@ -28,7 +28,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
 
 // ---------- Memory cache (static docs + snapshot) ----------
+// Cache is mode-aware: { mode: "ops"|"strategy", cache: {...} }
 let staticMemoryCache = null;
+let cachedMode = null;
 
 // ---------- Helper: Load file safely ----------
 function loadFile(filePath) {
@@ -160,8 +162,14 @@ function formatOpsStatusBlock(ops) {
 }
 
 // ---------- Build static docs/snapshot memory ----------
-function buildStaticMemoryFiles() {
-  if (staticMemoryCache !== null) return staticMemoryCache;
+function buildStaticMemoryFiles(mode = "ops") {
+  // For "direct" mode, treat it like "strategy" (load all files)
+  const effectiveMode = mode === "direct" ? "strategy" : mode;
+  
+  // Check if cache is valid for this mode
+  if (staticMemoryCache !== null && cachedMode === effectiveMode) {
+    return staticMemoryCache;
+  }
 
   const docsBase = path.join(PROJECT_DIR, "docs");
   const runbooksBase = path.join(PROJECT_DIR, "runbooks");
@@ -170,20 +178,37 @@ function buildStaticMemoryFiles() {
   const memoryFiles = [];
   const MAX_TOTAL_CHARS = 120000;
   
-  // Priority 1: Critical files (always include)
-  const criticalFiles = [
+  // Priority 1: Critical files (mode-aware filtering)
+  const allCriticalFiles = [
     { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
     { path: path.join(docsBase, "ADMIN_ASSISTANT.md"), name: "ADMIN_ASSISTANT.md" },
     { path: path.join(docsBase, "PROJECT_CONTEXT.md"), name: "PROJECT_CONTEXT.md" },
     { path: path.join(docsBase, "PROJECT_STATE.md"), name: "PROJECT_STATE.md" },
   ];
   
+  // For ops mode: exclude strategic/planning files
+  // For direct/strategy: include all files
+  const criticalFiles = effectiveMode === "ops"
+    ? allCriticalFiles.filter(f => 
+        f.name !== "ADMIN_ASSISTANT.md" && 
+        f.name !== "PROJECT_CONTEXT.md"
+      )
+    : allCriticalFiles;
+  
   // Priority 2: Important files (include if space allows)
-  const importantFiles = [
+  // For ops mode: only include safe ops files (runbooks)
+  const allImportantFiles = [
     { path: path.join(docsBase, "START_HERE.md"), name: "START_HERE.md" },
     { path: path.join(docsBase, "RUNBOOKS.md"), name: "RUNBOOKS.md" },
     { path: path.join(runbooksBase, "SOURCE_OF_TRUTH.md"), name: "runbooks/SOURCE_OF_TRUTH.md" },
   ];
+  
+  const importantFiles = effectiveMode === "ops"
+    ? allImportantFiles.filter(f => 
+        f.name === "runbooks/SOURCE_OF_TRUTH.md" || 
+        f.name === "RUNBOOKS.md"
+      )
+    : allImportantFiles;
   
   // Priority 3: System snapshot (tail last 250 lines if exists)
   const snapshotPath = path.join(stateBase, "system_snapshot.md");
@@ -257,12 +282,14 @@ function buildStaticMemoryFiles() {
     totalChars,
   };
 
+  cachedMode = effectiveMode;
+
   return staticMemoryCache;
 }
 
 // ---------- Build full Memory Pack (docs + snapshots + admin summaries/history) ----------
-async function buildMemoryPack(threadIdRaw) {
-  const staticPack = buildStaticMemoryFiles();
+async function buildMemoryPack(threadIdRaw, mode = "ops") {
+  const staticPack = buildStaticMemoryFiles(mode);
 
   let adminContext = null;
   try {
@@ -355,9 +382,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   
-  // Only POST /admin/domovoy
+  // Support POST /admin/domovoy and POST /admin/direct
   const parsedUrl = url.parse(req.url, true);
-  if (req.method !== "POST" || parsedUrl.pathname !== "/admin/domovoy") {
+  const isDomovoy = parsedUrl.pathname === "/admin/domovoy";
+  const isDirect = parsedUrl.pathname === "/admin/direct";
+  
+  if (req.method !== "POST" || (!isDomovoy && !isDirect)) {
     sendJson(res, 404, {
       ok: false,
       error: "Not Found",
@@ -400,16 +430,38 @@ const server = http.createServer(async (req, res) => {
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
       const threadId = getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
-      // Validate mode (default to "ops" if missing or invalid)
+      
+      // For /admin/direct: use "direct" mode, no mode validation
+      // For /admin/domovoy: validate mode (default to "ops" if missing or invalid)
+      const isDirectMode = isDirect;
       const modeRaw = data.mode;
       const validModes = ["ops", "strategy"];
-      const mode = validModes.includes(modeRaw) ? modeRaw : "ops";
+      const mode = isDirectMode ? "direct" : (validModes.includes(modeRaw) ? modeRaw : "ops");
       
+      // Validate question length (4k-8k chars limit)
       if (!text) {
         sendJson(res, 400, {
           ok: false,
           error: "Text is required",
           message: "Request body must include 'text' field",
+        });
+        return;
+      }
+      
+      if (text.length > 8000) {
+        sendJson(res, 400, {
+          ok: false,
+          error: "Text too long",
+          message: "Question must be 8000 characters or less",
+        });
+        return;
+      }
+      
+      if (text.length < 1) {
+        sendJson(res, 400, {
+          ok: false,
+          error: "Text too short",
+          message: "Question must be at least 1 character",
         });
         return;
       }
@@ -430,10 +482,232 @@ const server = http.createServer(async (req, res) => {
         );
       }
       
+      // For /admin/direct: skip domovoy-specific logic, go straight to OpenAI
+      if (isDirectMode) {
+        // Load memory pack (always load all files, no mode filtering)
+        let memoryPack;
+        try {
+          memoryPack = await buildMemoryPack(threadId, "direct");
+        } catch (e) {
+          console.error("[admin-domovoy-api] Memory pack loading error:", e);
+          sendJson(res, 500, {
+            ok: false,
+            error: "context_missing",
+            message: `Failed to load memory pack: ${e.message}`,
+            debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
+          });
+          return;
+        }
+        
+        if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
+          sendJson(res, 500, {
+            ok: false,
+            error: "context_missing",
+            message: "Memory pack is empty or not found",
+            debugHint: "Check docs/ files exist",
+          });
+          return;
+        }
+        
+        // Build context from memory files
+        const contextBlocks = memoryPack.memoryFiles.map(file => 
+          `=== ${file.name} ===\n\n${file.content}\n\n`
+        ).join("\n---\n\n");
+        
+        // Build messages array for direct mode
+        const messages = [];
+        
+        // System prompt for Direct Admin Chat
+        messages.push({
+          role: "system",
+          content: `Ты — Direct Admin Chat: прямой помощник для обсуждения идей и решений проекта NovaCiv.
+Ты НЕ операционный мозг (это Domovoy). Ты дружелюбный собеседник, который помогает обсуждать идеи и решения.
+
+ТВОЯ РОЛЬ:
+- Дружелюбный стиль общения, как в обычном чате
+- Помогаешь обсуждать идеи и решения
+- НЕ придумываешь инфраструктурные внедрения, если пользователь не просил
+- Если вопрос "что делать дальше?" без конкретики — попроси выбрать цель (A/B/C) и дай 1 следующий шаг
+- Используй контекст из файлов проекта для ответов
+
+ПОЛЬЗОВАТЕЛЬ:
+- Пользователь — Руслан, основатель и оператор NovaCiv
+- Владелец novaciv.space, управляет GitHub/Netlify/VPS
+- Thread ID по умолчанию: ruslan-main
+
+ПРАВИЛА ОТВЕТОВ:
+- Отвечай дружелюбно, но по делу
+- Используй memory pack (docs + snapshot + RTDB history) для контекста
+- НИКОГДА не печатай секреты, токены, ключи, пароли
+- Если данных нет в memory pack — честно скажи, не выдумывай
+- Стиль: человеческий, дружелюбный, конкретный
+- НЕ предлагай автоматически инфраструктурные решения (Grafana/Prometheus/GA/CI/CD), если пользователь не просит
+- Если вопрос общий "что делать дальше?" — предложи выбрать A/B/C и дай один шаг`
+        });
+        
+        // Add conversation history (last 20 messages)
+        const recentHistory = history.slice(-20);
+        for (const msg of recentHistory) {
+          if (msg.role && msg.content && (msg.role === "user" || msg.role === "assistant")) {
+            messages.push({ role: msg.role, content: msg.content });
+          }
+        }
+        
+        // Add current question with context
+        messages.push({
+          role: "user",
+          content: `Полная проектная память (Memory Pack):
+
+${contextBlocks}
+
+---
+
+Вопрос администратора:
+${text}`
+        });
+        
+        // Call OpenAI
+        const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: messages,
+            temperature: 0.5,
+          }),
+        });
+        
+        if (!completion.ok) {
+          const errorText = await completion.text().catch(() => "");
+          console.error(
+            "[admin-domovoy-api] OpenAI error:",
+            completion.status,
+            errorText.slice(0, 200),
+          );
+          sendJson(res, 502, {
+            ok: false,
+            error: "openai_failed",
+            message: `OpenAI API returned status ${completion.status}`,
+            debugHint: "Check OPENAI_API_KEY and API quota",
+          });
+          return;
+        }
+        
+        const completionData = await completion.json();
+        let answer =
+          completionData.choices?.[0]?.message?.content ||
+          "Не удалось получить ответ от OpenAI.";
+        
+        if (!answer || answer.trim().length === 0) {
+          sendJson(res, 502, {
+            ok: false,
+            error: "openai_empty_response",
+            message: "OpenAI returned an empty response",
+            debugHint: "Check OpenAI API response structure",
+          });
+          return;
+        }
+        
+        // Log assistant message and increment pairCount (best-effort)
+        let logResult = null;
+        try {
+          logResult = await logAssistantMessageAndIncrementPair({
+            threadId,
+            text: answer,
+            ts: Date.now(),
+            origin: "vps-direct",
+          });
+        } catch (e) {
+          console.warn(
+            "[admin-domovoy-api] Failed to log assistant message to RTDB:",
+            e.message,
+          );
+        }
+        
+        // Success response for direct mode
+        sendJson(res, 200, {
+          ok: true,
+          answer: answer,
+          debug: {
+            origin: "vps",
+            mode: "direct",
+            threadId,
+            filesLoaded: memoryPack.filesLoaded,
+            memoryBytes: memoryPack.totalChars,
+            pairCount: logResult && typeof logResult.pairCount === "number"
+              ? logResult.pairCount
+              : null,
+          },
+        });
+        return;
+      }
+      
+      // Detect general questions for ops mode (before loading memory)
+      if (mode === "ops") {
+        const normalizedText = text.toLowerCase().trim();
+        const generalQuestionPatterns = [
+          /^что делать дальше/i,
+          /^что дальше/i,
+          /^что улучшить/i,
+          /^next/i,
+          /^дальше/i,
+          /^что делать$/i,
+          /^что можно сделать$/i,
+          /^что нужно сделать$/i,
+        ];
+        
+        const isGeneralQuestion = generalQuestionPatterns.some(pattern => 
+          pattern.test(normalizedText) && normalizedText.length < 50
+        );
+        
+        if (isGeneralQuestion) {
+          const generalResponse = `Критичных проблем не видно.
+
+Выбери цель: (A) админка/домовой (B) форум/UX (C) контент/постинг
+
+Назови букву — дам один шаг.`;
+          
+          // Log assistant message
+          try {
+            await logAssistantMessageAndIncrementPair({
+              threadId,
+              text: generalResponse,
+              ts: Date.now(),
+              origin: "vps-admin",
+            });
+          } catch (e) {
+            console.warn("[admin-domovoy-api] Failed to log general response:", e.message);
+          }
+          
+          sendJson(res, 200, {
+            ok: true,
+            answer: generalResponse,
+            debug: {
+              filesLoaded: [],
+              memoryBytes: 0,
+              threadId,
+              mode: mode,
+              generalQuestionDetected: true,
+            },
+          });
+          return;
+        }
+        
+        // Handle A/B/C selection after general question
+        const choicePattern = /^(выбираю|выбираем|выберу|выберём|выбрал|выбрали|выбрала|выбрало|a|b|c|а|б|в)$/i;
+        if (choicePattern.test(normalizedText)) {
+          // Let it through to OpenAI, but add instruction to give ONE step for chosen area
+          // This will be handled by the system prompt
+        }
+      }
+      
       // Load memory pack (docs + snapshots + admin RTDB context)
       let memoryPack;
       try {
-        memoryPack = await buildMemoryPack(threadId);
+        memoryPack = await buildMemoryPack(threadId, mode);
       } catch (e) {
         console.error("[admin-domovoy-api] Memory pack loading error:", e);
         sendJson(res, 500, {
@@ -469,19 +743,34 @@ const server = http.createServer(async (req, res) => {
       // System prompt (mode-aware)
       const modeInstructions = mode === "ops" 
         ? `РЕЖИМ: ОПЕРАТИВКА
-- Отвечай КРАТКО и по делу
-- Формат: текущая проблема/симптом → причина → ОДИН следующий шаг
-- ЗАПРЕЩЕНО предлагать инфраструктурные рекомендации (Grafana/Prometheus/GA/CI/CD/Trello/Jira/мониторинг/установка инструментов), если пользователь явно не просит
-- Без длинных списков действий
-- Без автоматических разделов "Следующие действия"
-- Фокус: текущая ошибка/симптом → причина → 1 следующий шаг
+СТРОГИЙ ФОРМАТ ОТВЕТА (ОБЯЗАТЕЛЬНО):
+Твой ответ ДОЛЖЕН состоять из 3 блоков:
+1. СТАТУС: [краткое описание текущей ситуации/проблемы]
+2. ПРИЧИНА: [короткое объяснение причины, если есть проблема]
+3. ОДИН ШАГ: [только один следующий шаг, без нумерации, без списков]
 
-СПЕЦИАЛЬНАЯ ОБРАБОТКА "что делать дальше":
-- Если пользователь спрашивает "что делать дальше" или "что дальше" БЕЗ конкретной проблемы:
-  * Отвечай: "Критичных проблем не видно"
-  * Затем: "Выбери цель на сегодня: (A) стабильность админки/домового (B) форум/UX (C) контент/видео/постинг"
-  * Затем: "Назови букву — дам один следующий шаг"
-  * НЕ предлагай установку инструментов, мониторинг, CI/CD или другие инфраструктурные решения`
+ЗАПРЕЩЕНО:
+- Выдавать списки действий (1/2/3/4, • пункты, - пункты)
+- Предлагать инфраструктурные рекомендации (Grafana/Prometheus/GA/CI/CD/Trello/Jira/мониторинг/установка инструментов), если пользователь явно не просит
+- Добавлять разделы "Следующие действия" или "План"
+- Давать больше одного шага
+- Использовать нумерацию или маркеры списков
+
+ФОКУС:
+- Текущая ошибка/симптом → причина → ОДИН следующий шаг
+- Если критичных проблем нет → скажи "Критичных проблем не видно" и предложи выбрать A/B/C
+
+ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
+СТАТУС: Git репозиторий dirty, есть незакоммиченные изменения.
+ПРИЧИНА: Вероятно, были ручные правки на VPS или не синхронизированы изменения.
+ОДИН ШАГ: Выполни "git status" чтобы увидеть список измененных файлов, затем либо закоммить их, либо откатить через "git checkout -- <file>".
+
+ОБРАБОТКА ВЫБОРА A/B/C:
+- Если пользователь выбрал (A) админка/домовой: дай ОДИН шаг по улучшению стабильности админки или домового
+- Если пользователь выбрал (B) форум/UX: дай ОДИН шаг по улучшению форума или пользовательского опыта
+- Если пользователь выбрал (C) контент/постинг: дай ОДИН шаг по улучшению контента или процесса постинга
+- Всегда используй формат СТАТУС/ПРИЧИНА/ОДИН ШАГ
+- НЕ предлагай инфраструктурные решения (GA/CI/мониторинг) без явного запроса`
         : `РЕЖИМ: СТРАТЕГИЯ
 - Можно предлагать идеи улучшений и планы
 - МАКСИМУМ 3 пункта улучшений
@@ -599,7 +888,7 @@ ${text}`
       }
       
       const completionData = await completion.json();
-      const answer =
+      let answer =
         completionData.choices?.[0]?.message?.content ||
         "Не удалось получить ответ от OpenAI.";
       
@@ -611,6 +900,65 @@ ${text}`
           debugHint: "Check OpenAI API response structure",
         });
         return;
+      }
+      
+      // Post-process answer for ops mode: enforce strict format
+      if (mode === "ops") {
+        const normalizedAnswer = answer.trim();
+        
+        // Check if answer already follows the format
+        const hasStatus = /СТАТУС\s*:/i.test(normalizedAnswer);
+        const hasCause = /ПРИЧИНА\s*:/i.test(normalizedAnswer);
+        const hasStep = /ОДИН ШАГ\s*:/i.test(normalizedAnswer);
+        
+        // Check for forbidden patterns (lists, numbering)
+        const hasForbiddenList = /^\s*[0-9]+[\.\)]\s|^\s*[-•*]\s|^\s*[a-z][\.\)]\s/i.test(normalizedAnswer.split('\n').find(line => line.trim().length > 0) || '');
+        const hasMultipleSteps = (normalizedAnswer.match(/шаг|step|действие|action/gi) || []).length > 2;
+        
+        // If format is violated, try to extract and reformat
+        if (!hasStatus || !hasCause || !hasStep || hasForbiddenList || hasMultipleSteps) {
+          // Try to extract key parts and reformat
+          const lines = normalizedAnswer.split('\n').filter(l => l.trim().length > 0);
+          let statusPart = '';
+          let causePart = '';
+          let stepPart = '';
+          
+          // Look for status indicators
+          const statusKeywords = ['статус', 'ситуация', 'проблема', 'ошибка', 'status', 'situation', 'problem', 'error'];
+          const causeKeywords = ['причина', 'причиной', 'из-за', 'because', 'reason', 'cause'];
+          const stepKeywords = ['шаг', 'действие', 'сделай', 'выполни', 'step', 'action', 'do'];
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].toLowerCase();
+            if (statusKeywords.some(kw => line.includes(kw)) && !statusPart) {
+              statusPart = lines[i].replace(/^(статус|ситуация|проблема|ошибка|status|situation|problem|error)\s*:?\s*/i, '').trim();
+            } else if (causeKeywords.some(kw => line.includes(kw)) && !causePart) {
+              causePart = lines[i].replace(/^(причина|причиной|из-за|because|reason|cause)\s*:?\s*/i, '').trim();
+            } else if (stepKeywords.some(kw => line.includes(kw)) && !stepPart) {
+              // Take only the first step
+              stepPart = lines[i].replace(/^(шаг|действие|сделай|выполни|step|action|do)\s*[0-9]*\s*:?\s*/i, '').trim();
+              break; // Only take first step
+            }
+          }
+          
+          // If we couldn't extract, use original but warn
+          if (!statusPart) statusPart = lines[0] || 'Статус не определен';
+          if (!causePart) causePart = 'Причина не указана';
+          if (!stepPart) {
+            // Try to find any actionable line
+            stepPart = lines.find(l => 
+              stepKeywords.some(kw => l.toLowerCase().includes(kw)) ||
+              (l.length > 10 && l.length < 200)
+            ) || 'Шаг не определен';
+          }
+          
+          // Reformat to strict format
+          answer = `СТАТУС: ${statusPart}
+
+ПРИЧИНА: ${causePart}
+
+ОДИН ШАГ: ${stepPart}`;
+        }
       }
 
       // Log assistant message and increment pairCount (best-effort)
@@ -714,6 +1062,7 @@ ${text}`
 server.listen(PORT, () => {
   console.log(`[admin-domovoy-api] Server listening on port ${PORT}`);
   console.log(`[admin-domovoy-api] Endpoint: POST http://localhost:${PORT}/admin/domovoy`);
+  console.log(`[admin-domovoy-api] Endpoint: POST http://localhost:${PORT}/admin/direct`);
   console.log(`[admin-domovoy-api] PROJECT_DIR: ${PROJECT_DIR}`);
   
   if (!ADMIN_API_TOKEN) {

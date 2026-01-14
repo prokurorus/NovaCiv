@@ -176,9 +176,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   
-  // Check token
-  const token = req.headers["x-admin-token"];
-  if (!ADMIN_API_TOKEN || token !== ADMIN_API_TOKEN) {
+  // Check token (case-insensitive header lookup, trim whitespace)
+  const tokenRaw = req.headers["x-admin-token"] || req.headers["X-Admin-Token"];
+  const token = tokenRaw ? tokenRaw.trim() : null;
+  const expectedToken = ADMIN_API_TOKEN ? ADMIN_API_TOKEN.trim() : null;
+  
+  if (!expectedToken || !token || token !== expectedToken) {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ 
       ok: false, 

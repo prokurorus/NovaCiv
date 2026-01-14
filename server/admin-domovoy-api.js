@@ -9,6 +9,7 @@ const http = require("http");
 const url = require("url");
 const path = require("path");
 const fs = require("fs");
+const { execSync } = require("child_process");
 require("dotenv").config({ path: process.env.ENV_PATH || "/root/NovaCiv/.env" });
 
 const {
@@ -64,6 +65,98 @@ function sanitizeContent(content) {
   });
   
   return sanitized;
+}
+
+// ---------- Helper: Collect OPS STATUS (real-time checks) ----------
+function collectOpsStatus() {
+  const ops = {
+    gitClean: null,
+    headSha: null,
+    pm2: [],
+    snapshotMtime: null,
+  };
+
+  try {
+    // Check git status (authoritative)
+    try {
+      const gitStatus = execSync("git status --porcelain", {
+        cwd: PROJECT_DIR,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+      ops.gitClean = gitStatus.length === 0;
+    } catch (e) {
+      console.warn("[admin-domovoy-api] Failed to check git status:", e.message);
+      ops.gitClean = null;
+    }
+
+    // Get HEAD SHA
+    try {
+      ops.headSha = execSync("git rev-parse --short HEAD", {
+        cwd: PROJECT_DIR,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim();
+    } catch (e) {
+      console.warn("[admin-domovoy-api] Failed to get HEAD SHA:", e.message);
+      ops.headSha = null;
+    }
+
+    // Get PM2 summary (filtered to names + status + restarts + uptimeSeconds)
+    try {
+      const pm2List = execSync("pm2 jlist", {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const pm2Processes = JSON.parse(pm2List);
+      ops.pm2 = pm2Processes.map((proc) => ({
+        name: proc.name || null,
+        status: proc.pm2_env?.status || null,
+        restarts: proc.pm2_env?.restart_time || 0,
+        uptimeSeconds: proc.pm2_env?.pm_uptime ? Math.floor((Date.now() - proc.pm2_env.pm_uptime) / 1000) : null,
+      }));
+    } catch (e) {
+      console.warn("[admin-domovoy-api] Failed to get PM2 status:", e.message);
+      ops.pm2 = [];
+    }
+
+    // Get snapshot mtime
+    const snapshotPath = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
+    try {
+      if (fs.existsSync(snapshotPath)) {
+        const stats = fs.statSync(snapshotPath);
+        ops.snapshotMtime = stats.mtime.toISOString();
+      }
+    } catch (e) {
+      // Ignore
+    }
+  } catch (e) {
+    console.warn("[admin-domovoy-api] Error collecting ops status:", e.message);
+  }
+
+  return ops;
+}
+
+// ---------- Helper: Format OPS STATUS block for prompt ----------
+function formatOpsStatusBlock(ops) {
+  const lines = [];
+  lines.push("OPS STATUS (truth):");
+  lines.push(`  gitClean: ${ops.gitClean === true ? "true" : ops.gitClean === false ? "false" : "unknown"}`);
+  lines.push(`  headSha: ${ops.headSha || "unknown"}`);
+  
+  if (ops.pm2 && ops.pm2.length > 0) {
+    lines.push("  pm2:");
+    ops.pm2.forEach((proc) => {
+      const uptimeStr = proc.uptimeSeconds !== null ? `${proc.uptimeSeconds}s` : "unknown";
+      lines.push(`    - ${proc.name || "unnamed"}: status=${proc.status || "unknown"}, restarts=${proc.restarts || 0}, uptime=${uptimeStr}`);
+    });
+  } else {
+    lines.push("  pm2: []");
+  }
+  
+  lines.push(`  snapshotMtime: ${ops.snapshotMtime || "not found"}`);
+  
+  return lines.join("\n");
 }
 
 // ---------- Build static docs/snapshot memory ----------
@@ -358,6 +451,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       
+      // Collect OPS STATUS (real-time checks, authoritative)
+      const opsStatus = collectOpsStatus();
+      
       // Build context from memory files
       const contextBlocks = memoryPack.memoryFiles.map(file => 
         `=== ${file.name} ===\n\n${file.content}\n\n`
@@ -384,10 +480,19 @@ const server = http.createServer(async (req, res) => {
 - Когда спрашивает "кто я?" — отвечай: проектная роль (founder/operator), НЕ личные данные
 - Thread ID по умолчанию: ruslan-main
 
+КРИТИЧЕСКИ ВАЖНО — OPS STATUS (GROUND TRUTH):
+- OPS STATUS блок содержит РЕАЛЬНЫЕ проверки системы в момент запроса
+- OPS STATUS — это ИСТИНА, а НЕ память или предположения
+- Ты ДОЛЖЕН использовать OPS STATUS как источник истины для статуса VPS
+- Если gitClean=true в OPS STATUS — НЕ говори "dirty" или "RED FLAG"
+- Если gitClean=false в OPS STATUS — говори "dirty" и предложи действия (без секретов)
+- OPS STATUS обновляется при каждом запросе, это актуальные данные
+
 ПРАВИЛА ОТВЕТОВ:
 - Отвечай кратко, конкретно, с проверками и командами
 - Всегда предоставляй: текущий статус + следующие действия
-- Используй memory pack (docs + snapshot + RTDB history)
+- Используй OPS STATUS как источник истины для статуса VPS
+- Используй memory pack (docs + snapshot + RTDB history) для контекста
 - НИКОГДА не печатай секреты, токены, ключи, пароли
 - Если данных нет в memory pack — честно скажи, не выдумывай
 - Фокус: ops, статус системы, failure modes, recovery, архитектура
@@ -399,6 +504,7 @@ const server = http.createServer(async (req, res) => {
 - Фокус на проектной роли и операционной идентичности
 
 КОГДА СПРАШИВАЮТ "какая сейчас стадия администрирования?":
+- Проверь OPS STATUS (gitClean, pm2, snapshotMtime)
 - Проверь: статус VPS, RTDB, PM2 процессы, свежесть snapshot
 - Отвечай: конкретная стадия (например, "VPS OK, RTDB OK, summaries pending, Netlify step next")
 - Предложи конкретные следующие действия`
@@ -412,10 +518,15 @@ const server = http.createServer(async (req, res) => {
         }
       }
       
-      // Add current question with context
+      // Add current question with context (OPS STATUS BEFORE memory pack)
+      const opsStatusBlock = formatOpsStatusBlock(opsStatus);
       messages.push({
         role: "user",
-        content: `Полная проектная память (Memory Pack):
+        content: `${opsStatusBlock}
+
+---
+
+Полная проектная память (Memory Pack):
 
 ${contextBlocks}
 
@@ -530,25 +641,12 @@ ${text}`
         );
       }
       
-      // Get snapshot mtime if exists
-      const snapshotPath = path.join(PROJECT_DIR, "_state", "system_snapshot.md");
-      let snapshotMtime = null;
-      try {
-        if (fs.existsSync(snapshotPath)) {
-          const stats = fs.statSync(snapshotPath);
-          snapshotMtime = stats.mtime.toISOString();
-        }
-      } catch (e) {
-        // Ignore
-      }
-      
       // Success response
       sendJson(res, 200, {
         ok: true,
         answer: answer,
         debug: {
           filesLoaded: memoryPack.filesLoaded,
-          snapshotMtime: snapshotMtime,
           memoryBytes: memoryPack.totalChars,
           threadId,
           pairCount: logResult && typeof logResult.pairCount === "number"
@@ -558,6 +656,12 @@ ${text}`
           summariesIncluded: memoryPack.summaryCount,
           recentPairsIncluded: memoryPack.recentPairCount,
           summarizerRan: summarizerResult ? !!summarizerResult.ran : false,
+          ops: {
+            gitClean: opsStatus.gitClean,
+            headSha: opsStatus.headSha,
+            pm2: opsStatus.pm2,
+            snapshotMtime: opsStatus.snapshotMtime,
+          },
         },
       });
       

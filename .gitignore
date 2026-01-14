@@ -29,3 +29,22 @@ dist-ssr
 # local helper scripts
 sync.ps1
 
+
+# Environment files and backups (secrets)
+.env
+.env.*
+.env.backup*
+
+# Generated state directory
+_state/
+
+# Backup and temporary files
+*.bak
+*.bak2
+*.bak3
+*.new
+*.old
+*.tmp
+
+# Temporary check files
+PC_AUTOPUSH_CHECK.md

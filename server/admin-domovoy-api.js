@@ -12,6 +12,7 @@ const fs = require("fs");
 const { execSync } = require("child_process");
 require("dotenv").config({ path: process.env.ENV_PATH || "/root/NovaCiv/.env" });
 
+const { getDb } = require("./lib/firebaseAdmin");
 const {
   DEFAULT_THREAD_ID,
   getEffectiveThreadId,
@@ -67,6 +68,127 @@ function sanitizeContent(content) {
   });
   
   return sanitized;
+}
+
+// ---------- Helper: One-time sanitation for direct thread ----------
+async function sanitizeDirectThreadIfNeeded(threadId) {
+  if (threadId !== "ruslan-direct") return { ran: false, reason: "not_direct" };
+
+  const db = getDb();
+  const baseRef = db.ref("adminConversations").child(threadId);
+
+  const sanitizedFlagSnap = await baseRef
+    .child("state")
+    .child("directSanitized")
+    .once("value");
+
+  if (sanitizedFlagSnap.val() === true) {
+    return { ran: false, reason: "already_sanitized" };
+  }
+
+  const existingSnap = await baseRef.once("value");
+  const existing = existingSnap.val() || {};
+
+  const seedPairs = [
+    {
+      q: "что делать дальше?",
+      a:
+        "Критичных проблем не видно. Выбери цель: (A) стабильность админки/домового (B) форум/UX (C) контент/видео/постинг. Назови букву. Следующий шаг: ответь одной буквой.",
+    },
+    {
+      q: "почему мы получили 504 вчера и что изменили?",
+      a: "Не уверен. Уточни, на каком эндпойнте или странице была 504?",
+    },
+    {
+      q: "есть срочные проблемы?",
+      a: "Сейчас не вижу критичных проблем. Если есть симптомы — опиши коротко.",
+    },
+  ];
+
+  const messagesRef = baseRef.child("messages");
+  const messages = {};
+  const baseTs = Date.now() - seedPairs.length * 2 * 1000;
+  let ts = baseTs;
+
+  seedPairs.forEach((pair) => {
+    const userKey = messagesRef.push().key;
+    const assistantKey = messagesRef.push().key;
+    messages[userKey] = {
+      role: "user",
+      text: pair.q,
+      ts,
+      meta: {
+        origin: "direct-seed",
+      },
+    };
+    ts += 500;
+    messages[assistantKey] = {
+      role: "assistant",
+      text: pair.a,
+      ts,
+      meta: {
+        origin: "direct-seed",
+      },
+    };
+    ts += 500;
+  });
+
+  const preserved = {};
+  Object.keys(existing).forEach((key) => {
+    if (
+      key !== "messages" &&
+      key !== "recentPairs" &&
+      key !== "counters" &&
+      key !== "state" &&
+      key !== "summaries"
+    ) {
+      preserved[key] = existing[key];
+    }
+  });
+
+  const existingRecentPairs = existing.recentPairs;
+  let sanitizedRecentPairs = undefined;
+  if (Array.isArray(existingRecentPairs)) {
+    sanitizedRecentPairs = [];
+  } else if (existingRecentPairs && typeof existingRecentPairs === "object") {
+    sanitizedRecentPairs = {};
+  }
+
+  const newState = {
+    ...(existing.state || {}),
+    lastMessageTs: ts,
+    lastSummaryTs: null,
+    directSanitized: true,
+  };
+
+  const newCounters = {
+    ...(existing.counters || {}),
+    pairCount: seedPairs.length,
+    lastSummarizedPairCount: 0,
+  };
+
+  const newSummaries = {
+    ...(existing.summaries || {}),
+    level1: {},
+    level2: {},
+  };
+
+  const newData = {
+    ...preserved,
+    messages,
+    counters: newCounters,
+    state: newState,
+    summaries: newSummaries,
+  };
+
+  if (sanitizedRecentPairs !== undefined) {
+    newData.recentPairs = sanitizedRecentPairs;
+  }
+
+  await baseRef.set(newData);
+
+  console.log(`[direct-sanitize] done; pairs=${seedPairs.length}`);
+  return { ran: true, pairs: seedPairs.length };
 }
 
 // ---------- Helper: Collect OPS STATUS (real-time checks) ----------
@@ -469,6 +591,14 @@ const server = http.createServer(async (req, res) => {
           message: "Question must be at least 1 character",
         });
         return;
+      }
+
+      if (isDirectMode) {
+        try {
+          await sanitizeDirectThreadIfNeeded(threadId);
+        } catch (e) {
+          console.warn("[direct-sanitize] failed:", e.message);
+        }
       }
 
       // Log user message to RTDB (best-effort, non-fatal on error)

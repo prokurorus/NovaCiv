@@ -96,7 +96,23 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>([]);
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>(() => {
+    // Load from localStorage on init
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("adminChatHistory");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            return parsed.slice(-20); // Keep last 20 messages
+          }
+        }
+      } catch (e) {
+        console.error("[Admin] Failed to load chat history:", e);
+      }
+    }
+    return [];
+  });
   const [mode, setMode] = useState<"ops" | "strategy">(() => {
     // Load from localStorage, default to "ops"
     if (typeof window !== "undefined") {
@@ -105,6 +121,7 @@ function AdminInner() {
     }
     return "ops";
   });
+  const [copiedStatus, setCopiedStatus] = useState(false);
   const [debugInfo, setDebugInfo] = useState<{
     url: string;
     status: number | null;
@@ -116,6 +133,7 @@ function AdminInner() {
     origin?: string | null;
     upstreamUrl?: string | null;
     upstreamStatus?: number | null;
+    mode?: string | null;
   } | null>(null);
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
@@ -307,6 +325,27 @@ function AdminInner() {
     window.netlifyIdentity.open();
   };
 
+  const handleClearHistory = () => {
+    setConversationHistory([]);
+    setResponse("");
+    try {
+      localStorage.removeItem("adminChatHistory");
+    } catch (e) {
+      console.error("[Admin] Failed to clear chat history:", e);
+    }
+  };
+
+  const handleCopyResponse = async () => {
+    if (!response) return;
+    try {
+      await navigator.clipboard.writeText(response);
+      setCopiedStatus(true);
+      setTimeout(() => setCopiedStatus(false), 2000);
+    } catch (e) {
+      console.error("[Admin] Failed to copy:", e);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -394,6 +433,7 @@ function AdminInner() {
         origin: typeof debug.origin === "string" ? debug.origin : null,
         upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
         upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
+        mode: typeof debug.mode === "string" ? debug.mode : null,
       });
 
       // Handle error responses (ok: false or non-200 status)
@@ -437,6 +477,13 @@ function AdminInner() {
         { role: "assistant" as const, content: answerText },
       ].slice(-20);
       setConversationHistory(newHistory);
+      
+      // Save to localStorage
+      try {
+        localStorage.setItem("adminChatHistory", JSON.stringify(newHistory));
+      } catch (e) {
+        console.error("[Admin] Failed to save chat history:", e);
+      }
       
       setResponse(answerText);
       setText(""); // Clear input after successful submission
@@ -582,12 +629,60 @@ function AdminInner() {
             </button>
           </div>
 
+          {/* Chat History */}
+          {conversationHistory.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  История диалога
+                </h2>
+                <button
+                  onClick={handleClearHistory}
+                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition"
+                >
+                  Очистить
+                </button>
+              </div>
+              <div className="text-xs text-zinc-500 mb-2">
+                Очищает историю только в браузере. Серверный thread ruslan-main не трогает.
+              </div>
+              <div className="space-y-3 max-h-96 overflow-y-auto p-4 bg-zinc-50 border border-zinc-200 rounded-xl">
+                {conversationHistory.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`${
+                      msg.role === "user" ? "text-right" : "text-left"
+                    }`}
+                  >
+                    <div className="text-xs font-medium text-zinc-600 mb-1">
+                      {msg.role === "user" ? "Ты:" : "NovaCiv Admin:"}
+                    </div>
+                    <div
+                      className={`inline-block px-4 py-2 rounded-lg text-sm ${
+                        msg.role === "user"
+                          ? "bg-zinc-900 text-white"
+                          : "bg-white text-zinc-700 border border-zinc-300"
+                      }`}
+                    >
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Mode selector */}
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-zinc-700">
-                Режим ответа
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-zinc-700">
+                  Режим ответа
+                </label>
+                <div className="text-xs text-zinc-600">
+                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : "Стратегия"} | <span className="font-medium">Тред:</span> ruslan-main
+                </div>
+              </div>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -674,12 +769,25 @@ function AdminInner() {
 
           {response && !isSubmitting && (
             <div className="mt-6 p-6 bg-zinc-50 border border-zinc-200 rounded-xl">
-              <h2 className="text-sm font-semibold text-zinc-700 mb-3">
-                Ответ:
-              </h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-zinc-700">
+                  Ответ:
+                </h2>
+                <button
+                  onClick={handleCopyResponse}
+                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition"
+                >
+                  {copiedStatus ? "Скопировано" : "Скопировать"}
+                </button>
+              </div>
               <div className="prose prose-sm max-w-none text-zinc-700 whitespace-pre-wrap">
                 {response}
               </div>
+              {debugInfo?.mode && (
+                <div className="mt-3 text-xs text-zinc-500">
+                  server mode: {debugInfo.mode}
+                </div>
+              )}
             </div>
           )}
 

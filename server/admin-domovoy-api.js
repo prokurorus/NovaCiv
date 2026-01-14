@@ -27,6 +27,7 @@ const PORT = process.env.ADMIN_DOMOVOY_PORT || 3001;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
+const DIRECT_SEED_VERSION = 2;
 
 // ---------- Memory cache (static docs + snapshot) ----------
 // Cache is mode-aware: { mode: "ops"|"strategy", cache: {...} }
@@ -77,13 +78,13 @@ async function sanitizeDirectThreadIfNeeded(threadId) {
   const db = getDb();
   const baseRef = db.ref("adminConversations").child(threadId);
 
-  const sanitizedFlagSnap = await baseRef
-    .child("state")
-    .child("directSanitized")
-    .once("value");
+  const stateSnap = await baseRef.child("state").once("value");
+  const existingState = stateSnap.val() || {};
+  const existingSeedVersion = Number(existingState.directSeedVersion || 0);
 
-  if (sanitizedFlagSnap.val() === true) {
-    return { ran: false, reason: "already_sanitized" };
+  if (existingSeedVersion >= DIRECT_SEED_VERSION) {
+    console.log(`[direct-seed] skip; version=${existingSeedVersion}`);
+    return { ran: false, reason: "seed_version_ok", version: existingSeedVersion };
   }
 
   const existingSnap = await baseRef.once("value");
@@ -91,17 +92,16 @@ async function sanitizeDirectThreadIfNeeded(threadId) {
 
   const seedPairs = [
     {
-      q: "что делать дальше?",
-      a:
-        "Критичных проблем не видно. Выбери цель: (A) стабильность админки/домового (B) форум/UX (C) контент/видео/постинг. Назови букву. Следующий шаг: ответь одной буквой.",
+      q: "привет, на связи",
+      a: "Привет! Я здесь. Чем помочь?",
     },
     {
-      q: "почему мы получили 504 вчера и что изменили?",
-      a: "Не уверен. Уточни, на каком эндпойнте или странице была 504?",
+      q: "можешь отвечать просто и по делу?",
+      a: "Да, буду отвечать коротко и по сути.",
     },
     {
-      q: "есть срочные проблемы?",
-      a: "Сейчас не вижу критичных проблем. Если есть симптомы — опиши коротко.",
+      q: "нет срочных проблем, что обсудим?",
+      a: "Если срочного нет, давай выберем одну тему и разберем ее. Что сейчас важнее?",
     },
   ];
 
@@ -159,6 +159,7 @@ async function sanitizeDirectThreadIfNeeded(threadId) {
     lastMessageTs: ts,
     lastSummaryTs: null,
     directSanitized: true,
+    directSeedVersion: DIRECT_SEED_VERSION,
   };
 
   const newCounters = {
@@ -187,7 +188,7 @@ async function sanitizeDirectThreadIfNeeded(threadId) {
 
   await baseRef.set(newData);
 
-  console.log(`[direct-sanitize] done; pairs=${seedPairs.length}`);
+  console.log(`[direct-seed] done; pairs=${seedPairs.length}; version=${DIRECT_SEED_VERSION}`);
   return { ran: true, pairs: seedPairs.length };
 }
 

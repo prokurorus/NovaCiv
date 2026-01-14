@@ -121,6 +121,13 @@ function AdminInner() {
     }
     return "ops";
   });
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("adminTheme");
+      return saved === "dark" ? "dark" : "light";
+    }
+    return "light";
+  });
   const [copiedStatus, setCopiedStatus] = useState(false);
   const [debugInfo, setDebugInfo] = useState<{
     url: string;
@@ -139,6 +146,39 @@ function AdminInner() {
   const initEventFiredRef = useRef(false);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
   const stillLoadingRef = useRef(true);
+  const isDark = theme === "dark";
+  const threadLabel = debugInfo?.threadId ?? "—";
+  const textPrimary = isDark ? "text-zinc-100" : "text-zinc-900";
+  const textSecondary = isDark ? "text-zinc-300" : "text-zinc-600";
+  const textMuted = isDark ? "text-zinc-400" : "text-zinc-500";
+  const panelClass = isDark ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200";
+  const primaryButtonClass = isDark
+    ? "bg-zinc-100 text-zinc-900 hover:bg-white"
+    : "bg-zinc-900 text-white hover:bg-zinc-800";
+  const secondaryButtonClass = isDark
+    ? "border-zinc-700 text-zinc-100 hover:bg-zinc-800"
+    : "border-zinc-300 text-zinc-800 hover:bg-zinc-50";
+  const modeActiveClass = isDark ? "bg-zinc-100 text-zinc-900" : "bg-zinc-900 text-white";
+  const modeInactiveClass = isDark
+    ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+    : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200";
+  const inputClass = isDark
+    ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
+    : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
+  const themeToggle = (
+    <button
+      type="button"
+      onClick={() => setTheme(isDark ? "light" : "dark")}
+      className={`fixed top-4 right-4 z-50 inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+        isDark
+          ? "border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+          : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50"
+      }`}
+      aria-pressed={isDark}
+    >
+      {isDark ? "Светлая тема" : "Тёмная тема"}
+    </button>
+  );
 
   // Сильная очистка при выходе
   const performLogout = () => {
@@ -202,6 +242,14 @@ function AdminInner() {
       setHasAdminRole(false);
     }
   };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("adminTheme", theme);
+    } catch (e) {
+      console.error("[Admin] Failed to save theme:", e);
+    }
+  }, [theme]);
 
   useEffect(() => {
     // Сброс состояния загрузки
@@ -497,26 +545,27 @@ function AdminInner() {
   if (isLoading) {
     return (
       <>
+        {themeToggle}
         <Header />
-        <main className="min-h-screen bg-white">
+        <main className={`min-h-screen ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900"}`}>
           <div className="max-w-4xl mx-auto py-10 px-4">
             <div className="text-center space-y-4">
               <div>Загрузка...</div>
               {error && (
                 <>
-                  <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                  <div className={`px-4 py-3 rounded-xl text-sm ${isDark ? "bg-red-950 border border-red-900 text-red-200" : "bg-red-50 border border-red-200 text-red-700"}`}>
                     {error}
                   </div>
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={handleOpenLogin}
-                      className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
+                      className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
                     >
                       Войти
                     </button>
                     <button
                       onClick={performLogout}
-                      className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+                      className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
                     >
                       Сбросить вход
                     </button>
@@ -533,26 +582,27 @@ function AdminInner() {
   if (!user) {
     return (
       <>
+        {themeToggle}
         <Header />
-        <main className="min-h-screen bg-white">
+        <main className={`min-h-screen ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900"}`}>
           <div className="max-w-4xl mx-auto py-10 px-4">
             <div className="text-center space-y-4">
-              <h1 className="text-2xl font-semibold text-zinc-900">
+              <h1 className={`text-2xl font-semibold ${textPrimary}`}>
                 Админ-панель
               </h1>
-              <p className="text-zinc-600">
+              <p className={textSecondary}>
                 Необходима авторизация через Netlify Identity
               </p>
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleOpenLogin}
-                  className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition"
+                  className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
                 >
                   Войти (GitHub / Email)
                 </button>
                 <button
                   onClick={performLogout}
-                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+                  className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
                 >
                   Сбросить вход
                 </button>
@@ -567,22 +617,23 @@ function AdminInner() {
   if (!hasAdminRole) {
     return (
       <>
+        {themeToggle}
         <Header />
-        <main className="min-h-screen bg-white">
+        <main className={`min-h-screen ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900"}`}>
           <div className="max-w-4xl mx-auto py-10 px-4">
             <div className="text-center space-y-4">
-              <h1 className="text-2xl font-semibold text-zinc-900">
+              <h1 className={`text-2xl font-semibold ${textPrimary}`}>
                 Доступ запрещён
               </h1>
-              <p className="text-zinc-600">
+              <p className={textSecondary}>
                 Для доступа к этой странице требуется роль admin.
               </p>
-              <p className="text-sm text-zinc-500">
+              <p className={`text-sm ${textMuted}`}>
                 Вы вошли как: {user.email}
               </p>
               <button
                 onClick={performLogout}
-                className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-6 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+                className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
               >
                 Выйти
               </button>
@@ -595,35 +646,38 @@ function AdminInner() {
 
   return (
     <>
+      {themeToggle}
       <Header />
-      <main className="min-h-screen bg-white">
+      <main className={`min-h-screen ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900"}`}>
         <div className="max-w-4xl mx-auto py-10 px-4 space-y-6">
           {/* === ADMIN BUILD MARKER === */}
-          <div className="bg-yellow-100 border-2 border-yellow-400 rounded-xl p-4 text-center">
-            <div className="text-lg font-bold text-yellow-900 mb-1">
+          <div className={`border-2 rounded-xl p-4 text-center ${
+            isDark ? "bg-yellow-900/30 border-yellow-700" : "bg-yellow-100 border-yellow-400"
+          }`}>
+            <div className={`text-lg font-bold mb-1 ${isDark ? "text-yellow-100" : "text-yellow-900"}`}>
               === ADMIN BUILD MARKER ===
             </div>
-            <div className="text-sm text-yellow-800 font-mono">
+            <div className={`text-sm font-mono ${isDark ? "text-yellow-200" : "text-yellow-800"}`}>
               Git SHA: {import.meta.env.VITE_COMMIT_REF || "unknown"} | Build time:{" "}
               {import.meta.env.VITE_BUILD_TIME || "unknown"} | Source: src/pages/Admin.tsx
             </div>
-            <div className="text-sm text-yellow-700 mt-2 font-semibold">
+            <div className={`text-sm mt-2 font-semibold ${isDark ? "text-yellow-200" : "text-yellow-700"}`}>
               DEPLOY PROOF: if you see this, GitHub → Netlify pipeline is correct
             </div>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-zinc-900">
+              <h1 className={`text-2xl font-semibold ${textPrimary}`}>
                 Админ-панель
               </h1>
-              <p className="text-sm text-zinc-600 mt-1">
+              <p className={`text-sm mt-1 ${textSecondary}`}>
                 Вопросы к OpenAI на основе PROJECT_CONTEXT.md
               </p>
             </div>
             <button
               onClick={performLogout}
-              className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-50 transition"
+              className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
             >
               Выйти ({user.email})
             </button>
@@ -633,20 +687,20 @@ function AdminInner() {
           {conversationHistory.length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-zinc-900">
+                <h2 className={`text-lg font-semibold ${textPrimary}`}>
                   История диалога
                 </h2>
                 <button
                   onClick={handleClearHistory}
-                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 transition"
+                  className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-medium transition ${secondaryButtonClass}`}
                 >
                   Очистить
                 </button>
               </div>
-              <div className="text-xs text-zinc-500 mb-2">
-                Очищает историю только в браузере. Серверный thread ruslan-main не трогает.
+              <div className={`text-xs mb-2 ${textMuted}`}>
+                Очищает историю только в браузере. Серверный thread {threadLabel} не трогает.
               </div>
-              <div className="space-y-3 max-h-96 overflow-y-auto p-4 bg-zinc-50 border border-zinc-200 rounded-xl">
+              <div className={`space-y-3 max-h-96 overflow-y-auto p-4 border rounded-xl ${panelClass}`}>
                 {conversationHistory.map((msg, idx) => (
                   <div
                     key={idx}
@@ -654,13 +708,17 @@ function AdminInner() {
                       msg.role === "user" ? "text-right" : "text-left"
                     }`}
                   >
-                    <div className="text-xs font-medium text-zinc-600 mb-1">
+                    <div className={`text-xs font-medium mb-1 ${textSecondary}`}>
                       {msg.role === "user" ? "Ты:" : "NovaCiv Admin:"}
                     </div>
                     <div
                       className={`inline-block px-4 py-2 rounded-lg text-sm ${
                         msg.role === "user"
-                          ? "bg-zinc-900 text-white"
+                          ? isDark
+                            ? "bg-zinc-100 text-zinc-900"
+                            : "bg-zinc-900 text-white"
+                          : isDark
+                          ? "bg-zinc-900 text-zinc-100 border border-zinc-700"
                           : "bg-white text-zinc-700 border border-zinc-300"
                       }`}
                     >
@@ -676,11 +734,11 @@ function AdminInner() {
             {/* Mode selector */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="block text-sm font-medium text-zinc-700">
+                <label className={`block text-sm font-medium ${textSecondary}`}>
                   Режим ответа
                 </label>
-                <div className="text-xs text-zinc-600">
-                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : mode === "strategy" ? "Стратегия" : "Диалог (прямой)"} | <span className="font-medium">Тред:</span> ruslan-main
+                <div className={`text-xs ${textSecondary}`}>
+                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : mode === "strategy" ? "Стратегия" : "Диалог (прямой)"} | <span className="font-medium">Тред:</span> {threadLabel}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -691,9 +749,7 @@ function AdminInner() {
                     localStorage.setItem("adminMode", "ops");
                   }}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
-                    mode === "ops"
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                    mode === "ops" ? modeActiveClass : modeInactiveClass
                   }`}
                   disabled={isSubmitting}
                 >
@@ -706,9 +762,7 @@ function AdminInner() {
                     localStorage.setItem("adminMode", "strategy");
                   }}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
-                    mode === "strategy"
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                    mode === "strategy" ? modeActiveClass : modeInactiveClass
                   }`}
                   disabled={isSubmitting}
                 >
@@ -721,16 +775,14 @@ function AdminInner() {
                     localStorage.setItem("adminMode", "direct");
                   }}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
-                    mode === "direct"
-                      ? "bg-zinc-900 text-white"
-                      : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                    mode === "direct" ? modeActiveClass : modeInactiveClass
                   }`}
                   disabled={isSubmitting}
                 >
                   Диалог (прямой)
                 </button>
               </div>
-              <div className="text-xs text-zinc-500 mt-1">
+              <div className={`text-xs mt-1 ${textMuted}`}>
                 {mode === "ops" ? (
                   <>
                     <span className="font-medium">Оперативка:</span> Коротко и по делу: текущая проблема → причина → один следующий шаг. Без списков "поставь Grafana".
@@ -750,7 +802,7 @@ function AdminInner() {
             <div>
               <label
                 htmlFor="text"
-                className="block text-sm font-medium text-zinc-700 mb-2"
+                className={`block text-sm font-medium mb-2 ${textSecondary}`}
               >
                 Вопрос
               </label>
@@ -759,14 +811,14 @@ function AdminInner() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 rows={6}
-                className="w-full px-4 py-3 border border-zinc-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 focus:border-transparent resize-none"
+                className={`w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 resize-none ${inputClass}`}
                 placeholder="Введите ваш вопрос..."
                 disabled={isSubmitting}
               />
             </div>
 
             {error && (
-              <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+              <div className={`px-4 py-3 rounded-xl text-sm ${isDark ? "bg-red-950 border border-red-900 text-red-200" : "bg-red-50 border border-red-200 text-red-700"}`}>
                 {error}
               </div>
             )}
@@ -774,36 +826,36 @@ function AdminInner() {
             <button
               type="submit"
               disabled={isSubmitting || !text.trim()}
-              className="inline-flex items-center justify-center rounded-full bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition ${primaryButtonClass}`}
             >
               {isSubmitting ? "Отправка..." : "Отправить"}
             </button>
           </form>
 
           {isSubmitting && (
-            <div className="mt-6 p-6 bg-zinc-50 border border-zinc-200 rounded-xl">
-              <div className="text-zinc-600">ожидаю...</div>
+            <div className={`mt-6 p-6 border rounded-xl ${panelClass}`}>
+              <div className={textSecondary}>ожидаю...</div>
             </div>
           )}
 
           {response && !isSubmitting && (
-            <div className="mt-6 p-6 bg-zinc-50 border border-zinc-200 rounded-xl">
+            <div className={`mt-6 p-6 border rounded-xl ${panelClass}`}>
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-zinc-700">
+                <h2 className={`text-sm font-semibold ${textSecondary}`}>
                   Ответ:
                 </h2>
                 <button
                   onClick={handleCopyResponse}
-                  className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 transition"
+                  className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-medium transition ${secondaryButtonClass}`}
                 >
                   {copiedStatus ? "Скопировано" : "Скопировать"}
                 </button>
               </div>
-              <div className="prose prose-sm max-w-none text-zinc-700 whitespace-pre-wrap">
+              <div className={`prose prose-sm max-w-none whitespace-pre-wrap ${isDark ? "prose-invert text-zinc-100" : "text-zinc-700"}`}>
                 {response}
               </div>
               {debugInfo?.mode && (
-                <div className="mt-3 text-xs text-zinc-500">
+                <div className={`mt-3 text-xs ${textMuted}`}>
                   server mode: {debugInfo.mode}
                 </div>
               )}
@@ -812,9 +864,11 @@ function AdminInner() {
 
           {/* Debug area (non-secret) */}
           {debugInfo && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm">
-              <div className="font-semibold text-yellow-800 mb-2">Debug Info:</div>
-              <div className="text-yellow-700 font-mono text-xs space-y-1">
+            <div className={`mt-4 p-4 border rounded-xl text-sm ${
+              isDark ? "bg-yellow-900/30 border-yellow-700 text-yellow-100" : "bg-yellow-50 border-yellow-200"
+            }`}>
+              <div className={`font-semibold mb-2 ${isDark ? "text-yellow-100" : "text-yellow-800"}`}>Debug Info:</div>
+              <div className={`font-mono text-xs space-y-1 ${isDark ? "text-yellow-200" : "text-yellow-700"}`}>
                 <div><strong>URL:</strong> {debugInfo.url}</div>
                 <div><strong>HTTP Status:</strong> {debugInfo.status}</div>
                 {debugInfo.origin && (
@@ -840,7 +894,9 @@ function AdminInner() {
                   <div><strong>lastSummaryTs:</strong> {debugInfo.lastSummaryTs}</div>
                 )}
                 <div><strong>Raw Response (truncated):</strong></div>
-                <div className="bg-white p-2 rounded border border-yellow-300 overflow-auto max-h-32">
+                <div className={`p-2 rounded border overflow-auto max-h-32 ${
+                  isDark ? "bg-zinc-900 border-yellow-700 text-zinc-100" : "bg-white border-yellow-300"
+                }`}>
                   {debugInfo.rawResponse || "(empty)"}
                 </div>
               </div>

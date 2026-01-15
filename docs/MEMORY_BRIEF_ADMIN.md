@@ -3,6 +3,8 @@
 **Generated:** 2026-01-13  
 **Purpose:** Operational identity, architecture, and answer guidelines for Admin Domovoy (OPS brain)
 
+**Modes:** direct (free dialog) vs ops (strict operational). Mode is provided by UI/proxy.
+
 ---
 
 ## OPERATIONAL IDENTITY

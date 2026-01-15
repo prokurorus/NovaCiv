@@ -113,13 +113,14 @@ function AdminInner() {
     }
     return [];
   });
-  const [mode, setMode] = useState<"ops" | "strategy" | "direct">(() => {
-    // Load from localStorage, default to "ops"
+  const [mode, setMode] = useState<"ops" | "direct">(() => {
+    // Load from localStorage, default to "direct"
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("adminMode");
-      return saved === "strategy" ? "strategy" : saved === "direct" ? "direct" : "ops";
+      const saved =
+        localStorage.getItem("admin_mode") || localStorage.getItem("adminMode");
+      return saved === "ops" ? "ops" : "direct";
     }
-    return "ops";
+    return "direct";
   });
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window !== "undefined") {
@@ -142,6 +143,7 @@ function AdminInner() {
     upstreamStatus?: number | null;
     mode?: string | null;
   } | null>(null);
+  const historyEndRef = useRef<HTMLDivElement | null>(null);
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
@@ -250,6 +252,11 @@ function AdminInner() {
       console.error("[Admin] Failed to save theme:", e);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (!historyEndRef.current) return;
+    historyEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [conversationHistory.length]);
 
   useEffect(() => {
     // Сброс состояния загрузки
@@ -426,7 +433,7 @@ function AdminInner() {
         text: text.trim(),
         history: conversationHistory.slice(-20), // Last 20 messages
         threadId: "ruslan-main",
-        mode: mode, // "ops" | "strategy" | "direct"
+        mode: mode, // "ops" | "direct"
       };
       
       const res = await fetch(requestUrl, {
@@ -726,6 +733,7 @@ function AdminInner() {
                     </div>
                   </div>
                 ))}
+                <div ref={historyEndRef} />
               </div>
             </div>
           )}
@@ -738,7 +746,7 @@ function AdminInner() {
                   Режим ответа
                 </label>
                 <div className={`text-xs ${textSecondary}`}>
-                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка" : mode === "strategy" ? "Стратегия" : "Диалог (прямой)"} | <span className="font-medium">Тред:</span> {threadLabel}
+                  <span className="font-medium">Режим:</span> {mode === "ops" ? "Оперативка (строго)" : "Диалог (свободно)"} | <span className="font-medium">Тред:</span> {threadLabel}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -746,55 +754,41 @@ function AdminInner() {
                   type="button"
                   onClick={() => {
                     setMode("ops");
-                    localStorage.setItem("adminMode", "ops");
+                    localStorage.setItem("admin_mode", "ops");
                   }}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
                     mode === "ops" ? modeActiveClass : modeInactiveClass
                   }`}
                   disabled={isSubmitting}
                 >
-                  Оперативка
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("strategy");
-                    localStorage.setItem("adminMode", "strategy");
-                  }}
-                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
-                    mode === "strategy" ? modeActiveClass : modeInactiveClass
-                  }`}
-                  disabled={isSubmitting}
-                >
-                  Стратегия
+                  Оперативка (строго)
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setMode("direct");
-                    localStorage.setItem("adminMode", "direct");
+                    localStorage.setItem("admin_mode", "direct");
                   }}
                   className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${
                     mode === "direct" ? modeActiveClass : modeInactiveClass
                   }`}
                   disabled={isSubmitting}
                 >
-                  Диалог (прямой)
+                  Диалог (свободно)
                 </button>
               </div>
               <div className={`text-xs mt-1 ${textMuted}`}>
                 {mode === "ops" ? (
                   <>
-                    <span className="font-medium">Оперативка:</span> Коротко и по делу: текущая проблема → причина → один следующий шаг. Без списков "поставь Grafana".
-                  </>
-                ) : mode === "strategy" ? (
-                  <>
-                    <span className="font-medium">Стратегия:</span> Идеи улучшений и планы. Использовать, когда нет пожара и хочется развитие.
+                    <span className="font-medium">Оперативка:</span> Коротко и по делу: текущая проблема → причина → один следующий шаг. Без лишних планов.
                   </>
                 ) : (
                   <>
-                    <span className="font-medium">Диалог (прямой):</span> Как обычный чат: меньше шаблонов и планов. Используй, когда хочешь обсуждать идеи и решения напрямую.
+                    <span className="font-medium">Диалог (свободно):</span> Живой чат без шаблонов и планов. Подходит для обсуждений и решений напрямую.
                   </>
+                )}
+                {debugInfo?.mode && (
+                  <span className={`ml-3 ${textSecondary}`}>server mode: {debugInfo.mode}</span>
                 )}
               </div>
             </div>

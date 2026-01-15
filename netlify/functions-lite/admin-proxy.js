@@ -225,10 +225,10 @@ exports.handler = async (event, context) => {
       );
     }
 
-    // Validate and set mode (default to "ops" if missing or invalid)
+    // Validate and set mode (default to "direct" if missing or invalid)
     const modeRaw = requestData.mode;
     const validModes = ["ops", "strategy", "direct"];
-    const mode = validModes.includes(modeRaw) ? modeRaw : "ops";
+    const mode = validModes.includes(modeRaw) ? modeRaw : "direct";
     requestData.mode = mode;
 
     // Build upstream URL based on mode

@@ -30,9 +30,11 @@ const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
 const DIRECT_SEED_VERSION = 2;
 
 // ---------- Memory cache (static docs + snapshot) ----------
-// Cache is mode-aware: { mode: "ops"|"strategy", cache: {...} }
+// Cache is mode-aware: { mode: "ops"|"strategy"|"direct", cache: {...} }
 let staticMemoryCache = null;
 let cachedMode = null;
+const HONESTY_SYSTEM_RULE =
+  "Never claim you performed actions (opened browser, executed commands, checked endpoints) unless you actually have tool output provided in the conversation.";
 
 // ---------- Helper: Load file safely ----------
 function loadFile(filePath) {
@@ -69,6 +71,13 @@ function sanitizeContent(content) {
   });
   
   return sanitized;
+}
+
+function loadPromptFile(filePath, fallbackPath) {
+  const primary = filePath ? loadFile(filePath) : null;
+  const fallback = fallbackPath ? loadFile(fallbackPath) : null;
+  const content = primary || fallback || "";
+  return sanitizeContent(content);
 }
 
 // ---------- Helper: One-time sanitation for direct thread ----------
@@ -286,11 +295,11 @@ function formatOpsStatusBlock(ops) {
 
 // ---------- Build static docs/snapshot memory ----------
 function buildStaticMemoryFiles(mode = "ops") {
-  // For "direct" mode, treat it like "strategy" (load all files)
-  const effectiveMode = mode === "direct" ? "strategy" : mode;
-  
+  const normalizedMode =
+    mode === "direct" ? "direct" : mode === "strategy" ? "strategy" : "ops";
+
   // Check if cache is valid for this mode
-  if (staticMemoryCache !== null && cachedMode === effectiveMode) {
+  if (staticMemoryCache !== null && cachedMode === normalizedMode) {
     return staticMemoryCache;
   }
 
@@ -301,37 +310,45 @@ function buildStaticMemoryFiles(mode = "ops") {
   const memoryFiles = [];
   const MAX_TOTAL_CHARS = 120000;
   
-  // Priority 1: Critical files (mode-aware filtering)
-  const allCriticalFiles = [
+  const directCriticalFiles = [
+    { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
+    { path: path.join(docsBase, "ADMIN_ASSISTANT_DIRECT.md"), name: "ADMIN_ASSISTANT_DIRECT.md" },
+    {
+      path: path.join(docsBase, "PROJECT_CONTEXT.md"),
+      name: "PROJECT_CONTEXT.md (reference only)",
+      referenceOnly: true,
+    },
+  ];
+
+  const opsCriticalFiles = [
+    { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
+    { path: path.join(docsBase, "ADMIN_ASSISTANT_OPS.md"), name: "ADMIN_ASSISTANT_OPS.md" },
+    { path: path.join(docsBase, "PROJECT_CONTEXT.md"), name: "PROJECT_CONTEXT.md" },
+    { path: path.join(docsBase, "PROJECT_STATE.md"), name: "PROJECT_STATE.md" },
+  ];
+
+  const strategyCriticalFiles = [
     { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
     { path: path.join(docsBase, "ADMIN_ASSISTANT.md"), name: "ADMIN_ASSISTANT.md" },
     { path: path.join(docsBase, "PROJECT_CONTEXT.md"), name: "PROJECT_CONTEXT.md" },
     { path: path.join(docsBase, "PROJECT_STATE.md"), name: "PROJECT_STATE.md" },
   ];
-  
-  // For ops mode: exclude strategic/planning files
-  // For direct/strategy: include all files
-  const criticalFiles = effectiveMode === "ops"
-    ? allCriticalFiles.filter(f => 
-        f.name !== "ADMIN_ASSISTANT.md" && 
-        f.name !== "PROJECT_CONTEXT.md"
-      )
-    : allCriticalFiles;
-  
-  // Priority 2: Important files (include if space allows)
-  // For ops mode: only include safe ops files (runbooks)
-  const allImportantFiles = [
-    { path: path.join(docsBase, "START_HERE.md"), name: "START_HERE.md" },
-    { path: path.join(docsBase, "RUNBOOKS.md"), name: "RUNBOOKS.md" },
-    { path: path.join(runbooksBase, "SOURCE_OF_TRUTH.md"), name: "runbooks/SOURCE_OF_TRUTH.md" },
-  ];
-  
-  const importantFiles = effectiveMode === "ops"
-    ? allImportantFiles.filter(f => 
-        f.name === "runbooks/SOURCE_OF_TRUTH.md" || 
-        f.name === "RUNBOOKS.md"
-      )
-    : allImportantFiles;
+
+  const criticalFiles =
+    normalizedMode === "direct"
+      ? directCriticalFiles
+      : normalizedMode === "strategy"
+      ? strategyCriticalFiles
+      : opsCriticalFiles;
+
+  const importantFiles =
+    normalizedMode === "direct"
+      ? []
+      : [
+          { path: path.join(docsBase, "START_HERE.md"), name: "START_HERE.md" },
+          { path: path.join(docsBase, "RUNBOOKS.md"), name: "RUNBOOKS.md" },
+          { path: path.join(runbooksBase, "SOURCE_OF_TRUTH.md"), name: "runbooks/SOURCE_OF_TRUTH.md" },
+        ];
   
   // Priority 3: System snapshot (tail last 250 lines if exists)
   const snapshotPath = path.join(stateBase, "system_snapshot.md");
@@ -343,8 +360,11 @@ function buildStaticMemoryFiles(mode = "ops") {
     const content = loadFile(file.path);
     if (content) {
       const sanitized = sanitizeContent(content);
-      memoryFiles.push({ name: file.name, content: sanitized });
-      totalChars += sanitized.length;
+      const contentWithNote = file.referenceOnly
+        ? `СПРАВКА: этот файл только для фактов. Не копируй шаблонный стиль ответа.\n\n${sanitized}`
+        : sanitized;
+      memoryFiles.push({ name: file.name, content: contentWithNote });
+      totalChars += contentWithNote.length;
     }
   }
   
@@ -371,7 +391,7 @@ function buildStaticMemoryFiles(mode = "ops") {
   }
   
   // Load snapshot (tail 250 lines) if space allows
-  if (totalChars < MAX_TOTAL_CHARS && fs.existsSync(snapshotPath)) {
+  if (normalizedMode !== "direct" && totalChars < MAX_TOTAL_CHARS && fs.existsSync(snapshotPath)) {
     try {
       const snapshotContent = loadFile(snapshotPath);
       if (snapshotContent) {
@@ -405,7 +425,7 @@ function buildStaticMemoryFiles(mode = "ops") {
     totalChars,
   };
 
-  cachedMode = effectiveMode;
+  cachedMode = normalizedMode;
 
   return staticMemoryCache;
 }
@@ -553,18 +573,17 @@ const server = http.createServer(async (req, res) => {
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
       
-      // For /admin/direct: force threadId = "ruslan-direct" (ignore incoming threadId)
-      // For /admin/domovoy: use incoming threadId or default to ruslan-main
-      const isDirectMode = isDirect;
-      const threadId = isDirectMode 
+      // Validate mode (default to "direct" if missing or invalid)
+      const modeRaw = data.mode;
+      const validModes = ["ops", "strategy", "direct"];
+      const mode = validModes.includes(modeRaw) ? modeRaw : "direct";
+
+      // For /admin/direct or mode=direct: force threadId = "ruslan-direct"
+      // For ops/strategy: use incoming threadId or default to ruslan-main
+      const isDirectMode = isDirect || mode === "direct";
+      const threadId = isDirectMode
         ? "ruslan-direct" 
         : getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
-      
-      // For /admin/direct: use "direct" mode, no mode validation
-      // For /admin/domovoy: validate mode (default to "ops" if missing or invalid)
-      const modeRaw = data.mode;
-      const validModes = ["ops", "strategy"];
-      const mode = isDirectMode ? "direct" : (validModes.includes(modeRaw) ? modeRaw : "ops");
       
       // Validate question length (4k-8k chars limit)
       if (!text) {
@@ -620,7 +639,7 @@ const server = http.createServer(async (req, res) => {
       
       // For /admin/direct: skip domovoy-specific logic, go straight to OpenAI
       if (isDirectMode) {
-        // Load memory pack (always load all files, no mode filtering)
+        // Load memory pack (mode-aware filtering)
         let memoryPack;
         try {
           memoryPack = await buildMemoryPack(threadId, "direct");
@@ -652,20 +671,21 @@ const server = http.createServer(async (req, res) => {
         
         // Build messages array for direct mode
         const messages = [];
-        
+
+        const docsBase = path.join(PROJECT_DIR, "docs");
+        const directPrompt = loadPromptFile(
+          path.join(docsBase, "ADMIN_ASSISTANT_DIRECT.md"),
+          path.join(docsBase, "ADMIN_ASSISTANT.md"),
+        );
+
         // System prompt for Direct Admin Chat
         messages.push({
           role: "system",
-          content: `Ты — NovaCiv Admin Direct. Общайся с Русланом как в живом диалоге: дружелюбно, уважительно, без пафоса и без шаблонов.
-Ты можешь мягко предлагать улучшения и спорить аргументированно, но без давления и "указаний сверху".
-Запрещено: предлагать мониторинг, Grafana/Prometheus, Google Analytics, CI/CD, Trello/Jira, "установки инструментов" и прочие инфраструктурные внедрения — если Руслан прямо не попросил.
-Запрещено: утверждать, что "мы уже внесли изменения/настроили/установили", если этого нет в предоставленном контексте. Если не уверен — скажи, что не уверен.
-Если вопрос общий ("что делать дальше?" без конкретной проблемы):
-— скажи: "Критичных проблем не видно."
-— предложи выбор цели на сегодня: (A) стабильность админки/домового (B) форум/UX (C) контент/видео/постинг.
-— попроси назвать букву и дай ОДИН следующий шаг.
-Если информации не хватает — задай 1 короткий уточняющий вопрос.
-Используй контекст из файлов проекта, но не превращай runbooks в обязательный план работ.`
+          content: HONESTY_SYSTEM_RULE,
+        });
+        messages.push({
+          role: "system",
+          content: directPrompt,
         });
         
         // Add conversation history (last 20 messages)
@@ -864,36 +884,12 @@ ${text}`
       const messages = [];
       
       // System prompt (mode-aware)
-      const modeInstructions = mode === "ops" 
-        ? `РЕЖИМ: ОПЕРАТИВКА
-СТРОГИЙ ФОРМАТ ОТВЕТА (ОБЯЗАТЕЛЬНО):
-Твой ответ ДОЛЖЕН состоять из 3 блоков:
-1. СТАТУС: [краткое описание текущей ситуации/проблемы]
-2. ПРИЧИНА: [короткое объяснение причины, если есть проблема]
-3. ОДИН ШАГ: [только один следующий шаг, без нумерации, без списков]
-
-ЗАПРЕЩЕНО:
-- Выдавать списки действий (1/2/3/4, • пункты, - пункты)
-- Предлагать инфраструктурные рекомендации (Grafana/Prometheus/GA/CI/CD/Trello/Jira/мониторинг/установка инструментов), если пользователь явно не просит
-- Добавлять разделы "Следующие действия" или "План"
-- Давать больше одного шага
-- Использовать нумерацию или маркеры списков
-
-ФОКУС:
-- Текущая ошибка/симптом → причина → ОДИН следующий шаг
-- Если критичных проблем нет → скажи "Критичных проблем не видно" и предложи выбрать A/B/C
-
-ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
-СТАТУС: Git репозиторий dirty, есть незакоммиченные изменения.
-ПРИЧИНА: Вероятно, были ручные правки на VPS или не синхронизированы изменения.
-ОДИН ШАГ: Выполни "git status" чтобы увидеть список измененных файлов, затем либо закоммить их, либо откатить через "git checkout -- <file>".
-
-ОБРАБОТКА ВЫБОРА A/B/C:
-- Если пользователь выбрал (A) админка/домовой: дай ОДИН шаг по улучшению стабильности админки или домового
-- Если пользователь выбрал (B) форум/UX: дай ОДИН шаг по улучшению форума или пользовательского опыта
-- Если пользователь выбрал (C) контент/постинг: дай ОДИН шаг по улучшению контента или процесса постинга
-- Всегда используй формат СТАТУС/ПРИЧИНА/ОДИН ШАГ
-- НЕ предлагай инфраструктурные решения (GA/CI/мониторинг) без явного запроса`
+      const docsBase = path.join(PROJECT_DIR, "docs");
+      const opsPrompt = mode === "ops"
+        ? loadPromptFile(
+            path.join(docsBase, "ADMIN_ASSISTANT_OPS.md"),
+            path.join(docsBase, "ADMIN_ASSISTANT.md"),
+          )
         : `РЕЖИМ: СТРАТЕГИЯ
 - Можно предлагать идеи улучшений и планы
 - МАКСИМУМ 3 пункта улучшений
@@ -901,7 +897,11 @@ ${text}`
 - БЕЗ предложений "установить 10 инструментов"
 - Использовать, когда нет пожара и хочется развитие
 - Можно структурировать ответ с разделами, но кратко`;
-      
+
+      messages.push({
+        role: "system",
+        content: HONESTY_SYSTEM_RULE,
+      });
       messages.push({
         role: "system",
         content: `Ты — Admin Domovoy: OPS brain и системный хранитель проекта NovaCiv.
@@ -927,7 +927,7 @@ ${text}`
 - Если gitClean=false в OPS STATUS — говори "dirty" и предложи действия (без секретов)
 - OPS STATUS обновляется при каждом запросе, это актуальные данные
 
-${modeInstructions}
+${opsPrompt}
 
 ПРАВИЛА ОТВЕТОВ (общие):
 - Отвечай как спокойный человеческий помощник

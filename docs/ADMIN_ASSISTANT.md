@@ -1,5 +1,7 @@
 # ADMIN_ASSISTANT — NovaCiv
 
+> Legacy wrapper: для новых режимов смотри `ADMIN_ASSISTANT_DIRECT.md` и `ADMIN_ASSISTANT_OPS.md`.
+
 **Каноническая память для Admin Domovoy**
 
 ---

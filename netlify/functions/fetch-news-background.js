@@ -57,6 +57,85 @@ const LANG_OUTPUTS = [
   },
 ];
 
+// --- RSS auto-disable (self-healing sources) ---
+// Stores per-source health in Firebase RTDB:
+// /newsMeta/rssHealth/<lang>/<sourceKey> = { failCount, disabledUntil, lastStatus, lastOkAt, lastFailAt, lastError }
+// Rule: if failCount >= 3 => disable 24h, then retry later.
+const RSS_AUTO_DISABLE_ENABLED = (process.env.RSS_AUTO_DISABLE_ENABLED ?? "true") === "true";
+const RSS_FAIL_LIMIT = Number(process.env.RSS_FAIL_LIMIT || 3);
+const RSS_DISABLE_MS = Number(process.env.RSS_DISABLE_MS || 24 * 60 * 60 * 1000);
+
+function safeKey(value) {
+  if (!value) return "unknown";
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[.#$[\]/]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 120);
+}
+
+async function getRssHealth(FIREBASE_DB_URL, lang, sourceKey) {
+  try {
+    const url = `${FIREBASE_DB_URL}/newsMeta/rssHealth/${safeKey(lang)}/${safeKey(sourceKey)}.json`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function setRssHealth(FIREBASE_DB_URL, lang, sourceKey, patch) {
+  try {
+    const url = `${FIREBASE_DB_URL}/newsMeta/rssHealth/${safeKey(lang)}/${safeKey(sourceKey)}.json`;
+    await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+  } catch {
+    // silent: health is best-effort
+  }
+}
+
+async function shouldSkipSource({ FIREBASE_DB_URL, lang, sourceKey, now }) {
+  if (!RSS_AUTO_DISABLE_ENABLED || !FIREBASE_DB_URL) return false;
+  const h = await getRssHealth(FIREBASE_DB_URL, lang, sourceKey);
+  if (!h || !h.disabledUntil) return false;
+  return Number(h.disabledUntil) > now;
+}
+
+async function recordSourceOk({ FIREBASE_DB_URL, lang, sourceKey, now }) {
+  if (!RSS_AUTO_DISABLE_ENABLED || !FIREBASE_DB_URL) return;
+  await setRssHealth(FIREBASE_DB_URL, lang, sourceKey, {
+    failCount: 0,
+    disabledUntil: 0,
+    lastStatus: 200,
+    lastOkAt: now,
+  });
+}
+
+async function recordSourceFail({ FIREBASE_DB_URL, lang, sourceKey, now, status, error }) {
+  if (!RSS_AUTO_DISABLE_ENABLED || !FIREBASE_DB_URL) return;
+
+  const h = (await getRssHealth(FIREBASE_DB_URL, lang, sourceKey)) || {};
+  const nextFail = Number(h.failCount || 0) + 1;
+
+  const patch = {
+    failCount: nextFail,
+    lastStatus: status ?? null,
+    lastFailAt: now,
+    lastError: error ? String(error).slice(0, 180) : "rss_fetch_failed",
+  };
+
+  if (nextFail >= RSS_FAIL_LIMIT) {
+    patch.disabledUntil = now + RSS_DISABLE_MS;
+  }
+
+  await setRssHealth(FIREBASE_DB_URL, lang, sourceKey, patch);
+}
+
 
 // ---------- PROMPTS ----------
 
@@ -202,17 +281,6 @@ async function fetchRssSource(sourceUrl, sourceName, sourceLang) {
   const sourceId = safeKey(sourceName);
   const items = parseRss(xml, sourceId, [sourceLang]);
   return items;
-}
-
-// Безопасная санитизация ключей Firebase
-function safeKey(value) {
-  if (!value) return "unknown";
-  return String(value)
-    .trim()
-    .toLowerCase()
-    .replace(/[.#$[\]/]/g, "_")
-    .replace(/\s+/g, "_")
-    .slice(0, 120);
 }
 
 function normalizeTitle(title) {
@@ -893,6 +961,12 @@ exports.handler = async (event, context) => {
 
         for (const source of sources) {
           try {
+            const sourceKey = `${source.name}::${source.url}`;
+            if (await shouldSkipSource({ FIREBASE_DB_URL, lang, sourceKey, now: Date.now() })) {
+              console.log(`[fetch-news] ${lang}: source temporarily disabled: ${source.name}`);
+              continue;
+            }
+
             const items = await fetchRssSource(source.url, source.name, lang);
             items.forEach(item => {
               item.sourceName = source.name;
@@ -913,10 +987,21 @@ exports.handler = async (event, context) => {
 
             candidates.push(...recentItems);
             
+            await recordSourceOk({ FIREBASE_DB_URL, lang, sourceKey, now: Date.now() });
+
             if (candidates.length >= MAX_CANDIDATES_PER_LANG) {
               break; // Жёсткий лимит
             }
           } catch (err) {
+            const sourceKey = `${source.name}::${source.url}`;
+            await recordSourceFail({
+              FIREBASE_DB_URL,
+              lang,
+              sourceKey,
+              now: Date.now(),
+              status: err && (err.statusCode || err.status) ? (err.statusCode || err.status) : null,
+              error: err && err.message ? err.message : String(err),
+            });
             const entry = buildSourceError(lang, source, err);
             errors.push(entry);
             console.error(

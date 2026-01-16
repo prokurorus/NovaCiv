@@ -249,6 +249,30 @@ exports.handler = async (event, context) => {
       throw e; // Re-throw to be caught by outer catch
     }
 
+    if (requestData && requestData.action === "snapshot:download") {
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      const contentDisposition =
+        response.headers.get("content-disposition") ||
+        `attachment; filename="${(requestData.name || "download").toString().trim()}"`;
+      const bodyBuffer = Buffer.from(await response.arrayBuffer());
+
+      return {
+        statusCode: response.status || 502,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": contentDisposition,
+          "Cache-Control": "no-store",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          "X-Domovoy-Origin": "proxy",
+        },
+        body: bodyBuffer.toString("base64"),
+        isBase64Encoded: true,
+      };
+    }
+
     // Get response text
     const responseText = await response.text();
 
@@ -281,47 +305,6 @@ exports.handler = async (event, context) => {
       upstreamUrl: vpsUrl, // Full URL including /admin/domovoy path
     };
     const bodyWithDebug = attachProxyDebug(responseData, debugMeta);
-
-    if (requestData && requestData.action === "snapshot:download") {
-      if (!response.ok || bodyWithDebug.ok === false) {
-        return jsonResponse(response.status || 502, bodyWithDebug, debugMeta);
-      }
-
-      const filename =
-        (typeof bodyWithDebug.filename === "string" && bodyWithDebug.filename) || "download";
-      const contentType =
-        (typeof bodyWithDebug.contentType === "string" && bodyWithDebug.contentType) ||
-        "application/octet-stream";
-      const dataBase64 =
-        typeof bodyWithDebug.dataBase64 === "string" ? bodyWithDebug.dataBase64 : "";
-
-      if (!dataBase64) {
-        return jsonResponse(
-          502,
-          {
-            ok: false,
-            error: "download_empty",
-            message: "Upstream returned empty download payload",
-          },
-          debugMeta,
-        );
-      }
-
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Content-Disposition": `attachment; filename="${filename}"`,
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          "Access-Control-Expose-Headers": "Content-Disposition",
-          "X-Domovoy-Origin": "proxy",
-        },
-        body: dataBase64,
-        isBase64Encoded: true,
-      };
-    }
 
     // Return VPS response (preserve status code)
     return {

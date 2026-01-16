@@ -752,12 +752,12 @@ const server = http.createServer(async (req, res) => {
           }
 
           const fileBuffer = fs.readFileSync(allowed.fullPath);
-          sendJson(res, 200, {
-            ok: true,
-            filename: allowed.filename,
-            contentType: allowed.contentType,
-            dataBase64: fileBuffer.toString("base64"),
+          res.writeHead(200, {
+            "Content-Type": allowed.contentType || "application/octet-stream",
+            "Content-Disposition": `attachment; filename="${allowed.filename}"`,
+            "Cache-Control": "no-store",
           });
+          res.end(fileBuffer);
         } catch (e) {
           sendJson(res, 500, {
             ok: false,

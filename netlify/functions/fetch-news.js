@@ -202,10 +202,9 @@ function parseRss(xml, sourceId, languages) {
 async function fetchRssSource(sourceUrl, sourceName, sourceLang) {
   const res = await fetch(sourceUrl);
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `RSS fetch failed for ${sourceName}: HTTP ${res.status} – ${text}`,
-    );
+    const error = new Error(`RSS fetch failed for ${sourceName}: HTTP ${res.status}`);
+    error.statusCode = res.status;
+    throw error;
   }
   const xml = await res.text();
   const sourceId = safeKey(sourceName);
@@ -237,6 +236,42 @@ function makeNewsKey(item) {
   const base = (item.guid || item.link || item.title || "").trim();
   const rawKey = `${item.sourceId}::${base.slice(0, 200)}`;
   return safeKey(rawKey);
+}
+
+function safeUrlHost(url) {
+  if (!url) return "unknown";
+  try {
+    return new URL(url).host || "unknown";
+  } catch (e) {
+    return "unknown";
+  }
+}
+
+function sanitizeErrorMessage(message) {
+  if (!message) return "unknown error";
+  const trimmed = String(message).slice(0, 500);
+  const withoutUrls = trimmed.replace(/https?:\/\/\S+/gi, (match) => {
+    try {
+      return new URL(match).host || "<url>";
+    } catch (e) {
+      return "<url>";
+    }
+  });
+  return withoutUrls.slice(0, 200);
+}
+
+function buildSourceError(lang, source, err) {
+  const message = sanitizeErrorMessage((err && err.message) ? err.message : err);
+  const entry = {
+    lang,
+    sourceName: source && source.name ? source.name : "unknown",
+    urlHost: safeUrlHost(source && source.url ? source.url : ""),
+    message,
+  };
+  if (err && err.statusCode) {
+    entry.statusCode = err.statusCode;
+  }
+  return entry;
 }
 
 // ---------- МУСОР-ФИЛЬТР (до OpenAI) ----------
@@ -836,6 +871,7 @@ exports.handler = async (event) => {
       de: { prepared: false, fallback: false },
     };
     let totalCreated = 0;
+    const errors = [];
 
     for (const lang of languages) {
       console.log(`[fetch-news] Processing ${lang}...`);
@@ -904,7 +940,12 @@ exports.handler = async (event) => {
             break; // Жёсткий лимит
           }
         } catch (err) {
-          console.error(`[fetch-news] RSS fetch error for ${lang}/${source.name}:`, err.message);
+          const entry = buildSourceError(lang, source, err);
+          errors.push(entry);
+          console.error(
+            `[fetch-news] RSS fetch error for ${entry.lang}/${entry.sourceName} (${entry.urlHost}):`,
+            entry.message,
+          );
         }
       }
 
@@ -1159,18 +1200,29 @@ exports.handler = async (event) => {
     const preparedLangs = Object.entries(results)
       .filter(([, value]) => value && value.prepared)
       .map(([lang]) => lang);
+    const partial = errors.length > 0;
+    const hasSuccess = preparedLangs.length > 0;
     await writeHealthMetrics("news.fetch", {
-      status: "ok",
-      details: { items: totalCreated, langs: preparedLangs },
+      status: hasSuccess ? "ok" : "error",
+      details: {
+        items: totalCreated,
+        langs: preparedLangs,
+        partial,
+        failedSources: errors.length,
+        errors: errors,
+      },
     });
 
     return {
       statusCode: 200,
       body: JSON.stringify({
-        ok: true,
+        ok: hasSuccess,
         prepared: totalCreated,
         results,
         scheduledFor: new Date(scheduledFor).toISOString(),
+        partial,
+        errors,
+        error: hasSuccess ? undefined : "No news items were prepared for any language.",
       }),
     };
   } catch (err) {

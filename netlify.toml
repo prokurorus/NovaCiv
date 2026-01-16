@@ -10,7 +10,7 @@
   # All heavy functions (news, video, domovoy cron jobs) are VPS-only
   # See MIGRATION.md for env var migration plan
   # ============================================================================
-  functions = "netlify/functions"
+  functions = "netlify/functions-lite"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -24,7 +24,7 @@
   status = 200
 
 [functions]
-  directory = "netlify/functions"
+  directory = "netlify/functions-lite"
   # Minimal included files for lightweight functions
   included_files = ["docs/**", "runbooks/**"]
   # No external heavy deps needed (admin-proxy only uses fetch, no ffmpeg/openai)

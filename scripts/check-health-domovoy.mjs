@@ -16,7 +16,7 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const fetch = globalThis.fetch;
 
-const DOMOVOY_BASE_URL = process.env.DOMOVOY_BASE_URL || process.env.NEWS_BASE_URL || "https://novaciv.space";
+const HEALTH_BASE_URL = "https://novaciv.space";
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || process.env.CRON_TOKEN || "";
 
 if (!NEWS_CRON_SECRET) {
@@ -24,43 +24,76 @@ if (!NEWS_CRON_SECRET) {
   process.exit(1);
 }
 
-const HEALTH_URL = `${DOMOVOY_BASE_URL}/.netlify/functions/health-domovoy?token=${NEWS_CRON_SECRET}`;
+const HEALTH_FUNCTION = "health-domovoy";
+const HEALTH_URL = `${HEALTH_BASE_URL}/.netlify/functions/${HEALTH_FUNCTION}?token=${NEWS_CRON_SECRET}`;
 
 // SLA пороги
 const AUTO_POST_MAX_AGE_MS = 26 * 60 * 60 * 1000; // 26 часов
 const AUTO_REPLY_MAX_AGE_MS = 20 * 60 * 1000; // 20 минут
 
+function isHtmlResponse(response, bodyText) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.toLowerCase().includes("text/html")) return true;
+  const trimmed = (bodyText || "").trim().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
 async function main() {
   try {
     const response = await fetch(HEALTH_URL);
-    if (!response.ok) {
-      console.error(`❌ Health endpoint returned ${response.status}`);
+    const responseText = await response.text();
+
+    if (isHtmlResponse(response, responseText)) {
+      console.error("Function not deployed / returned SPA HTML");
       process.exit(1);
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (err) {
+      const snippet = responseText.slice(0, 200).replace(/\s+/g, " ").trim();
+      console.error("❌ Health endpoint did not return JSON");
+      console.error(`Content-Type: ${response.headers.get("content-type") || "unknown"}`);
+      console.error(`Snippet: ${snippet || "[empty response]"}`);
+      process.exit(1);
+    }
+
+    if (!response.ok) {
+      console.error(`❌ Health endpoint returned ${response.status}`);
+      if (data?.error) {
+        console.error("Error:", data.error);
+      }
+      process.exit(1);
+    }
+
     if (!data.ok) {
       console.error("❌ Health endpoint returned ok=false");
-      console.error("Error:", data.error);
+      if (data?.error) {
+        console.error("Error:", data.error);
+      }
       process.exit(1);
     }
 
     const now = Date.now();
     let hasError = false;
+    const details = data.details && typeof data.details === "object" ? data.details : data;
+    const autoPost = details.autoPost || data.autoPost || null;
+    const autoReply = details.autoReply || data.autoReply || null;
 
     // Проверка auto-post
-    if (!data.autoPost) {
+    if (!autoPost) {
       console.error("❌ auto-post: no metrics found (never run)");
       hasError = true;
     } else {
-      const age = now - data.autoPost.ts;
+      const age = now - autoPost.ts;
       const ageHours = Math.floor(age / (60 * 60 * 1000));
       
       if (age > AUTO_POST_MAX_AGE_MS) {
         console.error(`❌ auto-post: last run ${ageHours}h ago (max 26h)`);
         hasError = true;
-      } else if (!data.autoPost.ok) {
-        console.error(`❌ auto-post: last run failed (errCode: ${data.autoPost.errCode || "UNKNOWN"})`);
+      } else if (!autoPost.ok) {
+        console.error(`❌ auto-post: last run failed (errCode: ${autoPost.errCode || "UNKNOWN"})`);
         hasError = true;
       } else {
         console.log(`✅ auto-post: last run ${ageHours}h ago, ok=true`);
@@ -68,18 +101,18 @@ async function main() {
     }
 
     // Проверка auto-reply
-    if (!data.autoReply) {
+    if (!autoReply) {
       console.error("❌ auto-reply: no metrics found (never run)");
       hasError = true;
     } else {
-      const age = now - data.autoReply.ts;
+      const age = now - autoReply.ts;
       const ageMinutes = Math.floor(age / (60 * 1000));
       
       if (age > AUTO_REPLY_MAX_AGE_MS) {
         console.error(`❌ auto-reply: last run ${ageMinutes}m ago (max 20m)`);
         hasError = true;
-      } else if (!data.autoReply.ok) {
-        console.error(`❌ auto-reply: last run failed (errCode: ${data.autoReply.errCode || "UNKNOWN"})`);
+      } else if (!autoReply.ok) {
+        console.error(`❌ auto-reply: last run failed (errCode: ${autoReply.errCode || "UNKNOWN"})`);
         hasError = true;
       } else {
         console.log(`✅ auto-reply: last run ${ageMinutes}m ago, ok=true`);

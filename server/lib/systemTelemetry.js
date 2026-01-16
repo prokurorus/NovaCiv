@@ -8,7 +8,10 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
-const PROJECT_DIR = process.env.PROJECT_DIR || path.resolve(__dirname, "..", "..");
+const DEFAULT_PROJECT_DIR = "/root/NovaCiv";
+const PROJECT_DIR =
+  process.env.PROJECT_DIR ||
+  (fs.existsSync(DEFAULT_PROJECT_DIR) ? DEFAULT_PROJECT_DIR : path.resolve(__dirname, "..", ".."));
 
 function execSafe(cmd, options = {}) {
   try {

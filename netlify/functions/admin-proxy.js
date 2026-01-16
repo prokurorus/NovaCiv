@@ -57,6 +57,30 @@ function sanitizeUrlForLogs(url) {
   return url.replace(/\/\/.*@/, "//***@");
 }
 
+function extractHealthTarget(event) {
+  const rawPath = event?.path || event?.rawUrl || "";
+  if (!rawPath) return null;
+  const pathOnly = rawPath.split("?")[0];
+  const prefixes = [
+    "/.netlify/functions/admin-proxy/admin/health/",
+    "/.netlify/functions/admin-proxy/health/",
+    "/admin/health/",
+  ];
+  let suffix = null;
+  for (const prefix of prefixes) {
+    if (pathOnly.startsWith(prefix)) {
+      suffix = pathOnly.slice(prefix.length);
+      break;
+    }
+  }
+  if (!suffix) return null;
+  const target = suffix.split("/")[0];
+  if (target === "news" || target === "domovoy") {
+    return target;
+  }
+  return null;
+}
+
 /**
  * Authorize admin access via Netlify Identity role OR token fallback
  * @param {Object} event - Netlify function event (contains headers)
@@ -165,6 +189,177 @@ exports.handler = async (event, context) => {
   const startTime = Date.now();
 
   try {
+    const healthTarget = extractHealthTarget(event);
+    if (healthTarget) {
+      if (event.httpMethod !== "GET") {
+        return jsonResponse(405, {
+          ok: false,
+          error: "Method Not Allowed",
+        });
+      }
+
+      const authError = authorizeAdmin(event, context);
+      if (authError) {
+        return authError;
+      }
+
+      if (!ADMIN_DOMOVOY_API_URL) {
+        return jsonResponse(500, {
+          ok: false,
+          error: "ADMIN_DOMOVOY_API_URL is not set",
+          debug: {
+            origin: "admin-proxy",
+          },
+        });
+      }
+
+      if (!ADMIN_API_TOKEN) {
+        return jsonResponse(500, {
+          ok: false,
+          error: "ADMIN_API_TOKEN is not configured",
+          message: "Admin API token is missing in Netlify environment variables",
+          debugHint: "Set ADMIN_API_TOKEN in Netlify environment variables (same value as VPS .env)",
+          debug: {
+            origin: "admin-proxy",
+          },
+        });
+      }
+
+      const base = normalizeBaseUrl(ADMIN_DOMOVOY_API_URL);
+      if (!base) {
+        return jsonResponse(500, {
+          ok: false,
+          error: "ADMIN_DOMOVOY_API_URL is not set",
+          debug: {
+            origin: "admin-proxy",
+          },
+        });
+      }
+
+      const vpsUrl = `${base}/admin/health/${healthTarget}`;
+      console.log(`[admin-proxy] Health proxy start: ${sanitizeUrlForLogs(vpsUrl)}`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25_000);
+
+      let response;
+      let elapsedMs;
+
+      try {
+        response = await fetch(vpsUrl, {
+          method: "GET",
+          headers: {
+            "X-Admin-Token": ADMIN_API_TOKEN,
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        elapsedMs = Date.now() - startTime;
+      } catch (e) {
+        clearTimeout(timeoutId);
+        elapsedMs = Date.now() - startTime;
+
+        if (e.name === "AbortError" || e.message?.includes("aborted")) {
+          console.log(`[admin-proxy] Health timeout after ${elapsedMs}ms: ${sanitizeUrlForLogs(vpsUrl)}`);
+          return jsonResponse(
+            504,
+            {
+              ok: false,
+              error: "vps_timeout",
+              message: "VPS did not respond within 25s",
+              debugHint: "Check VPS reachability / port / firewall",
+              elapsedMs,
+              vpsEndpoint: sanitizeUrlForLogs(vpsUrl),
+            },
+            {
+              upstreamStatus: null,
+              upstreamUrl: vpsUrl,
+              where: "admin-proxy",
+            },
+          );
+        }
+
+        const errorCode = e.code || e.errno || e.message?.toUpperCase();
+        const isConnectionError =
+          errorCode === "ECONNREFUSED" ||
+          errorCode === "ENOTFOUND" ||
+          errorCode === "EHOSTUNREACH" ||
+          errorCode === "ETIMEDOUT" ||
+          e.message?.includes("ECONNREFUSED") ||
+          e.message?.includes("ENOTFOUND") ||
+          e.message?.includes("EHOSTUNREACH") ||
+          e.message?.includes("ETIMEDOUT") ||
+          e.message?.includes("getaddrinfo");
+
+        if (isConnectionError) {
+          console.log(
+            `[admin-proxy] Health connection error after ${elapsedMs}ms: ${errorCode || "unknown"} - ${sanitizeUrlForLogs(
+              vpsUrl,
+            )}`,
+          );
+          return jsonResponse(
+            502,
+            {
+              ok: false,
+              error: "vps_unreachable",
+              message: "Cannot reach VPS endpoint",
+              debugHint: "Port 3001 blocked or wrong URL",
+              elapsedMs,
+              vpsEndpoint: sanitizeUrlForLogs(vpsUrl),
+              code: errorCode || "unknown",
+            },
+            {
+              upstreamStatus: null,
+              upstreamUrl: vpsUrl,
+              where: "admin-proxy",
+            },
+          );
+        }
+
+        console.log(`[admin-proxy] Health fetch error after ${elapsedMs}ms: ${errorCode || "unknown"}`);
+        throw e;
+      }
+
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        const upstreamBodySnippet = (responseText || "").slice(0, 300);
+        return jsonResponse(
+          response.status || 502,
+          {
+            ok: false,
+            error: "upstream_non_json",
+            message: "Upstream did not return valid JSON",
+            upstreamBodySnippet,
+          },
+          {
+            upstreamStatus: response.status,
+            upstreamUrl: vpsUrl,
+            where: "admin-proxy",
+          },
+        );
+      }
+
+      const debugMeta = {
+        upstreamStatus: response.status,
+        upstreamUrl: vpsUrl,
+        healthTarget,
+        elapsedMs,
+      };
+      const bodyWithDebug = attachProxyDebug(responseData, debugMeta);
+
+      return {
+        statusCode: response.status || 200,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Domovoy-Origin": "proxy",
+        },
+        body: JSON.stringify(bodyWithDebug),
+      };
+    }
+
     // Check method
     if (event.httpMethod !== "POST") {
       return jsonResponse(405, {

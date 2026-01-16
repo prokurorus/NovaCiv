@@ -14,21 +14,25 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const fetch = globalThis.fetch;
 const NEWS_BASE_URL = process.env.NEWS_BASE_URL || "https://novaciv.space";
-const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
 
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || ""; // Опционально, для публичного доступа
 
 async function checkHealthEndpoint() {
-  if (!NEWS_CRON_SECRET) {
-    console.log("⚠️  NEWS_CRON_SECRET not set, skipping health endpoint check");
+  if (!ADMIN_API_TOKEN) {
+    console.log("⚠️  ADMIN_API_TOKEN not set, skipping health endpoint check");
     return null;
   }
 
-  const url = `${NEWS_BASE_URL}/.netlify/functions/health-news?token=${NEWS_CRON_SECRET}`;
+  const url = `${NEWS_BASE_URL}/.netlify/functions/admin-proxy/admin/health/news`;
   
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        "X-Admin-Token": ADMIN_API_TOKEN,
+      },
+    });
     if (!res.ok) {
       console.error(`❌ Health endpoint returned ${res.status}`);
       return null;
@@ -110,7 +114,7 @@ async function main() {
       }
     }
   } else {
-    console.log("❌ Health endpoint check failed (check NEWS_CRON_SECRET)");
+    console.log("❌ Health endpoint check failed (check ADMIN_API_TOKEN)");
   }
 
   console.log("\n2. Firebase Health Metrics (if accessible)");

@@ -17,15 +17,15 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 const fetch = globalThis.fetch;
 
 const HEALTH_BASE_URL = "https://novaciv.space";
-const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || process.env.CRON_TOKEN || "";
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
 
-if (!NEWS_CRON_SECRET) {
-  console.error("❌ NEWS_CRON_SECRET or CRON_TOKEN not set");
+if (!ADMIN_API_TOKEN) {
+  console.error("❌ ADMIN_API_TOKEN not set");
   process.exit(1);
 }
 
-const HEALTH_FUNCTION = "health-domovoy";
-const HEALTH_URL = `${HEALTH_BASE_URL}/.netlify/functions/${HEALTH_FUNCTION}?token=${NEWS_CRON_SECRET}`;
+const HEALTH_PROXY_PATH = "/.netlify/functions/admin-proxy/admin/health/domovoy";
+const HEALTH_URL = `${HEALTH_BASE_URL}${HEALTH_PROXY_PATH}`;
 
 // SLA пороги
 const AUTO_POST_MAX_AGE_MS = 26 * 60 * 60 * 1000; // 26 часов
@@ -40,7 +40,11 @@ function isHtmlResponse(response, bodyText) {
 
 async function main() {
   try {
-    const response = await fetch(HEALTH_URL);
+    const response = await fetch(HEALTH_URL, {
+      headers: {
+        "X-Admin-Token": ADMIN_API_TOKEN,
+      },
+    });
     const responseText = await response.text();
 
     if (isHtmlResponse(response, responseText)) {

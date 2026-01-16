@@ -13,20 +13,24 @@ dotenv.config({ path: join(__dirname, "..", ".env") });
 
 const fetch = globalThis.fetch;
 const NEWS_BASE_URL = process.env.NEWS_BASE_URL || "https://novaciv.space";
-const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET || "";
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN || "";
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 async function checkHealthEndpoint() {
-  if (!NEWS_CRON_SECRET) {
-    return { error: "NEWS_CRON_SECRET not set" };
+  if (!ADMIN_API_TOKEN) {
+    return { error: "ADMIN_API_TOKEN not set" };
   }
 
-  const url = `${NEWS_BASE_URL}/.netlify/functions/health-news?token=${NEWS_CRON_SECRET}`;
+  const url = `${NEWS_BASE_URL}/.netlify/functions/admin-proxy/admin/health/news`;
   
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {
+      headers: {
+        "X-Admin-Token": ADMIN_API_TOKEN,
+      },
+    });
     if (!res.ok) {
       return { error: `HTTP ${res.status}` };
     }
@@ -79,7 +83,7 @@ async function main() {
   
   if (health.error) {
     console.log(`❌ Cannot check health endpoint: ${health.error}`);
-    console.log("   (Set NEWS_CRON_SECRET in .env to enable)");
+    console.log("   (Set ADMIN_API_TOKEN in .env to enable)");
   } else if (!health.ok) {
     console.log(`❌ Health endpoint error: ${health.error || "unknown"}`);
   } else {

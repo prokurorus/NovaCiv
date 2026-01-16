@@ -71,7 +71,7 @@ try {
   console.log("");
   console.log("📊 To check status:");
   console.log(`   - Firebase Console → /forum/topics/${topicId}`);
-  console.log(`   - Health endpoint: https://novaciv.space/.netlify/functions/health-news?token=[SECRET]`);
+  console.log("   - Health endpoint: https://novaciv.space/.netlify/functions/admin-proxy/admin/health/news");
 } catch (err) {
   console.error("❌ Error creating test topic:", err.message);
   process.exit(1);

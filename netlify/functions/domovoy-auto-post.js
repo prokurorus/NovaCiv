@@ -71,35 +71,47 @@ function log(...args) {
 }
 
 
-// Отправка в Telegram (локальный helper, чтобы не падать из-за undefined)
 async function sendToTelegram(chatId, message) {
-  if (!TELEGRAM_BOT_TOKEN) {
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   }
   if (!chatId) {
     return { ok: false, skipped: true, reason: "chatId not configured" };
   }
 
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
   const body = {
     chat_id: chatId,
     text: message,
     parse_mode: "HTML",
-    // Для домового обычно чище без превью
     disable_web_page_preview: true,
   };
 
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
-  const data = await resp.json();
-  if (!data.ok) {
-    log("Telegram error:", data);
+    const text = await resp.text();
+    if (!resp.ok) {
+      console.log("[domovoy-auto-post] Telegram HTTP", resp.status);
+      return { ok: false, status: resp.status, bodySnippet: text.slice(0, 200) };
+    }
+
+    try {
+      const data = JSON.parse(text);
+      if (!data.ok) {
+        return { ok: false, status: resp.status, bodySnippet: text.slice(0, 200) };
+      }
+      return data;
+    } catch {
+      return { ok: false, status: resp.status, bodySnippet: text.slice(0, 200) };
+    }
+  } catch (err) {
+    return { ok: false, status: null, bodySnippet: String(err).slice(0, 200) };
   }
-  return data;
 }
 
 
@@ -369,7 +381,7 @@ exports.handler = async (event) => {
     metrics.postedPerLang[langCode] = 1;
 
     // Отправка в Telegram по языку
-    const telegramText = buildPostText(title, body, langCode);
+    const telegramText = buildPostText(title, body);
     let telegramChatId = null;
     if (langCode === "ru" && TELEGRAM_NEWS_CHAT_ID_RU) {
       telegramChatId = TELEGRAM_NEWS_CHAT_ID_RU;

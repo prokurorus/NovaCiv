@@ -13,6 +13,8 @@ const { execSync } = require("child_process");
 require("dotenv").config({ path: process.env.ENV_PATH || "/root/NovaCiv/.env" });
 
 const { getDb } = require("./lib/firebaseAdmin");
+const { parsePm2StatusTable } = require("./lib/systemTelemetry");
+const { runStabilityReport } = require("./ops-stability-report");
 const {
   DEFAULT_THREAD_ID,
   getEffectiveThreadId,
@@ -71,6 +73,16 @@ function sanitizeContent(content) {
   });
   
   return sanitized;
+}
+
+function truncateWithSuffix(text, remaining) {
+  if (typeof text !== "string") return "";
+  if (text.length <= remaining) return text;
+  const suffix = "\n\n[... truncated ...]";
+  if (remaining <= suffix.length) {
+    return text.slice(0, remaining);
+  }
+  return text.slice(0, remaining - suffix.length) + suffix;
 }
 
 function loadPromptFile(filePath, fallbackPath) {
@@ -208,6 +220,8 @@ function collectOpsStatus() {
     headSha: null,
     pm2: [],
     snapshotMtime: null,
+    stabilityReportMtime: null,
+    snapshotLastRun: null,
   };
 
   try {
@@ -236,18 +250,18 @@ function collectOpsStatus() {
       ops.headSha = null;
     }
 
-    // Get PM2 summary (filtered to names + status + restarts + uptimeSeconds)
+    // Get PM2 summary (safe table output)
     try {
-      const pm2List = execSync("pm2 jlist", {
+      const pm2Table = execSync("pm2 status --no-color", {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
-      const pm2Processes = JSON.parse(pm2List);
+      const pm2Processes = parsePm2StatusTable(pm2Table);
       ops.pm2 = pm2Processes.map((proc) => ({
         name: proc.name || null,
-        status: proc.pm2_env?.status || null,
-        restarts: proc.pm2_env?.restart_time || 0,
-        uptimeSeconds: proc.pm2_env?.pm_uptime ? Math.floor((Date.now() - proc.pm2_env.pm_uptime) / 1000) : null,
+        status: proc.status || null,
+        restarts: proc.restarts || 0,
+        uptimeSeconds: proc.uptimeSec || null,
       }));
     } catch (e) {
       console.warn("[admin-domovoy-api] Failed to get PM2 status:", e.message);
@@ -260,6 +274,44 @@ function collectOpsStatus() {
       if (fs.existsSync(snapshotPath)) {
         const stats = fs.statSync(snapshotPath);
         ops.snapshotMtime = stats.mtime.toISOString();
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    // Get last stability report mtime
+    const stabilityReportPath = path.join(
+      PROJECT_DIR,
+      "_state",
+      "system_report_latest.md",
+    );
+    try {
+      if (fs.existsSync(stabilityReportPath)) {
+        const stats = fs.statSync(stabilityReportPath);
+        ops.stabilityReportMtime = stats.mtime.toISOString();
+      }
+    } catch (e) {
+      // Ignore
+    }
+
+    // Read monitoring state for report/snapshot last run
+    const monitoringStatePath = path.join(
+      PROJECT_DIR,
+      "_state",
+      "monitoring_state.json",
+    );
+    try {
+      if (fs.existsSync(monitoringStatePath)) {
+        const stateRaw = fs.readFileSync(monitoringStatePath, "utf8");
+        const state = JSON.parse(stateRaw);
+        const lastRun =
+          (state && typeof state.lastReportRunAt === "string" && state.lastReportRunAt) ||
+          (state && typeof state.lastSnapshotAt === "string" && state.lastSnapshotAt) ||
+          (state && typeof state.snapshotLastRun === "string" && state.snapshotLastRun) ||
+          null;
+        if (lastRun) {
+          ops.snapshotLastRun = lastRun;
+        }
       }
     } catch (e) {
       // Ignore
@@ -308,7 +360,7 @@ function buildStaticMemoryFiles(mode = "ops") {
   const stateBase = path.join(PROJECT_DIR, "_state");
   
   const memoryFiles = [];
-  const MAX_TOTAL_CHARS = 120000;
+  const MAX_TOTAL_CHARS = normalizedMode === "ops" ? 25000 : 120000;
   
   const directCriticalFiles = [
     { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
@@ -323,7 +375,6 @@ function buildStaticMemoryFiles(mode = "ops") {
   const opsCriticalFiles = [
     { path: path.join(docsBase, "MEMORY_BRIEF_ADMIN.md"), name: "MEMORY_BRIEF_ADMIN.md" },
     { path: path.join(docsBase, "ADMIN_ASSISTANT_OPS.md"), name: "ADMIN_ASSISTANT_OPS.md" },
-    { path: path.join(docsBase, "PROJECT_CONTEXT.md"), name: "PROJECT_CONTEXT.md" },
     { path: path.join(docsBase, "PROJECT_STATE.md"), name: "PROJECT_STATE.md" },
   ];
 
@@ -342,7 +393,7 @@ function buildStaticMemoryFiles(mode = "ops") {
       : opsCriticalFiles;
 
   const importantFiles =
-    normalizedMode === "direct"
+    normalizedMode === "direct" || normalizedMode === "ops"
       ? []
       : [
           { path: path.join(docsBase, "START_HERE.md"), name: "START_HERE.md" },
@@ -355,16 +406,27 @@ function buildStaticMemoryFiles(mode = "ops") {
   
   let totalChars = 0;
   
-  // Load critical files
+  // Load critical files (respect MAX_TOTAL_CHARS)
   for (const file of criticalFiles) {
+    if (totalChars >= MAX_TOTAL_CHARS) break;
     const content = loadFile(file.path);
     if (content) {
       const sanitized = sanitizeContent(content);
       const contentWithNote = file.referenceOnly
         ? `СПРАВКА: этот файл только для фактов. Не копируй шаблонный стиль ответа.\n\n${sanitized}`
         : sanitized;
-      memoryFiles.push({ name: file.name, content: contentWithNote });
-      totalChars += contentWithNote.length;
+      const remaining = MAX_TOTAL_CHARS - totalChars;
+      if (contentWithNote.length <= remaining) {
+        memoryFiles.push({ name: file.name, content: contentWithNote });
+        totalChars += contentWithNote.length;
+      } else if (remaining > 100) {
+        memoryFiles.push({
+          name: file.name,
+          content: truncateWithSuffix(contentWithNote, remaining),
+        });
+        totalChars = MAX_TOTAL_CHARS;
+        break;
+      }
     }
   }
   
@@ -382,7 +444,7 @@ function buildStaticMemoryFiles(mode = "ops") {
       } else {
         memoryFiles.push({ 
           name: file.name, 
-          content: sanitized.slice(0, remaining) + "\n\n[... truncated ...]" 
+          content: truncateWithSuffix(sanitized, remaining),
         });
         totalChars = MAX_TOTAL_CHARS;
         break;
@@ -390,26 +452,27 @@ function buildStaticMemoryFiles(mode = "ops") {
     }
   }
   
-  // Load snapshot (tail 250 lines) if space allows
+  const snapshotTailLines = normalizedMode === "ops" ? 100 : 250;
+  // Load snapshot (tail N lines) if space allows
   if (normalizedMode !== "direct" && totalChars < MAX_TOTAL_CHARS && fs.existsSync(snapshotPath)) {
     try {
       const snapshotContent = loadFile(snapshotPath);
       if (snapshotContent) {
         const lines = snapshotContent.split("\n");
-        const tailLines = lines.slice(-250).join("\n");
+        const tailLines = lines.slice(-snapshotTailLines).join("\n");
         const sanitized = sanitizeContent(tailLines);
         const remaining = MAX_TOTAL_CHARS - totalChars;
         
         if (sanitized.length <= remaining) {
           memoryFiles.push({ 
-            name: "_state/system_snapshot.md (tail 250 lines)", 
+            name: `_state/system_snapshot.md (tail ${snapshotTailLines} lines)`, 
             content: sanitized 
           });
           totalChars += sanitized.length;
         } else if (remaining > 100) {
           memoryFiles.push({ 
             name: "_state/system_snapshot.md (tail, truncated)", 
-            content: sanitized.slice(0, remaining) + "\n\n[... truncated ...]" 
+            content: truncateWithSuffix(sanitized, remaining),
           });
           totalChars = MAX_TOTAL_CHARS;
         }
@@ -433,12 +496,14 @@ function buildStaticMemoryFiles(mode = "ops") {
 // ---------- Build full Memory Pack (docs + snapshots + admin summaries/history) ----------
 async function buildMemoryPack(threadIdRaw, mode = "ops") {
   const staticPack = buildStaticMemoryFiles(mode);
+  const isOps = mode === "ops";
+  const OPS_MAX_CHARS = 25000;
 
   let adminContext = null;
   try {
     adminContext = await buildAdminMemoryContext({
       threadId: threadIdRaw || DEFAULT_THREAD_ID,
-      maxPairs: 20,
+      maxPairs: isOps ? 6 : 20,
     });
   } catch (e) {
     console.warn(
@@ -451,6 +516,11 @@ async function buildMemoryPack(threadIdRaw, mode = "ops") {
   let summaryCount = 0;
   let recentPairCount = 0;
   let lastSummaryTs = null;
+  let totalChars = memoryFiles.reduce(
+    (sum, f) => sum + (typeof f.content === "string" ? f.content.length : 0),
+    0,
+  );
+  let remainingOpsChars = isOps ? Math.max(0, OPS_MAX_CHARS - totalChars) : null;
 
   if (adminContext) {
     const { summaryText, recentPairsText } = adminContext;
@@ -459,22 +529,44 @@ async function buildMemoryPack(threadIdRaw, mode = "ops") {
     lastSummaryTs = adminContext.lastSummaryTs || null;
 
     if (summaryText && summaryText.trim().length > 0) {
-      memoryFiles.push({
-        name: "adminConversations/summaries",
-        content: summaryText,
-      });
+      if (!isOps) {
+        memoryFiles.push({
+          name: "adminConversations/summaries",
+          content: summaryText,
+        });
+        totalChars += summaryText.length;
+      } else if (remainingOpsChars > 0) {
+        const content = truncateWithSuffix(summaryText, remainingOpsChars);
+        memoryFiles.push({
+          name: "adminConversations/summaries",
+          content,
+        });
+        totalChars += content.length;
+        remainingOpsChars = Math.max(0, OPS_MAX_CHARS - totalChars);
+      }
     }
 
     if (recentPairsText && recentPairsText.trim().length > 0) {
-      memoryFiles.push({
-        name: "adminConversations/recentPairs",
-        content: recentPairsText,
-      });
+      if (!isOps) {
+        memoryFiles.push({
+          name: "adminConversations/recentPairs",
+          content: recentPairsText,
+        });
+        totalChars += recentPairsText.length;
+      } else if (remainingOpsChars > 0) {
+        const content = truncateWithSuffix(recentPairsText, remainingOpsChars);
+        memoryFiles.push({
+          name: "adminConversations/recentPairs",
+          content,
+        });
+        totalChars += content.length;
+        remainingOpsChars = Math.max(0, OPS_MAX_CHARS - totalChars);
+      }
     }
   }
 
   const filesLoaded = memoryFiles.map((f) => f.name);
-  const totalChars = memoryFiles.reduce(
+  totalChars = memoryFiles.reduce(
     (sum, f) => sum + (typeof f.content === "string" ? f.content.length : 0),
     0,
   );
@@ -552,17 +644,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   
-  // Check OpenAI key
-  if (!OPENAI_API_KEY) {
-    sendJson(res, 500, {
-      ok: false,
-      error: "OPENAI_API_KEY is not configured",
-      message: "OpenAI API key is missing in environment variables",
-      debugHint: "Set OPENAI_API_KEY in VPS .env file",
-    });
-    return;
-  }
-  
   // Parse body
   let body = "";
   req.on("data", chunk => { body += chunk.toString(); });
@@ -572,6 +653,7 @@ const server = http.createServer(async (req, res) => {
       const data = JSON.parse(body || "{}");
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
+      const action = (data.action || "").toString().trim();
       
       // Validate mode (default to "direct" if missing or invalid)
       const modeRaw = data.mode;
@@ -584,6 +666,122 @@ const server = http.createServer(async (req, res) => {
       const threadId = isDirectMode
         ? "ruslan-direct" 
         : getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
+
+      if (action === "snapshot:report") {
+        const stabilityResult = await runStabilityReport();
+        const { report, reportError, saved, telemetry } = stabilityResult;
+        if (!report) {
+          const isMissingKey =
+            reportError && String(reportError.message || "").includes("OPENAI_API_KEY");
+          sendJson(res, 500, {
+            ok: false,
+            error: isMissingKey ? "openai_key_missing" : "stability_report_failed",
+            message: isMissingKey
+              ? "OPENAI_API_KEY отсутствует на VPS"
+              : reportError?.message || "Failed to generate stability report",
+            saved: {
+              telemetry: saved?.telemetryLatest || null,
+            },
+          });
+          return;
+        }
+
+        const summary = {
+          processes: telemetry?.pm2?.processes?.length ?? 0,
+          repoClean: telemetry?.repo?.clean ?? null,
+          loadavg1: telemetry?.cpu?.loadavg1 ?? null,
+        };
+
+        sendJson(res, 200, {
+          ok: true,
+          reportMd: report.reportMd,
+          saved: {
+            telemetry: saved?.telemetryLatest || null,
+            report: saved?.reportLatestMd || null,
+            metadata: saved?.reportLatestJson || null,
+          },
+          summary,
+          ts: new Date().toISOString(),
+          debug: {
+            origin: "vps",
+            mode: "snapshot:report",
+            model: report.model,
+          },
+        });
+        return;
+      }
+
+      if (action === "stability:report") {
+        try {
+          const stabilityResult = await runStabilityReport();
+          const { report, reportError, saved, telemetry } = stabilityResult;
+          if (!report) {
+            const isMissingKey =
+              reportError && String(reportError.message || "").includes("OPENAI_API_KEY");
+            sendJson(res, 500, {
+              ok: false,
+              error: isMissingKey ? "openai_key_missing" : "stability_report_failed",
+              message: isMissingKey
+                ? "OPENAI_API_KEY отсутствует на VPS"
+                : reportError?.message || "Failed to generate stability report",
+              saved: {
+                telemetry: saved?.telemetryLatest || null,
+              },
+            });
+            return;
+          }
+
+          const summary = {
+            processes: telemetry?.pm2?.processes?.length ?? 0,
+            repoClean: telemetry?.repo?.clean ?? null,
+            loadavg1: telemetry?.cpu?.loadavg1 ?? null,
+          };
+
+          sendJson(res, 200, {
+            ok: true,
+            reportMd: report.reportMd,
+            saved: {
+              telemetry: saved?.telemetryLatest || null,
+              report: saved?.reportLatestMd || null,
+              metadata: saved?.reportLatestJson || null,
+            },
+            summary,
+            ts: new Date().toISOString(),
+            debug: {
+              origin: "vps",
+              mode: "stability:report",
+              model: report.model,
+            },
+          });
+        } catch (e) {
+          sendJson(res, 502, {
+            ok: false,
+            error: "stability_report_failed",
+            message: e.message || "Failed to generate stability report",
+          });
+        }
+        return;
+      }
+
+      if (action === "ops:status") {
+        const opsStatus = collectOpsStatus();
+        sendJson(res, 200, {
+          ok: true,
+          status: {
+            gitClean: opsStatus.gitClean,
+            headSha: opsStatus.headSha,
+            pm2: opsStatus.pm2,
+            snapshotMtime: opsStatus.snapshotMtime,
+            stabilityReportMtime: opsStatus.stabilityReportMtime,
+            snapshotLastRun: opsStatus.snapshotLastRun,
+          },
+          debug: {
+            origin: "vps",
+            mode: "ops:status",
+          },
+        });
+        return;
+      }
       
       // Validate question length (4k-8k chars limit)
       if (!text) {
@@ -709,6 +907,16 @@ ${contextBlocks}
 ${text}`
         });
         
+        if (!OPENAI_API_KEY) {
+          sendJson(res, 500, {
+            ok: false,
+            error: "OPENAI_API_KEY is not configured",
+            message: "OpenAI API key is missing in environment variables",
+            debugHint: "Set OPENAI_API_KEY in VPS .env file",
+          });
+          return;
+        }
+
         // Call OpenAI
         const completion = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
@@ -980,6 +1188,16 @@ ${contextBlocks}
 ${text}`
       });
       
+      if (!OPENAI_API_KEY) {
+        sendJson(res, 500, {
+          ok: false,
+          error: "OPENAI_API_KEY is not configured",
+          message: "OpenAI API key is missing in environment variables",
+          debugHint: "Set OPENAI_API_KEY in VPS .env file",
+        });
+        return;
+      }
+
       // Call OpenAI
       const completion = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -1025,65 +1243,6 @@ ${text}`
         return;
       }
       
-      // Post-process answer for ops mode: enforce strict format
-      if (mode === "ops") {
-        const normalizedAnswer = answer.trim();
-        
-        // Check if answer already follows the format
-        const hasStatus = /СТАТУС\s*:/i.test(normalizedAnswer);
-        const hasCause = /ПРИЧИНА\s*:/i.test(normalizedAnswer);
-        const hasStep = /ОДИН ШАГ\s*:/i.test(normalizedAnswer);
-        
-        // Check for forbidden patterns (lists, numbering)
-        const hasForbiddenList = /^\s*[0-9]+[\.\)]\s|^\s*[-•*]\s|^\s*[a-z][\.\)]\s/i.test(normalizedAnswer.split('\n').find(line => line.trim().length > 0) || '');
-        const hasMultipleSteps = (normalizedAnswer.match(/шаг|step|действие|action/gi) || []).length > 2;
-        
-        // If format is violated, try to extract and reformat
-        if (!hasStatus || !hasCause || !hasStep || hasForbiddenList || hasMultipleSteps) {
-          // Try to extract key parts and reformat
-          const lines = normalizedAnswer.split('\n').filter(l => l.trim().length > 0);
-          let statusPart = '';
-          let causePart = '';
-          let stepPart = '';
-          
-          // Look for status indicators
-          const statusKeywords = ['статус', 'ситуация', 'проблема', 'ошибка', 'status', 'situation', 'problem', 'error'];
-          const causeKeywords = ['причина', 'причиной', 'из-за', 'because', 'reason', 'cause'];
-          const stepKeywords = ['шаг', 'действие', 'сделай', 'выполни', 'step', 'action', 'do'];
-          
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].toLowerCase();
-            if (statusKeywords.some(kw => line.includes(kw)) && !statusPart) {
-              statusPart = lines[i].replace(/^(статус|ситуация|проблема|ошибка|status|situation|problem|error)\s*:?\s*/i, '').trim();
-            } else if (causeKeywords.some(kw => line.includes(kw)) && !causePart) {
-              causePart = lines[i].replace(/^(причина|причиной|из-за|because|reason|cause)\s*:?\s*/i, '').trim();
-            } else if (stepKeywords.some(kw => line.includes(kw)) && !stepPart) {
-              // Take only the first step
-              stepPart = lines[i].replace(/^(шаг|действие|сделай|выполни|step|action|do)\s*[0-9]*\s*:?\s*/i, '').trim();
-              break; // Only take first step
-            }
-          }
-          
-          // If we couldn't extract, use original but warn
-          if (!statusPart) statusPart = lines[0] || 'Статус не определен';
-          if (!causePart) causePart = 'Причина не указана';
-          if (!stepPart) {
-            // Try to find any actionable line
-            stepPart = lines.find(l => 
-              stepKeywords.some(kw => l.toLowerCase().includes(kw)) ||
-              (l.length > 10 && l.length < 200)
-            ) || 'Шаг не определен';
-          }
-          
-          // Reformat to strict format
-          answer = `СТАТУС: ${statusPart}
-
-ПРИЧИНА: ${causePart}
-
-ОДИН ШАГ: ${stepPart}`;
-        }
-      }
-
       // Log assistant message and increment pairCount (best-effort)
       let logResult = null;
       try {

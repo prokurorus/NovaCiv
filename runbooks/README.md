@@ -94,16 +94,23 @@ pm2 describe nova-ops-agent
 
 ## 📸 System Snapshot
 
-**Автоматическое обновление:** каждые 30 минут через cron
+**Автоматическое обновление:** раз в сутки через cron (snapshot + отчет)
 
 **Ручной запуск:**
 ```bash
 bash /root/NovaCiv/runbooks/snapshot_system.sh
 ```
 
+**Автоматический отчет через OpenAI (snapshot + отчет):**
+```bash
+bash /root/NovaCiv/runbooks/snapshot_system_send_openai.sh
+```
+
 **Файлы:**
 - `/root/NovaCiv/_state/system_snapshot.md` - читаемый формат
 - `/root/NovaCiv/_state/system_snapshot.json` - структурированный JSON
+- `/root/NovaCiv/_state/system_report.md` - отчет по устойчивости
+- `/root/NovaCiv/_state/system_report.json` - метаданные отчета
 
 **Логи snapshot:**
 ```bash

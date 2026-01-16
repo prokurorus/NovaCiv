@@ -1,0 +1,136 @@
+NovaCiv — Отчет по серверному агенту (ops-agent)
+Дата: 2026-01-16
+
+1) Обзор текущего функционала
+--------------------------------
+Серверный агент реализован в `server/ops-agent.js`. Он работает как GitHub-агент:
+- Каждые 60 секунд опрашивает GitHub Issues с меткой `ops`.
+- Парсит команду из title/body и выполняет только whitelist-команды.
+- Результаты публикует в комментариях Issue.
+- Дополнительно помечает Issue метками `ops-agent:processing`, `ops-agent:done`, `ops-agent:error`.
+- Маскирует секреты в любом выводе.
+
+2) Собираемые данные и операции
+--------------------------------
+Ниже перечислены команды, их данные и формат отчета:
+
+2.1 report:status
+- Данные: список PM2 процессов, git статус и текущая ветка, дисковое пространство.
+- Формат: Markdown-комментарий в Issue с блоками ```...```.
+- Хранилище: комментарий в GitHub Issue (источник правды — GitHub).
+
+2.2 video:validate
+- Данные: наличие ключевых файлов (video-worker.js, pipeline.js, firebase-config.js),
+  список имен env-переменных по префиксам FIREBASE_/YOUTUBE_/TELEGRAM_ (без значений).
+- Формат: Markdown-комментарий в Issue с секциями Files и Environment Variables.
+- Хранилище: комментарий в GitHub Issue.
+
+2.3 youtube:refresh-test
+- Данные: результат обновления YouTube refresh token (валиден/ошибка).
+- Формат: Markdown-комментарий в Issue (вывод скрипта в ```...```).
+- Хранилище: комментарий в GitHub Issue.
+
+2.4 worker:restart
+- Операция: перезапуск PM2 процесса `nova-video`, затем `pm2 save`.
+- Данные: вывод pm2 start/status.
+- Формат: Markdown-комментарий в Issue (лог в ```...```).
+- Хранилище: комментарий в GitHub Issue.
+
+2.5 pipeline:run-test-job
+- Операция: создание тестовой задачи в Firebase Realtime Database.
+- Данные: ID созданной задачи или ошибка.
+- Формат: Markdown-комментарий в Issue (вывод в ```...```).
+- Хранилище: комментарий в GitHub Issue; данные задачи — в Firebase.
+
+2.6 snapshot / snapshot:get
+- Данные: расширенный snapshot `_state/system_snapshot.md` (с доп. санитизацией),
+  включая CPU/Load, RAM/Swap/RSS, диск (inode/latency/ключевые mount’ы),
+  сеть (трафик/ошибки/соединения), PM2/Node (event loop lag),
+  Cron/Jobs (последний запуск snapshot), Firebase/DB и Netlify (best-effort).
+- Формат: Markdown-отчет (с секциями и блоками ```...```).
+- Хранилище: файл `_state/system_snapshot.md` на сервере + JSON `_state/system_snapshot.json`.
+
+2.7 onebigstep:health
+- Данные:
+  - Git: ветка, короткий commit, статус clean/dirty.
+  - PM2: список процессов и статусы (JSON либо fallback `pm2 status`).
+  - Snapshot: наличие файлов `_state/system_snapshot.md/json` + mtime.
+  - Cron: наличие строки с `snapshot_system.sh`.
+  - Health endpoints: наличие файлов health-news/health-domovoy.
+- Формат: Markdown-комментарий в Issue.
+- Хранилище: комментарий в GitHub Issue.
+
+2.8 snapshot:run
+- Операция: запуск `runbooks/snapshot_system.sh`.
+- Данные: статус выполнения, пути сгенерированных файлов,
+  stdout/stderr (санитизированные).
+- Формат: Markdown-комментарий в Issue.
+- Хранилище: `_state/system_snapshot.md` и `_state/system_snapshot.json`.
+
+2.9 logs:tail <process>
+- Данные: tail PM2 логов (по allowlist: `nova-ops-agent`, `nova-video`).
+- Формат: Markdown-комментарий в Issue.
+- Хранилище: комментарий в GitHub Issue.
+
+3) Частота сбора данных
+--------------------------------
+- Основной цикл агента: опрос Issues с меткой `ops` каждые 60 секунд.
+- Snapshot: генерируется скриптом `runbooks/snapshot_system.sh`,
+  обычно по cron каждые 30 минут (см. документы и проверку в onebigstep:health).
+- Остальные данные собираются по запросу через Issue-команды.
+
+4) Форматы отчетов и места хранения
+--------------------------------
+- GitHub Issue comments: основной канал отчетов (Markdown с блоками ```...```).
+- Snapshot-файлы:
+  - `_state/system_snapshot.md` — Markdown.
+  - `_state/system_snapshot.json` — JSON.
+- Логи генерации snapshot: `/var/log/novaciv_snapshot.log` (на сервере).
+
+5) Предложения по улучшению (недостающие функции)
+--------------------------------
+Ниже предложены дополнения для более полного мониторинга и управления (часть уже реализована, см. п.6):
+
+5.1 Новые типы данных (оставшиеся gaps)
+- PM2/Node: рестарты/uptime/память в разрезе процесса без раскрытия env.
+- Cron/Jobs: длительность/статус для всех критичных задач (не только snapshot).
+- Firebase/DB: размер очередей/коллекций и error-rate по реальным операциям.
+- Netlify Functions: последние ошибки, средняя длительность, 5xx rate через API.
+
+5.2 Новые метрики и проверки
+- Проверка health endpoints через реальный HTTP вызов (не только наличие файлов).
+- Проверка доступности внешних интеграций (YouTube, Telegram, OpenAI).
+- Сравнение версий/деплоя: тег/commit в проде vs origin/main.
+- Алерты по дрейфу времени/хронометрии (cron drift).
+- Контроль размера логов и авто-ротации.
+- Безопасность: наличие открытых портов, устаревших пакетов, уязвимостей.
+
+5.3 Улучшения отчетности
+- Единый JSON-отчет (машиночитаемый) + Markdown-сводка.
+- Сохранение последних N отчетов в `_state/` с timestamp.
+- Отправка ключевых метрик в Firebase (раздел `ops/`), как heartbeat.
+- Добавить "diff" с прошлым snapshot (изменения по версиям/процессам).
+
+6) Обзор добавленных данных и методы сбора
+--------------------------------
+В `runbooks/snapshot_system.sh` добавлены расширенные метрики (best-effort):
+- CPU: load average, CPU steal %, топ процессов по %CPU.
+- RAM: детальный usage, swap usage, топ процессов по RSS.
+- Disk: inode usage, I/O latency (iostat), free space по ключевым mount’ам.
+- Network: суммарный вход/выход, ошибки, открытые соединения и состояния.
+- PM2/Node: event loop lag (perf_hooks) + расширенный PM2 статус в отчете.
+- Cron/Jobs: последний запуск snapshot и длительность из `/var/log/novaciv_snapshot.log`.
+- Firebase/DB: latency ping к RTDB (если есть .env и firebase-admin).
+- Netlify Functions: placeholder/статус (требует токенов для API метрик).
+
+Данные сохраняются тем же способом:
+- GitHub Issue comments (по командам `snapshot`/`snapshot:run`).
+- Snapshot-файлы: `_state/system_snapshot.md` и `_state/system_snapshot.json`.
+
+7) Рекомендации
+--------------------------------
+- Добавить безопасный сбор PM2 restarts/uptime/memory через парсер таблицы `pm2 list`
+  без `pm2 jlist`/`describe` (избежать утечек env).
+- Настроить Netlify API токены и site ID для метрик ошибок/latency/5xx.
+- В Firebase добавить отдельные счетчики ошибок/очередей в RTDB/Firestore,
+  чтобы агент мог читать агрегаты без тяжелых выборок.

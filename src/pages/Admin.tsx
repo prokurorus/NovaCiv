@@ -96,6 +96,7 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>(() => {
     // Load from localStorage on init
     if (typeof window !== "undefined") {
@@ -164,6 +165,9 @@ function AdminInner() {
   const modeInactiveClass = isDark
     ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
     : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200";
+  const reportButtonClass = isDark
+    ? "bg-emerald-500 text-white hover:bg-emerald-400"
+    : "bg-emerald-600 text-white hover:bg-emerald-500";
   const inputClass = isDark
     ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
     : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
@@ -401,6 +405,137 @@ function AdminInner() {
     }
   };
 
+  const requestAdmin = async (
+    requestBody: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
+  ) => {
+    const currentUser = window.netlifyIdentity?.currentUser();
+    if (!currentUser) {
+      throw new Error("Пользователь не авторизован");
+    }
+
+    // Получаем токен: предпочитаем jwt(), иначе token.access_token
+    let token: string | null = null;
+    if (currentUser.jwt) {
+      token = await currentUser.jwt(true);
+    } else if (currentUser.token?.access_token) {
+      token = currentUser.token.access_token;
+    }
+
+    if (!token) {
+      throw new Error("Токен не готов, попробуйте перелогиниться");
+    }
+
+    const requestUrl = "/.netlify/functions/admin-proxy";
+    const controller = new AbortController();
+    const timeoutMs = options.timeoutMs;
+    const timeoutId = timeoutMs
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+    let res: Response;
+    try {
+      res = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(`Таймаут запроса (${Math.round((timeoutMs || 0) / 1000)}s)`);
+      }
+      throw err;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    // Получаем raw response text для debug
+    const rawResponseText = await res.text();
+    const rawResponseTruncated = rawResponseText.slice(0, 2000);
+
+    // Проверяем, что ответ - JSON, а не HTML
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      setDebugInfo({
+        url: requestUrl,
+        status: res.status,
+        rawResponse: rawResponseTruncated,
+        jsonKeys: [],
+      });
+      throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${rawResponseText.slice(0, 200)}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawResponseText);
+    } catch (parseErr) {
+      setDebugInfo({
+        url: requestUrl,
+        status: res.status,
+        rawResponse: rawResponseTruncated,
+        jsonKeys: [],
+      });
+      throw new Error(`Не удалось распарсить JSON: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`);
+    }
+
+    // Capture debug info
+    const jsonKeys = Object.keys(data);
+    const debug = (data && typeof data.debug === "object") ? data.debug : {};
+    setDebugInfo({
+      url: requestUrl,
+      status: res.status,
+      rawResponse: rawResponseTruncated,
+      jsonKeys,
+      threadId: debug.threadId ?? null,
+      pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
+      lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
+      origin: typeof debug.origin === "string" ? debug.origin : null,
+      upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
+      upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
+      mode: typeof debug.mode === "string" ? debug.mode : null,
+    });
+
+    // Handle error responses (ok: false or non-200 status)
+    if (!res.ok || data.ok === false) {
+      const errorMsg = data.error || data.message || "Ошибка запроса";
+      let statusMsg: string;
+      if (res.status === 401) {
+        if (data.error === "unauthorized") {
+          statusMsg = "Токен не совпадает между Netlify и VPS. Проверьте ADMIN_API_TOKEN в обеих системах.";
+        } else {
+          statusMsg = "Не авторизован. Проверьте вход через Netlify Identity.";
+        }
+      } else if (res.status === 403) {
+        statusMsg = "Доступ запрещён. Требуется роль admin.";
+      } else if (res.status === 500) {
+        if (data.error === "openai_key_missing") {
+          statusMsg = data.message || "OPENAI_API_KEY отсутствует на VPS";
+        } else {
+          statusMsg = "Ошибка сервера. Проверьте логи функции.";
+        }
+      } else if (res.status === 502) {
+        statusMsg = data.error === "vps_unreachable" 
+          ? "VPS недоступен. Проверьте доступность и порт."
+          : data.error === "vps_timeout"
+          ? "Таймаут соединения с VPS (>10s). Проверьте сеть."
+          : errorMsg;
+      } else if (res.status === 504) {
+        statusMsg = "Таймаут от VPS. Проверьте доступность сервера.";
+      } else {
+        statusMsg = errorMsg;
+      }
+      throw new Error(`${statusMsg} (HTTP ${res.status})`);
+    }
+
+    return data;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -409,115 +544,16 @@ function AdminInner() {
     setError("");
     setResponse("");
     setDebugInfo(null);
+    setPendingMessage("Отправка...");
 
     try {
-      const currentUser = window.netlifyIdentity?.currentUser();
-      if (!currentUser) {
-        throw new Error("Пользователь не авторизован");
-      }
-
-      // Получаем токен: предпочитаем jwt(), иначе token.access_token
-      let token: string | null = null;
-      if (currentUser.jwt) {
-        token = await currentUser.jwt(true);
-      } else if (currentUser.token?.access_token) {
-        token = currentUser.token.access_token;
-      }
-
-      if (!token) {
-        throw new Error("Токен не готов, попробуйте перелогиниться");
-      }
-
-      const requestUrl = "/.netlify/functions/admin-proxy";
       const requestBody = {
         text: text.trim(),
         history: conversationHistory.slice(-20), // Last 20 messages
         threadId: "ruslan-main",
         mode: mode, // "ops" | "direct"
       };
-      
-      const res = await fetch(requestUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      // Получаем raw response text для debug
-      const rawResponseText = await res.text();
-      const rawResponseTruncated = rawResponseText.slice(0, 2000);
-
-      // Проверяем, что ответ - JSON, а не HTML
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        setDebugInfo({
-          url: requestUrl,
-          status: res.status,
-          rawResponse: rawResponseTruncated,
-          jsonKeys: [],
-        });
-        throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${rawResponseText.slice(0, 200)}`);
-      }
-
-      let data;
-      try {
-        data = JSON.parse(rawResponseText);
-      } catch (parseErr) {
-        setDebugInfo({
-          url: requestUrl,
-          status: res.status,
-          rawResponse: rawResponseTruncated,
-          jsonKeys: [],
-        });
-        throw new Error(`Не удалось распарсить JSON: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`);
-      }
-
-      // Capture debug info
-      const jsonKeys = Object.keys(data);
-      const debug = (data && typeof data.debug === "object") ? data.debug : {};
-      setDebugInfo({
-        url: requestUrl,
-        status: res.status,
-        rawResponse: rawResponseTruncated,
-        jsonKeys,
-        threadId: debug.threadId ?? null,
-        pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
-        lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
-        origin: typeof debug.origin === "string" ? debug.origin : null,
-        upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
-        upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
-        mode: typeof debug.mode === "string" ? debug.mode : null,
-      });
-
-      // Handle error responses (ok: false or non-200 status)
-      if (!res.ok || data.ok === false) {
-        const errorMsg = data.error || data.message || "Ошибка запроса";
-        let statusMsg: string;
-        if (res.status === 401) {
-          if (data.error === "unauthorized") {
-            statusMsg = "Токен не совпадает между Netlify и VPS. Проверьте ADMIN_API_TOKEN в обеих системах.";
-          } else {
-            statusMsg = "Не авторизован. Проверьте вход через Netlify Identity.";
-          }
-        } else if (res.status === 403) {
-          statusMsg = "Доступ запрещён. Требуется роль admin.";
-        } else if (res.status === 500) {
-          statusMsg = "Ошибка сервера. Проверьте логи функции.";
-        } else if (res.status === 502) {
-          statusMsg = data.error === "vps_unreachable" 
-            ? "VPS недоступен. Проверьте доступность и порт."
-            : data.error === "vps_timeout"
-            ? "Таймаут соединения с VPS (>10s). Проверьте сеть."
-            : errorMsg;
-        } else if (res.status === 504) {
-          statusMsg = "Таймаут от VPS. Проверьте доступность сервера.";
-        } else {
-          statusMsg = errorMsg;
-        }
-        throw new Error(`${statusMsg} (HTTP ${res.status})`);
-      }
+      const data = await requestAdmin(requestBody);
 
       // Handle success response - prefer answer, then output, then text, then reply
       const answerText = data.answer || data.output || data.text || data.reply || "";
@@ -546,6 +582,46 @@ function AdminInner() {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {
       setIsSubmitting(false);
+      setPendingMessage(null);
+    }
+  };
+
+  const handleStabilityReport = async () => {
+    setIsSubmitting(true);
+    setError("");
+    setResponse("");
+    setDebugInfo(null);
+    setPendingMessage("Генерирую отчет...");
+
+    try {
+      const data = await requestAdmin(
+        { action: "snapshot:report", text: "manual run" },
+        { timeoutMs: 180_000 },
+      );
+      const answerText = data.reportMd || data.answer || data.output || data.text || data.reply || "";
+      if (!answerText) {
+        throw new Error("Отчет получен, но пуст.");
+      }
+
+      const snapshotUserText = "Отчет устойчивости";
+      const newHistory = [
+        ...conversationHistory,
+        { role: "user" as const, content: snapshotUserText },
+        { role: "assistant" as const, content: answerText },
+      ].slice(-20);
+      setConversationHistory(newHistory);
+      try {
+        localStorage.setItem("adminChatHistory", JSON.stringify(newHistory));
+      } catch (e) {
+        console.error("[Admin] Failed to save chat history:", e);
+      }
+
+      setResponse(answerText);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+    } finally {
+      setIsSubmitting(false);
+      setPendingMessage(null);
     }
   };
 
@@ -776,6 +852,14 @@ function AdminInner() {
                 >
                   Диалог (свободно)
                 </button>
+                <button
+                  type="button"
+                  onClick={handleStabilityReport}
+                  className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition ${reportButtonClass}`}
+                  disabled={isSubmitting}
+                >
+                  Отчет устойчивости
+                </button>
               </div>
               <div className={`text-xs mt-1 ${textMuted}`}>
                 {mode === "ops" ? (
@@ -828,7 +912,7 @@ function AdminInner() {
 
           {isSubmitting && (
             <div className={`mt-6 p-6 border rounded-xl ${panelClass}`}>
-              <div className={textSecondary}>ожидаю...</div>
+              <div className={textSecondary}>{pendingMessage || "ожидаю..."}</div>
             </div>
           )}
 

@@ -132,6 +132,20 @@ The server logs a deterministic line when building context:
 
 ---
 
+## D1. Monitoring artifacts
+
+**Latest-only (overwrite):**
+- `/root/NovaCiv/_state/telemetry_latest.json` — sanitized telemetry used for AI report
+- `/root/NovaCiv/_state/system_report_latest.md` — AI stability report (short)
+- `/root/NovaCiv/_state/system_report_latest.json` — report metadata (model/usage/timestamp)
+
+**State:**
+- `/root/NovaCiv/_state/monitoring_state.json` — last report run metadata
+
+**Archives:** timestamped copies of telemetry/report are kept рядом с latest-файлами.
+
+---
+
 ## E. Snapshot Mechanism
 
 **Script:** `runbooks/snapshot_system.sh`

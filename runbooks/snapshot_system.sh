@@ -106,6 +106,7 @@ sanitize_content() {
 # Timestamp
 TIMESTAMP=$(date -Is)
 DATE_HUMAN=$(date '+%Y-%m-%d %H:%M:%S %Z')
+START_EPOCH=$(date +%s)
 
 # System info
 HOSTNAME=$(hostname)
@@ -130,9 +131,21 @@ PM2_STATUS_SUMMARY=$(pm2 status 2>/dev/null | grep -E "^(id|│|└|┌)" || ech
 # Disk usage (df -h)
 DISK_USAGE=$(df -h / 2>/dev/null | tail -1 || echo "disk info unavailable")
 DISK_USAGE_ALL=$(df -h 2>/dev/null | head -20 || echo "disk info unavailable")
+DISK_INODE_USAGE=$(df -ih 2>/dev/null | head -20 || echo "inode info unavailable")
+DISK_KEY_MOUNTS=$(for m in / /var /home /root /mnt /data /srv; do if df -h "$m" &>/dev/null; then df -h "$m" | tail -1; fi; done | head -10 || echo "no key mounts found")
+IO_LATENCY=$(if command -v iostat &> /dev/null; then iostat -xd 1 1 2>/dev/null | head -20; else echo "iostat not available"; fi)
 
 # Memory usage (free -h)
 MEMORY_USAGE=$(free -h 2>/dev/null | head -2 || echo "memory info unavailable")
+MEMORY_DETAILED=$(free -m 2>/dev/null | head -3 || echo "memory info unavailable")
+SWAP_USAGE=$(free -h 2>/dev/null | awk 'NR==3 {print $0}' || echo "swap info unavailable")
+RSS_TOP=$(ps -eo pid,comm,rss --sort=-rss 2>/dev/null | head -6 || echo "rss info unavailable")
+
+# CPU usage
+LOAD_AVG=$(awk '{print $1" "$2" "$3}' /proc/loadavg 2>/dev/null || uptime 2>/dev/null | awk -F'load average:' '{print $2}' | xargs || echo "unavailable")
+CPU_STEAL_RAW=$(awk 'NR==1 {print $9}' /proc/stat 2>/dev/null || echo "unknown")
+CPU_STEAL_PCT=$(awk 'NR==1 {total=0; for(i=2;i<=NF;i++){total+=$i;} steal=$9; if (total>0) {printf "%.2f", (steal/total)*100} else {print "0.00"} }' /proc/stat 2>/dev/null || echo "unknown")
+CPU_TOP=$(ps -eo pid,comm,%cpu --sort=-%cpu 2>/dev/null | head -6 || echo "cpu info unavailable")
 
 # Cron status (list crontab entries without env)
 CRON_STATUS=""
@@ -142,6 +155,12 @@ if command -v crontab &> /dev/null; then
 else
   CRON_STATUS="crontab not available"
 fi
+
+# Snapshot cron last run (from log)
+SNAPSHOT_LAST_LOG=$(tail -1 "$LOG_FILE" 2>/dev/null || echo "no snapshot log")
+SNAPSHOT_LAST_TIME=$(echo "$SNAPSHOT_LAST_LOG" | awk -F']' '{print $1}' | tr -d '[')
+SNAPSHOT_LAST_STATUS=$(echo "$SNAPSHOT_LAST_LOG" | sed 's/.*] //')
+SNAPSHOT_LAST_DURATION=$(echo "$SNAPSHOT_LAST_LOG" | grep -oE 'duration=[0-9]+s' | cut -d= -f2 || echo "unknown")
 
 # Git info (NO remote URL with tokens)
 cd "$REPO_DIR" 2>/dev/null || cd / || true
@@ -181,6 +200,21 @@ PM2_LOGS_OPS=$(sanitize_content "$PM2_LOGS_OPS_RAW")
 PM2_LOGS_VIDEO_RAW=$(pm2 logs nova-video --lines 80 --nostream 2>/dev/null | tail -80 || echo "")
 PM2_LOGS_VIDEO=$(sanitize_content "$PM2_LOGS_VIDEO_RAW")
 
+# Network stats
+NET_DEV_RAW=$(cat /proc/net/dev 2>/dev/null | tail -n +3 || echo "net dev info unavailable")
+NET_TRAFFIC_SUMMARY=$(awk 'NR>2{rx+=$2; tx+=$10; rxerr+=$4; txerr+=$12} END{print "rx_bytes="rx" tx_bytes="tx" rx_err="rxerr" tx_err="txerr}' /proc/net/dev 2>/dev/null || echo "net summary unavailable")
+NET_CONN_SUMMARY=$(ss -s 2>/dev/null || netstat -s 2>/dev/null | head -20 || echo "net conn summary unavailable")
+NET_CONN_STATES=$(ss -tan 2>/dev/null | awk 'NR>1{state[$1]++} END{for (s in state) print s": "state[s]}' | sort || echo "connection states unavailable")
+
+# Node event loop lag (best-effort)
+EVENT_LOOP_LAG=$(node -e "try{const { monitorEventLoopDelay }=require('perf_hooks');const h=monitorEventLoopDelay({resolution:20});h.enable();setTimeout(()=>{h.disable();const mean=(h.mean/1e6).toFixed(2);const max=(h.max/1e6).toFixed(2);console.log('mean_ms='+mean+' max_ms='+max);},200);}catch(e){console.log('not available');}" 2>/dev/null || echo "not available")
+
+# Firebase/DB metrics (best-effort, no secrets output)
+FIREBASE_METRICS=$(node -e "try{const fs=require('fs');const path='${REPO_DIR}/.env';if(!fs.existsSync(path)){console.log('not configured');process.exit(0);}require('dotenv').config({path});if(!process.env.FIREBASE_SERVICE_ACCOUNT_JSON||!process.env.FIREBASE_DB_URL){console.log('not configured');process.exit(0);}let admin;try{admin=require('firebase-admin');}catch(e){console.log('firebase-admin not installed');process.exit(0);}const sa=JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);admin.initializeApp({credential: admin.credential.cert(sa), databaseURL: process.env.FIREBASE_DB_URL});const db=admin.database();const start=Date.now();db.ref('.info/serverTimeOffset').once('value').then(()=>{console.log('latency_ms='+(Date.now()-start));process.exit(0);}).catch(err=>{console.log('error='+String(err.message||err));process.exit(0);});}catch(e){console.log('firebase metrics unavailable');}" 2>/dev/null || echo "firebase metrics unavailable")
+
+# Netlify Functions metrics (best-effort, no secrets output)
+NETLIFY_METRICS="not configured"
+
 # Build JSON (sanitize all content)
 JSON_OUTPUT=$(cat <<EOF
 {
@@ -198,16 +232,51 @@ JSON_OUTPUT=$(cat <<EOF
     "node": "$NODE_VERSION",
     "pm2": "$PM2_VERSION"
   },
+  "cpu": {
+    "load_average": "$LOAD_AVG",
+    "steal_pct": "$CPU_STEAL_PCT",
+    "steal_raw": "$CPU_STEAL_RAW",
+    "top_processes": "$(echo "$CPU_TOP" | jq -Rs . 2>/dev/null || echo "\"$(echo "$CPU_TOP" | sed 's/"/\\"/g')\"")"
+  },
+  "memory": {
+    "usage": "$(echo "$MEMORY_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$MEMORY_USAGE" | sed 's/"/\\"/g')\"")",
+    "detailed": "$(echo "$MEMORY_DETAILED" | jq -Rs . 2>/dev/null || echo "\"$(echo "$MEMORY_DETAILED" | sed 's/"/\\"/g')\"")",
+    "swap": "$(echo "$SWAP_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$SWAP_USAGE" | sed 's/"/\\"/g')\"")",
+    "top_rss_processes": "$(echo "$RSS_TOP" | jq -Rs . 2>/dev/null || echo "\"$(echo "$RSS_TOP" | sed 's/"/\\"/g')\"")"
+  },
+  "disk": {
+    "usage_root": "$(echo "$DISK_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$DISK_USAGE" | sed 's/"/\\"/g')\"")",
+    "usage_all": "$(echo "$DISK_USAGE_ALL" | jq -Rs . 2>/dev/null || echo "\"$(echo "$DISK_USAGE_ALL" | sed 's/"/\\"/g')\"")",
+    "inode_usage": "$(echo "$DISK_INODE_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$DISK_INODE_USAGE" | sed 's/"/\\"/g')\"")",
+    "key_mounts_free": "$(echo "$DISK_KEY_MOUNTS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$DISK_KEY_MOUNTS" | sed 's/"/\\"/g')\"")",
+    "io_latency": "$(echo "$IO_LATENCY" | jq -Rs . 2>/dev/null || echo "\"$(echo "$IO_LATENCY" | sed 's/"/\\"/g')\"")"
+  },
+  "network": {
+    "traffic_summary": "$NET_TRAFFIC_SUMMARY",
+    "interfaces": "$(echo "$NET_DEV_RAW" | jq -Rs . 2>/dev/null || echo "\"$(echo "$NET_DEV_RAW" | sed 's/"/\\"/g')\"")",
+    "connection_summary": "$(echo "$NET_CONN_SUMMARY" | jq -Rs . 2>/dev/null || echo "\"$(echo "$NET_CONN_SUMMARY" | sed 's/"/\\"/g')\"")",
+    "connection_states": "$(echo "$NET_CONN_STATES" | jq -Rs . 2>/dev/null || echo "\"$(echo "$NET_CONN_STATES" | sed 's/"/\\"/g')\"")"
+  },
   "pm2": {
     "status_table": "$(echo "$PM2_LIST_TABLE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$PM2_LIST_TABLE" | sed 's/"/\\"/g')\"")",
-    "status_summary": "$(echo "$PM2_STATUS_SUMMARY" | jq -Rs . 2>/dev/null || echo "\"$(echo "$PM2_STATUS_SUMMARY" | sed 's/"/\\"/g')\"")"
+    "status_summary": "$(echo "$PM2_STATUS_SUMMARY" | jq -Rs . 2>/dev/null || echo "\"$(echo "$PM2_STATUS_SUMMARY" | sed 's/"/\\"/g')\"")",
+    "event_loop_lag": "$EVENT_LOOP_LAG"
   },
   "resources": {
     "disk_usage": "$(echo "$DISK_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$DISK_USAGE" | sed 's/"/\\"/g')\"")",
     "memory_usage": "$(echo "$MEMORY_USAGE" | jq -Rs . 2>/dev/null || echo "\"$(echo "$MEMORY_USAGE" | sed 's/"/\\"/g')\"")"
   },
   "cron": {
-    "status": "$(echo "$CRON_STATUS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$CRON_STATUS" | sed 's/"/\\"/g')\"")"
+    "status": "$(echo "$CRON_STATUS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$CRON_STATUS" | sed 's/"/\\"/g')\"")",
+    "snapshot_last_time": "$SNAPSHOT_LAST_TIME",
+    "snapshot_last_status": "$(echo "$SNAPSHOT_LAST_STATUS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$SNAPSHOT_LAST_STATUS" | sed 's/"/\\"/g')\"")",
+    "snapshot_last_duration": "$SNAPSHOT_LAST_DURATION"
+  },
+  "firebase_db": {
+    "metrics": "$(echo "$FIREBASE_METRICS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$FIREBASE_METRICS" | sed 's/"/\\"/g')\"")"
+  },
+  "netlify_functions": {
+    "metrics": "$(echo "$NETLIFY_METRICS" | jq -Rs . 2>/dev/null || echo "\"$(echo "$NETLIFY_METRICS" | sed 's/"/\\"/g')\"")"
   },
   "critical_checks": {
     "repo_clean": "$(if [ "$GIT_CLEAN" = "clean" ]; then echo "ok"; else echo "FAIL: dirty repo"; fi)",
@@ -266,23 +335,114 @@ MD_OUTPUT=$(cat <<EOF
 
 ---
 
-## Resources
+## CPU
 
-### Disk Usage
+- **Load average:** $LOAD_AVG
+- **CPU steal:** $CPU_STEAL_PCT% (raw: $CPU_STEAL_RAW)
+
+### Top processes by %CPU
 
 \`\`\`
-$DISK_USAGE
+$CPU_TOP
 \`\`\`
 
-### Memory Usage
+---
+
+## Memory
+
+### Usage
 
 \`\`\`
 $MEMORY_USAGE
 \`\`\`
 
+### Detailed (MB)
+
+\`\`\`
+$MEMORY_DETAILED
+\`\`\`
+
+### Swap
+
+\`\`\`
+$SWAP_USAGE
+\`\`\`
+
+### Top processes by RSS
+
+\`\`\`
+$RSS_TOP
+\`\`\`
+
 ---
 
-## PM2 Status
+## Disk
+
+### Usage (root)
+
+\`\`\`
+$DISK_USAGE
+\`\`\`
+
+### Usage (all)
+
+\`\`\`
+$DISK_USAGE_ALL
+\`\`\`
+
+### Inode Usage
+
+\`\`\`
+$DISK_INODE_USAGE
+\`\`\`
+
+### Key Mounts Free Space
+
+\`\`\`
+$DISK_KEY_MOUNTS
+\`\`\`
+
+### I/O Latency (best-effort)
+
+\`\`\`
+$IO_LATENCY
+\`\`\`
+
+---
+
+## Network
+
+### Traffic Summary
+
+\`\`\`
+$NET_TRAFFIC_SUMMARY
+\`\`\`
+
+### Interface Counters
+
+\`\`\`
+$NET_DEV_RAW
+\`\`\`
+
+### Connection Summary
+
+\`\`\`
+$NET_CONN_SUMMARY
+\`\`\`
+
+### Connection States
+
+\`\`\`
+$NET_CONN_STATES
+\`\`\`
+
+---
+
+## PM2 / Node
+
+- **Event loop lag:** $EVENT_LOOP_LAG
+
+### PM2 Status
 
 \`\`\`
 $PM2_LIST_TABLE
@@ -290,10 +450,32 @@ $PM2_LIST_TABLE
 
 ---
 
-## Cron Status
+## Cron / Jobs
+
+- **Last snapshot run:** $SNAPSHOT_LAST_TIME
+- **Last snapshot status:** $SNAPSHOT_LAST_STATUS
+- **Last snapshot duration:** $SNAPSHOT_LAST_DURATION
+
+### Crontab Entries
 
 \`\`\`
 $CRON_STATUS
+\`\`\`
+
+---
+
+## Firebase / DB (best-effort)
+
+\`\`\`
+$FIREBASE_METRICS
+\`\`\`
+
+---
+
+## Netlify Functions (best-effort)
+
+\`\`\`
+$NETLIFY_METRICS
 \`\`\`
 
 ---
@@ -356,11 +538,16 @@ fi
 echo "$JSON_OUTPUT" > "$STATE_DIR/system_snapshot.json"
 echo "$MD_OUTPUT" > "$STATE_DIR/system_snapshot.md"
 
+# Execution duration
+END_EPOCH=$(date +%s)
+RUN_DURATION_SEC=$((END_EPOCH - START_EPOCH))
+RUN_DURATION_TEXT="${RUN_DURATION_SEC}s"
+
 # Log execution
 if [ $SNAPSHOT_TAINTED -eq 1 ]; then
-  echo "[$TIMESTAMP] Snapshot generated with SECURITY WARNINGS (tainted)" >> "$LOG_FILE" 2>&1 || true
+  echo "[$TIMESTAMP] Snapshot generated with SECURITY WARNINGS (tainted) duration=${RUN_DURATION_TEXT}" >> "$LOG_FILE" 2>&1 || true
   exit 1  # Exit with error code to trigger monitoring
 else
-  echo "[$TIMESTAMP] Snapshot generated successfully (clean)" >> "$LOG_FILE" 2>&1 || true
+  echo "[$TIMESTAMP] Snapshot generated successfully (clean) duration=${RUN_DURATION_TEXT}" >> "$LOG_FILE" 2>&1 || true
   exit 0
 fi

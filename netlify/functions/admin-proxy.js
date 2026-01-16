@@ -136,9 +136,14 @@ exports.handler = async (event, context) => {
     // Log start (no secrets)
     console.log(`[admin-proxy] Starting request to VPS: ${sanitizeUrlForLogs(vpsUrl)}`);
 
-    // Create AbortController for 10s timeout
+    // Create AbortController with longer timeout for stability report
+    const timeoutMs =
+      requestData &&
+      (requestData.action === "stability:report" || requestData.action === "snapshot:report")
+        ? 180_000
+        : 10_000;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     let response;
     let elapsedMs;
@@ -168,7 +173,7 @@ exports.handler = async (event, context) => {
           {
             ok: false,
             error: "vps_timeout",
-            message: "VPS did not respond within 10s",
+            message: `VPS did not respond within ${Math.round(timeoutMs / 1000)}s`,
             debugHint: "Check VPS reachability / port / firewall",
             elapsedMs,
             vpsEndpoint: sanitizeUrlForLogs(vpsUrl),

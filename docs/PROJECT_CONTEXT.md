@@ -32,3 +32,16 @@ This file is canonical and must be kept consistent with docs/PROJECT_STATE.md.
 - Never print env values.
 - Never print tokens, keys, cookies, auth headers.
 - Sanitize outputs consistently.
+
+## Project File Access
+### Baseline access (all collaborators)
+- Read access to all files in this repository.
+- No direct edits on production servers; changes flow via PRs to GitHub `main`.
+
+### Elevated access (maintainers/ops)
+- Write access to code and infrastructure files when needed.
+- Production changes require PR review and pull-only deploy flow.
+
+### Restricted access (ops/owners only)
+- Secret-bearing files and configs (e.g., `.env`, credentials, tokens).
+- Deployment and server-only configs when they include sensitive values.

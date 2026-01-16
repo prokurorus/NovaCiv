@@ -99,6 +99,32 @@ cat /root/NovaCiv/_state/system_snapshot.json
 
 ---
 
+## 🧪 Stability Report
+
+### Запуск локально (ПК/VPS)
+
+**Требования:** `OPENAI_API_KEY` в окружении.
+
+```bash
+cd /root/NovaCiv
+node server/ops-stability-report.js
+```
+
+**Артефакты (последние):**
+- `/root/NovaCiv/_state/telemetry_latest.json`
+- `/root/NovaCiv/_state/system_report_latest.md`
+- `/root/NovaCiv/_state/system_report_latest.json`
+
+**Архив:** создаются timestamped копии рядом с latest-файлами.
+
+### Ежедневный cron (VPS)
+
+```bash
+bash /root/NovaCiv/runbooks/stability_report_daily.sh
+```
+
+---
+
 ## 🔧 Troubleshooting
 
 ### PM2 Logs

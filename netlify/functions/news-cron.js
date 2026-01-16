@@ -11,6 +11,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { writeHealthMetrics } = require("../../server/lib/healthMetrics");
 const { formatNewsMessage } = require("../lib/telegramFormat");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -459,24 +460,6 @@ async function markTopicAsPosted(topicId) {
   }
 }
 
-// Запись heartbeat метрик в Firebase
-async function writeHealthMetrics(metrics) {
-  if (!FIREBASE_DB_URL) return;
-  try {
-    const url = `${FIREBASE_DB_URL}/health/news/newsCronLastRun.json`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(metrics),
-    });
-    if (!res.ok) {
-      log("Failed to write health metrics:", res.status);
-    }
-  } catch (e) {
-    log("Error writing health metrics:", e.message || e);
-  }
-}
-
 // ---------- HELPERS FOR INVOCATION TYPE DETECTION ----------
 
 // Безопасное чтение заголовков с учетом разных регистров
@@ -845,6 +828,11 @@ ${text}
       fetchedTopics: topics.length,
       totalSent,
       perLanguage,
+    });
+
+    await writeHealthMetrics("news.cron", {
+      status: "ok",
+      details: { topicsSent: totalSent },
     });
 
     return {

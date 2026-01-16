@@ -35,6 +35,7 @@ const TELEGRAM_NEWS_CHAT_ID_DE = process.env.TELEGRAM_NEWS_CHAT_ID_DE;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { writeHealthMetrics } = require("../../server/lib/healthMetrics");
 
 // Безопасная санитизация ключей Firebase
 function safeKey(value) {
@@ -71,6 +72,13 @@ function log(...args) {
 
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function buildPostText(title, body) {
+  const parts = [];
+  if (title) parts.push(String(title).trim());
+  if (body) parts.push(String(body).trim());
+  return parts.filter(Boolean).join("\n\n");
 }
 
 function getLangConfig(langCode) {
@@ -381,7 +389,14 @@ exports.handler = async (event) => {
       }),
     };
 
-    await writeHealthMetrics(metrics);
+    const totalPosted = Object.values(metrics.postedPerLang).reduce((a, b) => a + b, 0);
+    const langsPosted = Object.entries(metrics.postedPerLang)
+      .filter(([, count]) => count > 0)
+      .map(([lang]) => lang);
+    await writeHealthMetrics("domovoy.autoPost", {
+      status: "ok",
+      details: { posts: totalPosted, langs: langsPosted },
+    });
     return result;
   } catch (err) {
     log("Fatal error:", err);
@@ -409,14 +424,10 @@ exports.handler = async (event) => {
       error: errMsg,
     });
 
-    await writeHealthMetrics(metrics);
-    
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        ok: false,
-        error: errMsg,
-      }),
-    };
+    await writeHealthMetrics("domovoy.autoPost", {
+      status: "error",
+      details: { message: errMsg },
+    });
+    throw err;
   }
 };

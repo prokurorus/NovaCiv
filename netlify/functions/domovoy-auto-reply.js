@@ -26,6 +26,8 @@ const DOMOVOY_NAME_RU = "Домовой NovaCiv";
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { getDb } = require("../../server/lib/firebaseAdmin");
+const { writeHealthMetrics } = require("../../server/lib/healthMetrics");
 
 // Безопасная санитизация ключей Firebase
 function safeKey(value) {
@@ -303,27 +305,24 @@ async function saveReplyComment({ topicId, replyText, lang, replyToId }) {
   }
 }
 
-// Запись heartbeat метрик в Firebase
-async function writeHealthMetrics(metrics) {
-  if (!FIREBASE_DB_URL) return;
-  try {
-    const url = `${FIREBASE_DB_URL}/health/domovoy/autoReplyLastRun.json`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(metrics),
-    });
-    if (!res.ok) {
-      log("Failed to write health metrics:", res.status);
-    }
-  } catch (e) {
-    log("Error writing health metrics:", e.message || e);
-  }
-}
-
 // ---------- handler ----------
 
 exports.handler = async (event) => {
+  console.log("[auto-reply] env check", {
+    hasDbUrl: !!process.env.FIREBASE_DB_URL,
+    hasSA: !!process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+  });
+
+  try {
+    getDb();
+  } catch (err) {
+    await writeHealthMetrics("domovoy.autoReply", {
+      status: "error",
+      details: { message: err?.message || "Firebase init failed" },
+    });
+    throw err;
+  }
+
   const startTime = Date.now();
   const component = "domovoy-auto-reply";
   

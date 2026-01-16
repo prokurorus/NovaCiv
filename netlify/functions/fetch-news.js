@@ -34,6 +34,7 @@ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 // Операторский пульт
 const { writeHeartbeat, writeEvent, writeFirebaseError } = require("../lib/opsPulse");
+const { writeHealthMetrics } = require("../../server/lib/healthMetrics");
 const { RSS_SOURCES } = require("../lib/rssSourcesByLang");
 
 // Максимум кандидатов для сбора (на язык)
@@ -444,24 +445,6 @@ async function saveNewsMeta(lang, meta) {
       op: "write",
     });
     console.error(`Error writing news meta for ${lang}:`, e);
-  }
-}
-
-// Запись heartbeat метрик в Firebase
-async function writeHealthMetrics(metrics) {
-  if (!FIREBASE_DB_URL) return;
-  try {
-    const url = `${FIREBASE_DB_URL}/health/news/fetchNewsLastRun.json`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(metrics),
-    });
-    if (!res.ok) {
-      console.error("Failed to write health metrics:", res.status);
-    }
-  } catch (e) {
-    console.error("Error writing health metrics:", e.message || e);
   }
 }
 
@@ -1171,6 +1154,14 @@ exports.handler = async (event) => {
         preparedDe: results.de.prepared,
         scheduledFor: scheduledFor,
       },
+    });
+
+    const preparedLangs = Object.entries(results)
+      .filter(([, value]) => value && value.prepared)
+      .map(([lang]) => lang);
+    await writeHealthMetrics("news.fetch", {
+      status: "ok",
+      details: { items: totalCreated, langs: preparedLangs },
     });
 
     return {

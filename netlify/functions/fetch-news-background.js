@@ -950,7 +950,16 @@ exports.handler = async (event, context) => {
         }
 
         // 1) Сбор кандидатов за последние 6 часов
-        const sources = RSS_SOURCES[lang] || [];
+        const rawSources = RSS_SOURCES[lang] || [];
+        const seen = new Set();
+        const sources = [];
+        for (const s of rawSources) {
+          if (!s || !s.url) continue;
+          const key = String(s.url).trim().toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          sources.push(s);
+        }
         if (sources.length === 0) {
           console.log(`[fetch-news] No sources for ${lang}`);
           continue;

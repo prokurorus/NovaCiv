@@ -1,2 +1,4 @@
 /*    /index.html   200
 
+
+/.netlify/functions/admin-proxy/*  /.netlify/functions/admin-proxy/:splat  200

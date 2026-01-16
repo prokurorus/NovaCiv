@@ -103,6 +103,24 @@ function truncateWithSuffix(text, remaining) {
   return text.slice(0, remaining - suffix.length) + suffix;
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function maxTimestamp(values) {
+  const numeric = values
+    .map((value) => (typeof value === "number" ? value : null))
+    .filter((value) => Number.isFinite(value));
+  if (!numeric.length) return null;
+  return Math.max(...numeric);
+}
+
+async function fetchDbValue(path) {
+  const db = getDb();
+  const snapshot = await db.ref(path).once("value");
+  return snapshot.val();
+}
+
 function loadPromptFile(filePath, fallbackPath) {
   const primary = filePath ? loadFile(filePath) : null;
   const fallback = fallbackPath ? loadFile(fallbackPath) : null;
@@ -624,7 +642,7 @@ function sendJson(res, statusCode, payload) {
 const server = http.createServer(async (req, res) => {
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Admin-Token");
   
   if (req.method === "OPTIONS") {
@@ -635,12 +653,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   
-  // Support POST /admin/domovoy and POST /admin/direct
+  // Support POST /admin/domovoy, POST /admin/direct, GET /admin/health/*
   const parsedUrl = url.parse(req.url, true);
   const isDomovoy = parsedUrl.pathname === "/admin/domovoy";
   const isDirect = parsedUrl.pathname === "/admin/direct";
+  const isHealthNews = parsedUrl.pathname === "/admin/health/news";
+  const isHealthDomovoy = parsedUrl.pathname === "/admin/health/domovoy";
+  const isHealth = isHealthNews || isHealthDomovoy;
   
-  if (req.method !== "POST" || (!isDomovoy && !isDirect)) {
+  if (!isDomovoy && !isDirect && !isHealth) {
+    sendJson(res, 404, {
+      ok: false,
+      error: "Not Found",
+    });
+    return;
+  }
+  
+  if (isHealth && req.method !== "GET") {
+    sendJson(res, 405, {
+      ok: false,
+      error: "Method Not Allowed",
+    });
+    return;
+  }
+  
+  if (!isHealth && req.method !== "POST") {
     sendJson(res, 404, {
       ok: false,
       error: "Not Found",
@@ -662,6 +699,55 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   
+  if (isHealth) {
+    try {
+      if (isHealthNews) {
+        const fetchMetrics = await fetchDbValue("/health/news/fetchNewsLastRun");
+        const cronMetrics = await fetchDbValue("/health/news/newsCronLastRun");
+        const lastRunTs = maxTimestamp([fetchMetrics?.ts, cronMetrics?.ts]);
+        const lastRunIso = lastRunTs ? new Date(lastRunTs).toISOString() : null;
+
+        sendJson(res, 200, {
+          ok: true,
+          service: "news",
+          ts: nowIso(),
+          lastRun: lastRunIso,
+          details: {
+            fetch: fetchMetrics || null,
+            cron: cronMetrics || null,
+          },
+        });
+        return;
+      }
+
+      if (isHealthDomovoy) {
+        const autoPostMetrics = await fetchDbValue("/health/domovoy/autoPostLastRun");
+        const autoReplyMetrics = await fetchDbValue("/health/domovoy/autoReplyLastRun");
+        const lastRunTs = maxTimestamp([autoPostMetrics?.ts, autoReplyMetrics?.ts]);
+        const lastRunIso = lastRunTs ? new Date(lastRunTs).toISOString() : null;
+
+        sendJson(res, 200, {
+          ok: true,
+          service: "domovoy",
+          ts: nowIso(),
+          lastRun: lastRunIso,
+          details: {
+            autoPost: autoPostMetrics || null,
+            autoReply: autoReplyMetrics || null,
+          },
+        });
+        return;
+      }
+    } catch (e) {
+      sendJson(res, 500, {
+        ok: false,
+        error: "health_fetch_failed",
+        message: e.message || "Failed to read health metrics",
+      });
+      return;
+    }
+  }
+
   // Parse body
   let body = "";
   req.on("data", chunk => { body += chunk.toString(); });

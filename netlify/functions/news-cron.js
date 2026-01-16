@@ -4,7 +4,7 @@
 // Повторные вызовы функции безопасны: темы, помеченные как отправленные,
 // повторно не отправляются.
 
-const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+let FIREBASE_DB_URL;
 const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -546,6 +546,9 @@ exports.handler = async (event) => {
   const startTime = Date.now();
   const runId = `news-cron-${startTime}`;
   const component = "news-cron";
+  const dbUrl =
+    process.env.FIREBASE_DB_URL || process.env.FIREBASE_DATABASE_URL;
+  FIREBASE_DB_URL = dbUrl;
 
   // Записываем начало выполнения
   await writeHeartbeat(component, {
@@ -595,10 +598,10 @@ exports.handler = async (event) => {
 
     // Загружаем topics с scheduledFor в текущем часе
     let topics = [];
-    if (FIREBASE_DB_URL) {
+    if (dbUrl) {
       try {
         // Используем fallback full-scan, так как индекса по scheduledFor может не быть
-        const topicsUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+        const topicsUrl = `${dbUrl}/forum/topics.json`;
         const topicsResp = await fetch(topicsUrl);
         if (topicsResp.ok) {
           const topicsData = await topicsResp.json();
@@ -632,13 +635,12 @@ exports.handler = async (event) => {
     };
 
     // Загружаем состояние для дедупа (по языкам)
-    const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
     const stateByLang = {};
     
     for (const lang of ["ru", "en", "de"]) {
       try {
-        if (FIREBASE_DB_URL) {
-          const stateUrl = `${FIREBASE_DB_URL}/newsMeta/state_${lang}.json`;
+        if (dbUrl) {
+          const stateUrl = `${dbUrl}/newsMeta/state_${lang}.json`;
           const stateResp = await fetch(stateUrl);
           if (stateResp.ok) {
             stateByLang[lang] = await stateResp.json() || {};
@@ -771,9 +773,9 @@ ${text}
             };
 
             // Сохраняем переведённую topic в Firebase
-            if (FIREBASE_DB_URL) {
+            if (dbUrl) {
               try {
-                const saveUrl = `${FIREBASE_DB_URL}/forum/topics.json`;
+                const saveUrl = `${dbUrl}/forum/topics.json`;
                 const saveResp = await fetch(saveUrl, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },

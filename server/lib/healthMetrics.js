@@ -23,6 +23,13 @@ async function writeHealthMetrics(name, payload = {}) {
     return;
   }
 
+  const legacyMirrors = {
+    "news.fetch": "health/news/fetchNewsLastRun",
+    "news.cron": "health/news/newsCronLastRun",
+    "domovoy.autoPost": "health/domovoy/autoPostLastRun",
+    "domovoy.autoReply": "health/domovoy/autoReplyLastRun",
+  };
+
   const status = payload.status === "error" ? "error" : "ok";
   const details = payload.details && typeof payload.details === "object" ? payload.details : {};
 
@@ -35,7 +42,12 @@ async function writeHealthMetrics(name, payload = {}) {
   try {
     const db = getDb();
     const path = `health/${safeKey(name)}`;
-    await db.ref(path).set(data);
+    const writes = [db.ref(path).set(data)];
+    const legacyPath = legacyMirrors[name];
+    if (legacyPath) {
+      writes.push(db.ref(legacyPath).set(data));
+    }
+    await Promise.all(writes);
   } catch (error) {
     console.error(`[health-metrics] Failed to write ${name}:`, error.message);
   }

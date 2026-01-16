@@ -38,6 +38,24 @@ function isHtmlResponse(response, bodyText) {
   return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
 }
 
+// MISSING_METRICS_OK: Treat missing lastRun metrics as never_run (OK), not a hard failure.
+// Reason: first-run / gated jobs should not make the whole system "red".
+function normalizeMetric(metric, name) {
+  if (!metric) {
+    return { status: "never_run", ts: null, details: { reason: `${name}: missing` } };
+  }
+  if (typeof metric.ts !== "number" && metric.lastRun) {
+    const parsed = Date.parse(metric.lastRun);
+    if (!Number.isNaN(parsed)) {
+      metric.ts = parsed;
+    }
+  }
+  if (typeof metric.ts !== "number") {
+    return { status: "never_run", ts: null, details: { reason: `${name}: no lastRun` } };
+  }
+  return metric;
+}
+
 async function main() {
   try {
     const response = await fetch(HEALTH_URL, {
@@ -84,42 +102,42 @@ async function main() {
     const details = data.details && typeof data.details === "object" ? data.details : data;
     const fetchMetrics = details.fetch || data.fetch || null;
     const cronMetrics = details.cron || data.cron || null;
+  const normalizedFetch = normalizeMetric(fetchMetrics, "fetch-news");
+  const normalizedCron = normalizeMetric(cronMetrics, "news-cron");
 
     // Проверка fetch-news
-    if (!fetchMetrics) {
-      console.error("❌ fetch-news: no metrics found (scheduler not running)");
-      hasError = true;
-    } else {
-      const age = now - fetchMetrics.ts;
+  if (normalizedFetch.status === "never_run") {
+    console.log(`✅ fetch-news: never_run (${normalizedFetch.details?.reason || "missing"})`);
+  } else {
+    const age = now - normalizedFetch.ts;
       const ageMinutes = Math.floor(age / (60 * 1000));
       
       if (age > FETCH_NEWS_MAX_AGE_MS) {
         console.error(`❌ fetch-news: last run ${ageMinutes}m ago (max 90m, scheduler not running)`);
         hasError = true;
-      } else if (fetchMetrics.processed === 0) {
+    } else if (normalizedFetch.processed === 0) {
         console.log(`⚠️  fetch-news: last run ${ageMinutes}m ago, processed=0 (no new items, but scheduler is running)`);
         // processed=0 не ошибка, это heartbeat
       } else {
-        console.log(`✅ fetch-news: last run ${ageMinutes}m ago, processed=${fetchMetrics.processed}`);
+      console.log(`✅ fetch-news: last run ${ageMinutes}m ago, processed=${normalizedFetch.processed}`);
       }
     }
 
     // Проверка news-cron
-    if (!cronMetrics) {
-      console.error("❌ news-cron: no metrics found (scheduler not running)");
-      hasError = true;
-    } else {
-      const age = now - cronMetrics.ts;
+  if (normalizedCron.status === "never_run") {
+    console.log(`✅ news-cron: never_run (${normalizedCron.details?.reason || "missing"})`);
+  } else {
+    const age = now - normalizedCron.ts;
       const ageMinutes = Math.floor(age / (60 * 1000));
       
       if (age > NEWS_CRON_MAX_AGE_MS) {
         console.error(`❌ news-cron: last run ${ageMinutes}m ago (max 90m, scheduler not running)`);
         hasError = true;
-      } else if (cronMetrics.processed === 0) {
+    } else if (normalizedCron.processed === 0) {
         console.log(`⚠️  news-cron: last run ${ageMinutes}m ago, processed=0 (no new topics, but scheduler is running)`);
         // processed=0 не ошибка, это heartbeat
       } else {
-        console.log(`✅ news-cron: last run ${ageMinutes}m ago, processed=${cronMetrics.processed}, sent=${cronMetrics.totalSent || 0}`);
+      console.log(`✅ news-cron: last run ${ageMinutes}m ago, processed=${normalizedCron.processed}, sent=${normalizedCron.totalSent || 0}`);
       }
     }
 

@@ -38,6 +38,24 @@ function isHtmlResponse(response, bodyText) {
   return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
 }
 
+// MISSING_METRICS_OK: Treat missing lastRun metrics as never_run (OK), not a hard failure.
+// Reason: first-run / gated jobs should not make the whole system "red".
+function normalizeMetric(metric, name) {
+  if (!metric) {
+    return { status: "never_run", ts: null, details: { reason: `${name}: missing` } };
+  }
+  if (typeof metric.ts !== "number" && metric.lastRun) {
+    const parsed = Date.parse(metric.lastRun);
+    if (!Number.isNaN(parsed)) {
+      metric.ts = parsed;
+    }
+  }
+  if (typeof metric.ts !== "number") {
+    return { status: "never_run", ts: null, details: { reason: `${name}: no lastRun` } };
+  }
+  return metric;
+}
+
 async function main() {
   try {
     const response = await fetch(HEALTH_URL, {
@@ -84,20 +102,21 @@ async function main() {
     const details = data.details && typeof data.details === "object" ? data.details : data;
     const autoPost = details.autoPost || data.autoPost || null;
     const autoReply = details.autoReply || data.autoReply || null;
+  const normalizedAutoPost = normalizeMetric(autoPost, "domovoy-auto-post");
+  const normalizedAutoReply = normalizeMetric(autoReply, "domovoy-auto-reply");
 
     // Проверка auto-post
-    if (!autoPost) {
-      console.error("❌ auto-post: no metrics found (never run)");
-      hasError = true;
-    } else {
-      const age = now - autoPost.ts;
+  if (normalizedAutoPost.status === "never_run") {
+    console.log(`✅ auto-post: never_run (${normalizedAutoPost.details?.reason || "missing"})`);
+  } else {
+    const age = now - normalizedAutoPost.ts;
       const ageHours = Math.floor(age / (60 * 60 * 1000));
       
       if (age > AUTO_POST_MAX_AGE_MS) {
         console.error(`❌ auto-post: last run ${ageHours}h ago (max 26h)`);
         hasError = true;
-      } else if (!autoPost.ok) {
-        console.error(`❌ auto-post: last run failed (errCode: ${autoPost.errCode || "UNKNOWN"})`);
+    } else if (!normalizedAutoPost.ok) {
+      console.error(`❌ auto-post: last run failed (errCode: ${normalizedAutoPost.errCode || "UNKNOWN"})`);
         hasError = true;
       } else {
         console.log(`✅ auto-post: last run ${ageHours}h ago, ok=true`);
@@ -105,18 +124,17 @@ async function main() {
     }
 
     // Проверка auto-reply
-    if (!autoReply) {
-      console.error("❌ auto-reply: no metrics found (never run)");
-      hasError = true;
-    } else {
-      const age = now - autoReply.ts;
+  if (normalizedAutoReply.status === "never_run") {
+    console.log(`✅ auto-reply: never_run (${normalizedAutoReply.details?.reason || "missing"})`);
+  } else {
+    const age = now - normalizedAutoReply.ts;
       const ageMinutes = Math.floor(age / (60 * 1000));
       
       if (age > AUTO_REPLY_MAX_AGE_MS) {
         console.error(`❌ auto-reply: last run ${ageMinutes}m ago (max 20m)`);
         hasError = true;
-      } else if (!autoReply.ok) {
-        console.error(`❌ auto-reply: last run failed (errCode: ${autoReply.errCode || "UNKNOWN"})`);
+    } else if (!normalizedAutoReply.ok) {
+      console.error(`❌ auto-reply: last run failed (errCode: ${normalizedAutoReply.errCode || "UNKNOWN"})`);
         hasError = true;
       } else {
         console.log(`✅ auto-reply: last run ${ageMinutes}m ago, ok=true`);

@@ -20,6 +20,16 @@
    - обновляет `_state/monitoring_state.json`
 5) Ответ возвращается в UI как сообщение "NovaCiv Admin: ...".
 
+## Скачивание артефактов
+
+- UI отправляет `snapshot:download` через `/.netlify/functions/admin-proxy`.
+- Netlify Function добавляет `X-Admin-Token` server-side и возвращает файл как attachment.
+- На VPS в `admin-domovoy-api.js` работает строгий allowlist:
+  - `system_report_latest.md` → `/root/NovaCiv/_state/system_report_latest.md`
+  - `telemetry_latest.json` → `/root/NovaCiv/_state/telemetry_latest.json`
+  - `system_report_latest.json` → `/root/NovaCiv/_state/system_report_latest.json`
+- Произвольные пути/имена запрещены.
+
 ## Как включается cron
 
 Пример (UTC):

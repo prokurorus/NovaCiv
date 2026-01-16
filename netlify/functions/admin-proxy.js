@@ -50,6 +50,9 @@ function jsonResponse(statusCode, payload, extraDebug) {
     headers: {
       "Content-Type": "application/json",
       "X-Domovoy-Origin": "proxy",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
     body: JSON.stringify(body),
   };
@@ -61,6 +64,20 @@ exports.handler = async (event, context) => {
   const startTime = Date.now();
 
   try {
+    // CORS preflight
+    if (event.httpMethod === "OPTIONS") {
+      return {
+        statusCode: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "X-Domovoy-Origin": "proxy",
+        },
+        body: "",
+      };
+    }
+
     // Check method
     if (event.httpMethod !== "POST") {
       return jsonResponse(405, {
@@ -139,8 +156,11 @@ exports.handler = async (event, context) => {
     // Create AbortController with longer timeout for stability report
     const timeoutMs =
       requestData &&
-      (requestData.action === "stability:report" || requestData.action === "snapshot:report")
+      (requestData.action === "stability:report" ||
+        requestData.action === "snapshot:report")
         ? 180_000
+        : requestData.action === "snapshot:download"
+        ? 60_000
         : 10_000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -262,12 +282,56 @@ exports.handler = async (event, context) => {
     };
     const bodyWithDebug = attachProxyDebug(responseData, debugMeta);
 
+    if (requestData && requestData.action === "snapshot:download") {
+      if (!response.ok || bodyWithDebug.ok === false) {
+        return jsonResponse(response.status || 502, bodyWithDebug, debugMeta);
+      }
+
+      const filename =
+        (typeof bodyWithDebug.filename === "string" && bodyWithDebug.filename) || "download";
+      const contentType =
+        (typeof bodyWithDebug.contentType === "string" && bodyWithDebug.contentType) ||
+        "application/octet-stream";
+      const dataBase64 =
+        typeof bodyWithDebug.dataBase64 === "string" ? bodyWithDebug.dataBase64 : "";
+
+      if (!dataBase64) {
+        return jsonResponse(
+          502,
+          {
+            ok: false,
+            error: "download_empty",
+            message: "Upstream returned empty download payload",
+          },
+          debugMeta,
+        );
+      }
+
+      return {
+        statusCode: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          "X-Domovoy-Origin": "proxy",
+        },
+        body: dataBase64,
+        isBase64Encoded: true,
+      };
+    }
+
     // Return VPS response (preserve status code)
     return {
       statusCode: response.status || 200,
       headers: {
         "Content-Type": "application/json",
         "X-Domovoy-Origin": "proxy",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
       },
       body: JSON.stringify(bodyWithDebug),
     };

@@ -96,6 +96,12 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [snapshotDownloads, setSnapshotDownloads] = useState<{
+    report: boolean;
+    telemetry: boolean;
+    metadata: boolean;
+  } | null>(null);
+  const [downloadInProgress, setDownloadInProgress] = useState<string | null>(null);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [conversationHistory, setConversationHistory] = useState<Array<{role: "user" | "assistant", content: string}>>(() => {
     // Load from localStorage on init
@@ -405,16 +411,12 @@ function AdminInner() {
     }
   };
 
-  const requestAdmin = async (
-    requestBody: Record<string, unknown>,
-    options: { timeoutMs?: number } = {},
-  ) => {
+  const getAuthToken = async () => {
     const currentUser = window.netlifyIdentity?.currentUser();
     if (!currentUser) {
       throw new Error("Пользователь не авторизован");
     }
 
-    // Получаем токен: предпочитаем jwt(), иначе token.access_token
     let token: string | null = null;
     if (currentUser.jwt) {
       token = await currentUser.jwt(true);
@@ -425,6 +427,15 @@ function AdminInner() {
     if (!token) {
       throw new Error("Токен не готов, попробуйте перелогиниться");
     }
+
+    return token;
+  };
+
+  const requestAdmin = async (
+    requestBody: Record<string, unknown>,
+    options: { timeoutMs?: number } = {},
+  ) => {
+    const token = await getAuthToken();
 
     const requestUrl = "/.netlify/functions/admin-proxy";
     const controller = new AbortController();
@@ -592,6 +603,7 @@ function AdminInner() {
     setResponse("");
     setDebugInfo(null);
     setPendingMessage("Генерирую отчет...");
+    setSnapshotDownloads(null);
 
     try {
       const data = await requestAdmin(
@@ -617,11 +629,70 @@ function AdminInner() {
       }
 
       setResponse(answerText);
+      const saved = data.saved && typeof data.saved === "object" ? data.saved : {};
+      setSnapshotDownloads({
+        report: Boolean(saved.report),
+        telemetry: Boolean(saved.telemetry),
+        metadata: Boolean(saved.metadata),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {
       setIsSubmitting(false);
       setPendingMessage(null);
+    }
+  };
+
+  const handleDownloadSnapshot = async (name: string) => {
+    setError("");
+    setDownloadInProgress(name);
+
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/.netlify/functions/admin-proxy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "snapshot:download", name }),
+      });
+
+      if (!res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        let message = `Ошибка скачивания (HTTP ${res.status})`;
+        if (contentType.includes("application/json")) {
+          const data = await res.json().catch(() => ({}));
+          const errorMsg = data.message || data.error || "";
+          if (errorMsg) {
+            message = `${errorMsg} (HTTP ${res.status})`;
+          }
+        } else {
+          const text = await res.text().catch(() => "");
+          if (text) {
+            message = `${message}: ${text.slice(0, 200)}`;
+          }
+        }
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const filename = match?.[1] || name;
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+    } finally {
+      setDownloadInProgress(null);
     }
   };
 
@@ -937,6 +1008,52 @@ function AdminInner() {
                   server mode: {debugInfo.mode}
                 </div>
               )}
+            </div>
+          )}
+
+          {snapshotDownloads && !isSubmitting && (
+            <div className={`mt-4 p-4 border rounded-xl ${panelClass}`}>
+              <div className={`text-sm font-semibold mb-3 ${textSecondary}`}>
+                Файлы отчета
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {snapshotDownloads.report && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSnapshot("system_report_latest.md")}
+                    className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-medium transition ${secondaryButtonClass}`}
+                    disabled={downloadInProgress !== null}
+                  >
+                    {downloadInProgress === "system_report_latest.md"
+                      ? "Скачивание..."
+                      : "Скачать отчет (md)"}
+                  </button>
+                )}
+                {snapshotDownloads.telemetry && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSnapshot("telemetry_latest.json")}
+                    className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-medium transition ${secondaryButtonClass}`}
+                    disabled={downloadInProgress !== null}
+                  >
+                    {downloadInProgress === "telemetry_latest.json"
+                      ? "Скачивание..."
+                      : "Скачать telemetry (json)"}
+                  </button>
+                )}
+                {snapshotDownloads.metadata && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadSnapshot("system_report_latest.json")}
+                    className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-xs font-medium transition ${secondaryButtonClass}`}
+                    disabled={downloadInProgress !== null}
+                  >
+                    {downloadInProgress === "system_report_latest.json"
+                      ? "Скачивание..."
+                      : "Скачать metadata (json)"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

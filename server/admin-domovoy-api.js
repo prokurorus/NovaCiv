@@ -30,6 +30,24 @@ const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PROJECT_DIR = process.env.PROJECT_DIR || "/root/NovaCiv";
 const DIRECT_SEED_VERSION = 2;
+const STATE_DIR = path.join(PROJECT_DIR, "_state");
+const SNAPSHOT_DOWNLOAD_ALLOWLIST = {
+  "system_report_latest.md": {
+    filename: "system_report_latest.md",
+    fullPath: path.join(STATE_DIR, "system_report_latest.md"),
+    contentType: "text/markdown; charset=utf-8",
+  },
+  "telemetry_latest.json": {
+    filename: "telemetry_latest.json",
+    fullPath: path.join(STATE_DIR, "telemetry_latest.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+  "system_report_latest.json": {
+    filename: "system_report_latest.json",
+    fullPath: path.join(STATE_DIR, "system_report_latest.json"),
+    contentType: "application/json; charset=utf-8",
+  },
+};
 
 // ---------- Memory cache (static docs + snapshot) ----------
 // Cache is mode-aware: { mode: "ops"|"strategy"|"direct", cache: {...} }
@@ -708,6 +726,45 @@ const server = http.createServer(async (req, res) => {
             model: report.model,
           },
         });
+        return;
+      }
+
+      if (action === "snapshot:download") {
+        const name = (data.name || "").toString().trim();
+        const allowed = SNAPSHOT_DOWNLOAD_ALLOWLIST[name];
+        if (!allowed) {
+          sendJson(res, 400, {
+            ok: false,
+            error: "invalid_name",
+            message: "File name is not allowed",
+          });
+          return;
+        }
+
+        try {
+          if (!fs.existsSync(allowed.fullPath)) {
+            sendJson(res, 404, {
+              ok: false,
+              error: "not_found",
+              message: "File not found",
+            });
+            return;
+          }
+
+          const fileBuffer = fs.readFileSync(allowed.fullPath);
+          sendJson(res, 200, {
+            ok: true,
+            filename: allowed.filename,
+            contentType: allowed.contentType,
+            dataBase64: fileBuffer.toString("base64"),
+          });
+        } catch (e) {
+          sendJson(res, 500, {
+            ok: false,
+            error: "download_failed",
+            message: "Failed to read requested file",
+          });
+        }
         return;
       }
 

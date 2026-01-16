@@ -1,11 +1,25 @@
-// netlify/functions/admin-proxy.js
+// netlify/functions-lite/admin-proxy.js
 //
 // Server-side proxy for Admin Domovoy API
 // Forwards requests to VPS endpoint with X-Admin-Token (never exposed to browser)
 // Requires Netlify Identity admin role (RBAC gate)
 // NO AI processing here - just proxy
-
-const { requireAdmin } = require("./_lib/auth");
+//
+// ============================================================================
+// NETLIFY ENV VAR USAGE (MINIMAL SET):
+// ============================================================================
+// ✅ NETLIFY-SAFE (required for this function):
+//   - ADMIN_DOMOVOY_API_URL: VPS endpoint URL (e.g., "http://vps:3001")
+//   - ADMIN_API_TOKEN: Token for VPS authentication
+//
+// ❌ VPS-ONLY (NOT used by this function, can be removed from Netlify after migration):
+//   - FIREBASE_* (all Firebase vars)
+//   - OPENAI_* (all OpenAI vars)
+//   - TELEGRAM_* (all Telegram vars)
+//   - YOUTUBE_* (all YouTube vars)
+//   - DOMOVOY_CRON_SECRET, DOMOVOY_REPLY_CRON_SECRET, NEWS_CRON_SECRET, OPS_CRON_SECRET
+//   - SENDGRID_API_KEY
+// ============================================================================
 
 // ---------- ENV ----------
 // Upstream base URL: ADMIN_DOMOVOY_API_URL (dedicated env var for admin-proxy)
@@ -15,6 +29,19 @@ const ADMIN_DOMOVOY_API_URL = process.env.ADMIN_DOMOVOY_API_URL;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 
 // ---------- Helpers ----------
+function normalizeBaseUrl(raw) {
+  if (!raw) return null;
+  // Remove trailing slashes
+  let base = raw.replace(/\/+$/, "");
+  // Remove /admin/domovoy suffix if present
+  base = base.replace(/\/admin\/domovoy$/i, "");
+  // Remove /admin suffix if present (but keep the base if it's just /admin)
+  base = base.replace(/\/admin$/i, "");
+  // Remove trailing slashes again after suffix removal
+  base = base.replace(/\/+$/, "");
+  return base;
+}
+
 function buildUpstreamUrl() {
   if (!ADMIN_DOMOVOY_API_URL) {
     return null; // Will trigger error response
@@ -28,6 +55,83 @@ function sanitizeUrlForLogs(url) {
   if (!url) return "";
   // Strip basic auth if present (no secrets in logs)
   return url.replace(/\/\/.*@/, "//***@");
+}
+
+/**
+ * Authorize admin access via Netlify Identity role OR token fallback
+ * @param {Object} event - Netlify function event (contains headers)
+ * @param {Object} context - Netlify function context (contains clientContext.user)
+ * @returns {Object|null} Error response object if unauthorized, null if authorized
+ */
+function authorizeAdmin(event, context) {
+  // First, check Netlify Identity context for admin role
+  const user = context?.clientContext?.user;
+  
+  if (user) {
+    // Check for admin role in various metadata locations
+    const appRoles = user.app_metadata?.roles || [];
+    const userRoles = user.user_metadata?.roles || [];
+    const appRole = user.app_metadata?.role; // singular string fallback
+    
+    const hasAdminRole = 
+      (Array.isArray(appRoles) && appRoles.includes("admin")) ||
+      (Array.isArray(userRoles) && userRoles.includes("admin")) ||
+      (typeof appRole === "string" && appRole === "admin");
+    
+    if (hasAdminRole) {
+      return null; // Authorized via Identity role
+    }
+  }
+  
+  // Fallback to token-based authentication
+  const headers = event.headers || {};
+  
+  // Try x-admin-token header first (preferred)
+  let token = headers["x-admin-token"] || headers["X-Admin-Token"];
+  
+  // Fallback to Authorization: Bearer <token>
+  if (!token) {
+    const authHeader = headers["authorization"] || headers["Authorization"] || "";
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch) {
+      token = bearerMatch[1];
+    }
+  }
+  
+  // Check if token is provided
+  if (!token) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "forbidden",
+      message: "Access denied",
+      debug: {
+        origin: "admin-proxy",
+      },
+    });
+  }
+  
+  // Compare with ADMIN_API_TOKEN
+  const expectedToken = process.env.ADMIN_API_TOKEN;
+  if (!expectedToken) {
+    return jsonResponse(500, {
+      ok: false,
+      error: "server_error",
+      message: "ADMIN_API_TOKEN is not configured",
+    });
+  }
+  
+  if (token !== expectedToken) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "forbidden",
+      message: "Access denied",
+      debug: {
+        origin: "admin-proxy",
+      },
+    });
+  }
+  
+  return null; // Authorized via token
 }
 
 function attachProxyDebug(payload, extraDebug) {
@@ -50,9 +154,6 @@ function jsonResponse(statusCode, payload, extraDebug) {
     headers: {
       "Content-Type": "application/json",
       "X-Domovoy-Origin": "proxy",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
     body: JSON.stringify(body),
   };
@@ -64,20 +165,6 @@ exports.handler = async (event, context) => {
   const startTime = Date.now();
 
   try {
-    // CORS preflight
-    if (event.httpMethod === "OPTIONS") {
-      return {
-        statusCode: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          "X-Domovoy-Origin": "proxy",
-        },
-        body: "",
-      };
-    }
-
     // Check method
     if (event.httpMethod !== "POST") {
       return jsonResponse(405, {
@@ -86,13 +173,14 @@ exports.handler = async (event, context) => {
       });
     }
 
-    // Check admin role (RBAC gate)
-    const authError = requireAdmin(context);
+    // Check admin authentication (Identity role OR token fallback)
+    const authError = authorizeAdmin(event, context);
     if (authError) {
       return authError;
     }
 
     // Check ADMIN_DOMOVOY_API_URL is configured (required, no fallback)
+    // This check happens before mode validation, so we can build URLs correctly
     if (!ADMIN_DOMOVOY_API_URL) {
       return jsonResponse(500, {
         ok: false,
@@ -137,10 +225,16 @@ exports.handler = async (event, context) => {
       );
     }
 
-    // Forward to VPS endpoint
-    const vpsUrl = buildUpstreamUrl();
-    if (!vpsUrl) {
-      // This should not happen if ADMIN_DOMOVOY_API_URL check passed, but safety check
+    // Validate and set mode (default to "direct" if missing or invalid)
+    const modeRaw = requestData.mode;
+    const validModes = ["ops", "strategy", "direct"];
+    const mode = validModes.includes(modeRaw) ? modeRaw : "direct";
+    requestData.mode = mode;
+
+    // Build upstream URL based on mode
+    // For "direct" mode: use /admin/direct, otherwise use /admin/domovoy
+    const base = normalizeBaseUrl(ADMIN_DOMOVOY_API_URL);
+    if (!base) {
       return jsonResponse(500, {
         ok: false,
         error: "ADMIN_DOMOVOY_API_URL is not set",
@@ -149,21 +243,15 @@ exports.handler = async (event, context) => {
         },
       });
     }
+    const endpoint = mode === "direct" ? "/admin/direct" : "/admin/domovoy";
+    const vpsUrl = `${base}${endpoint}`;
 
     // Log start (no secrets)
     console.log(`[admin-proxy] Starting request to VPS: ${sanitizeUrlForLogs(vpsUrl)}`);
 
-    // Create AbortController with longer timeout for stability report
-    const timeoutMs =
-      requestData &&
-      (requestData.action === "stability:report" ||
-        requestData.action === "snapshot:report")
-        ? 180_000
-        : requestData.action === "snapshot:download"
-        ? 60_000
-        : 10_000;
+    // Create AbortController for 10s timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort(), 25_000);
 
     let response;
     let elapsedMs;
@@ -193,7 +281,7 @@ exports.handler = async (event, context) => {
           {
             ok: false,
             error: "vps_timeout",
-            message: `VPS did not respond within ${Math.round(timeoutMs / 1000)}s`,
+            message: "VPS did not respond within 25s",
             debugHint: "Check VPS reachability / port / firewall",
             elapsedMs,
             vpsEndpoint: sanitizeUrlForLogs(vpsUrl),
@@ -249,30 +337,6 @@ exports.handler = async (event, context) => {
       throw e; // Re-throw to be caught by outer catch
     }
 
-    if (requestData && requestData.action === "snapshot:download") {
-      const contentType = response.headers.get("content-type") || "application/octet-stream";
-      const contentDisposition =
-        response.headers.get("content-disposition") ||
-        `attachment; filename="${(requestData.name || "download").toString().trim()}"`;
-      const bodyBuffer = Buffer.from(await response.arrayBuffer());
-
-      return {
-        statusCode: response.status || 502,
-        headers: {
-          "Content-Type": contentType,
-          "Content-Disposition": contentDisposition,
-          "Cache-Control": "no-store",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-          "Access-Control-Expose-Headers": "Content-Disposition",
-          "X-Domovoy-Origin": "proxy",
-        },
-        body: bodyBuffer.toString("base64"),
-        isBase64Encoded: true,
-      };
-    }
-
     // Get response text
     const responseText = await response.text();
 
@@ -312,9 +376,6 @@ exports.handler = async (event, context) => {
       headers: {
         "Content-Type": "application/json",
         "X-Domovoy-Origin": "proxy",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
       },
       body: JSON.stringify(bodyWithDebug),
     };
@@ -337,7 +398,7 @@ exports.handler = async (event, context) => {
         where: "admin-proxy",
         stack: trimmedStack,
         upstreamStatus: null,
-        upstreamUrl: buildUpstreamUrl(), // Full URL including /admin/domovoy path
+        upstreamUrl: null, // Cannot build URL in error case
       },
     );
   }

@@ -70,6 +70,39 @@ function log(...args) {
   console.log("[domovoy-auto-post]", ...args);
 }
 
+
+// Отправка в Telegram (локальный helper, чтобы не падать из-за undefined)
+async function sendToTelegram(chatId, message) {
+  if (!TELEGRAM_BOT_TOKEN) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
+  if (!chatId) {
+    return { ok: false, skipped: true, reason: "chatId not configured" };
+  }
+
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const body = {
+    chat_id: chatId,
+    text: message,
+    parse_mode: "HTML",
+    // Для домового обычно чище без превью
+    disable_web_page_preview: true,
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = await resp.json();
+  if (!data.ok) {
+    log("Telegram error:", data);
+  }
+  return data;
+}
+
+
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -389,13 +422,13 @@ exports.handler = async (event) => {
       }),
     };
 
-    const totalPosted = Object.values(metrics.postedPerLang).reduce((a, b) => a + b, 0);
+  const totalPostedForHealth = Object.values(metrics.postedPerLang).reduce((a, b) => a + b, 0);
     const langsPosted = Object.entries(metrics.postedPerLang)
       .filter(([, count]) => count > 0)
       .map(([lang]) => lang);
     await writeHealthMetrics("domovoy.autoPost", {
       status: "ok",
-      details: { posts: totalPosted, langs: langsPosted },
+      details: { posts: totalPostedForHealth, langs: langsPosted },
     });
     return result;
   } catch (err) {

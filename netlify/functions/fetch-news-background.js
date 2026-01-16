@@ -342,17 +342,17 @@ function isJunkItem(item, publishedSources, publishedTitles) {
     return { isJunk: true, reason: "missing title or url" };
   }
 
-  // title < 35 символов
-  if (item.title.length < 35) {
+  // title < 22 символа
+  if (item.title.length < 22) {
     return { isJunk: true, reason: "title too short" };
   }
 
-  // Источник уже публиковался на этом языке за 24 часа
+  // Источник уже публиковался на этом языке за 12 часов
   const sourceId = item.sourceId || safeKey(item.sourceName || "");
   const now = Date.now();
-  const cutoff24h = now - 24 * 60 * 60 * 1000;
+  const cutoff12h = now - 12 * 60 * 60 * 1000;
   
-  if (publishedSources[sourceId] && publishedSources[sourceId] > cutoff24h) {
+  if (publishedSources[sourceId] && publishedSources[sourceId] > cutoff12h) {
     return { isJunk: true, reason: "source published recently" };
   }
 
@@ -1060,20 +1060,8 @@ exports.handler = async (event, context) => {
         const analyzed = [];
         for (const { item, score } of top5) {
           try {
-            // Если источник не EN - переводим заголовок и excerpt в EN для анализа
-            let itemForAnalysis = item;
-            if (item.sourceLang !== "en") {
-              const titleEn = await translateText(item.title || "", "en");
-              const descEn = await translateText(item.description || "", "en");
-              itemForAnalysis = {
-                ...item,
-                title: typeof titleEn === "string" ? titleEn : item.title,
-                description: typeof descEn === "string" ? descEn : item.description,
-              };
-            }
-
             // Анализ на EN
-            const analyticEn = await analyzeNewsItemEn(itemForAnalysis);
+            const analyticEn = await analyzeNewsItemEn(item);
             
             // Проверяем валидность
             if (analyticEn && typeof analyticEn === "object" && 

@@ -9,7 +9,7 @@
 // NETLIFY ENV VAR USAGE (MINIMAL SET):
 // ============================================================================
 // ✅ NETLIFY-SAFE (required for this function):
-//   - ADMIN_DOMOVOY_API_URL: VPS endpoint URL (e.g., "http://vps:3001")
+//   - ADMIN_DOMOVOY_API_URL: VPS endpoint URL (e.g., "http://vps")
 //   - ADMIN_API_TOKEN: Token for VPS authentication
 //
 // ❌ VPS-ONLY (NOT used by this function, can be removed from Netlify after migration):
@@ -303,7 +303,7 @@ exports.handler = async (event, context) => {
               ok: false,
               error: "vps_unreachable",
               message: "Cannot reach VPS endpoint",
-              debugHint: "Port 3001 blocked or wrong URL",
+              debugHint: "Port blocked or wrong URL",
               elapsedMs,
               vpsEndpoint: sanitizeUrlForLogs(vpsUrl),
               code: errorCode || "unknown",
@@ -514,7 +514,7 @@ exports.handler = async (event, context) => {
             ok: false,
             error: "vps_unreachable",
             message: "Cannot reach VPS endpoint",
-            debugHint: "Port 3001 blocked or wrong URL",
+            debugHint: "Port blocked or wrong URL",
             elapsedMs,
             vpsEndpoint: sanitizeUrlForLogs(vpsUrl),
             code: errorCode || "unknown",

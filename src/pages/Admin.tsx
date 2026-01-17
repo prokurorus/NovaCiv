@@ -87,7 +87,6 @@ declare global {
     };
     __ncIdentityInited?: boolean;
     __ncIdentityHandlersAttached?: boolean;
-    __ncIdentityModalOpen?: boolean;
   }
 }
 
@@ -187,7 +186,6 @@ function AdminInner() {
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
-  const identityObserverRef = useRef<MutationObserver | null>(null);
   const stillLoadingRef = useRef(true);
   const isDark = theme === "dark";
   const threadLabel = debugInfo?.threadId ?? "—";
@@ -367,27 +365,9 @@ function AdminInner() {
     const cleanup = () => {
       timersRef.current.forEach(timer => clearTimeout(timer));
       timersRef.current = [];
-      if (identityObserverRef.current) {
-        identityObserverRef.current.disconnect();
-        identityObserverRef.current = null;
-      }
       if (scriptLoadTarget && scriptLoadHandler) {
         scriptLoadTarget.removeEventListener("load", scriptLoadHandler);
       }
-    };
-
-    const getIdentityElements = () => {
-      const elements = new Set<HTMLElement>();
-      document
-        .querySelectorAll<HTMLElement>(".netlify-identity-widget")
-        .forEach((el) => elements.add(el));
-      document
-        .querySelectorAll<HTMLElement>(".netlify-identity-modal")
-        .forEach((el) => elements.add(el));
-      document
-        .querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget")
-        .forEach((el) => elements.add(el));
-      return Array.from(elements);
     };
 
     const dedupeIdentityIframes = () => {
@@ -403,26 +383,25 @@ function AdminInner() {
       });
     };
 
-    const setIdentityPointerEvents = (value: "auto" | "none") => {
-      getIdentityElements().forEach((el) => {
-        el.style.pointerEvents = value;
+    const forceIdentityPointerEventsOpen = () => {
+      const modalElements = document.querySelectorAll<HTMLElement>(".netlify-identity-modal");
+      const iframeElements = document.querySelectorAll<HTMLElement>(
+        "iframe#netlify-identity-widget",
+      );
+      modalElements.forEach((el) => {
+        el.style.setProperty("pointer-events", "auto", "important");
+      });
+      iframeElements.forEach((el) => {
+        el.style.setProperty("pointer-events", "auto", "important");
       });
     };
 
-    const syncIdentityIframeState = (isOpen: boolean) => {
-      dedupeIdentityIframes();
-      setIdentityPointerEvents(isOpen ? "auto" : "none");
-      updateIdentityDiagnostics();
-    };
-
-    const ensureIdentityObserver = () => {
-      if (identityObserverRef.current || typeof MutationObserver === "undefined") return;
-      identityObserverRef.current = new MutationObserver(() => {
-        syncIdentityIframeState(Boolean(window.__ncIdentityModalOpen));
-      });
-      identityObserverRef.current.observe(document.body, {
-        childList: true,
-        subtree: true,
+    const forceIdentityIframePointerEventsClosed = () => {
+      const iframeElements = document.querySelectorAll<HTMLElement>(
+        "iframe#netlify-identity-widget",
+      );
+      iframeElements.forEach((el) => {
+        el.style.setProperty("pointer-events", "none", "important");
       });
     };
 
@@ -431,13 +410,14 @@ function AdminInner() {
       window.__ncIdentityHandlersAttached = true;
       window.netlifyIdentity.on("open", () => {
         setLastIdentityEvent("open");
-        window.__ncIdentityModalOpen = true;
-        syncIdentityIframeState(true);
+        dedupeIdentityIframes();
+        forceIdentityPointerEventsOpen();
+        updateIdentityDiagnostics();
       });
       window.netlifyIdentity.on("close", () => {
         setLastIdentityEvent("close");
-        window.__ncIdentityModalOpen = false;
-        syncIdentityIframeState(false);
+        forceIdentityIframePointerEventsClosed();
+        updateIdentityDiagnostics();
       });
     };
 
@@ -445,12 +425,7 @@ function AdminInner() {
       if (!window.netlifyIdentity || initCalledRef.current) return;
 
       initCalledRef.current = true;
-      ensureIdentityObserver();
       attachGlobalIdentityHandlers();
-      if (window.__ncIdentityModalOpen === undefined) {
-        window.__ncIdentityModalOpen = false;
-      }
-      syncIdentityIframeState(Boolean(window.__ncIdentityModalOpen));
 
       // 1) Регистрируем обработчики ПЕРВЫМИ, до вызова init()
       window.netlifyIdentity.on("init", (user) => {
@@ -496,15 +471,6 @@ function AdminInner() {
         window.__ncIdentityInited = true;
         window.netlifyIdentity.init();
       }
-
-      // Страховка: после init сразу выключаем клики по iframe
-      const postInitSync = setTimeout(() => {
-        syncIdentityIframeState(false);
-      }, 0);
-      const postInitSyncDelayed = setTimeout(() => {
-        syncIdentityIframeState(false);
-      }, 200);
-      timersRef.current.push(postInitSync, postInitSyncDelayed);
 
       // 3) Детерминированный fallback через 700ms
       const fallbackTimer = setTimeout(() => {

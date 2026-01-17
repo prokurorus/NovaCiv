@@ -147,8 +147,6 @@ iframe#netlify-identity-widget {
   z-index: 2147483647 !important;
 }
 
-.netlify-identity-widget,
-.netlify-identity-modal,
 .netlify-identity-widget iframe,
 iframe#netlify-identity-widget {
   pointer-events: none;

@@ -95,8 +95,10 @@ declare global {
   }
 }
 
-const API_BASE =
-  import.meta.env.VITE_ADMIN_API_BASE || "https://admin-api.novaciv.space";
+const isVpsAdminHost = window.location.hostname === "admin.novaciv.space";
+const API_BASE = isVpsAdminHost
+  ? "/api"
+  : import.meta.env.VITE_ADMIN_API_BASE || "https://admin-api.novaciv.space";
 
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
@@ -212,6 +214,7 @@ function AdminInner() {
 
   // Сброс входа: только через явную кнопку
   const performLogout = () => {
+    if (isVpsAdminHost) return;
     window.netlifyIdentity?.logout();
   };
 
@@ -265,6 +268,12 @@ function AdminInner() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (isVpsAdminHost) {
+      setUser({ id: "server-protected", email: "server-protected" });
+      setHasAdminRole(true);
+      setIsLoading(false);
+      return;
+    }
     if (!window.netlifyIdentity) {
       setIsLoading(false);
       return;
@@ -311,6 +320,7 @@ function AdminInner() {
   }, []);
 
   const handleOpenLogin = () => {
+    if (isVpsAdminHost) return;
     if (!window.netlifyIdentity) {
       setError("Netlify Identity недоступен. Обновите страницу.");
       return;
@@ -416,7 +426,7 @@ function AdminInner() {
     requestBody: Record<string, unknown>,
     options: { timeoutMs?: number } = {},
   ) => {
-    const token = await getAuthToken();
+    const token = isVpsAdminHost ? null : await getAuthToken();
 
     const isDirectRequest = requestBody.mode === "direct";
     const requestUrl = `${API_BASE}/admin/${isDirectRequest ? "direct" : "domovoy"}`;
@@ -432,7 +442,7 @@ function AdminInner() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
@@ -482,13 +492,13 @@ function AdminInner() {
   };
 
   const requestAdminResult = async (jobId: string) => {
-    const token = await getAuthToken();
+    const token = isVpsAdminHost ? null : await getAuthToken();
     const requestUrl = `${API_BASE}/admin/result/${encodeURIComponent(jobId)}`;
 
     const res = await fetch(requestUrl, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
 
@@ -667,12 +677,12 @@ function AdminInner() {
     setDownloadInProgress(name);
 
     try {
-      const token = await getAuthToken();
+      const token = isVpsAdminHost ? null : await getAuthToken();
       const res = await fetch(`${API_BASE}/admin/domovoy`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ action: "snapshot:download", name }),
       });
@@ -764,29 +774,35 @@ function AdminInner() {
               <h1 className={`text-2xl font-semibold ${textPrimary}`}>
                 Админ-панель
               </h1>
-              <p className={textSecondary}>
-                Необходима авторизация через Netlify Identity
-              </p>
+              {!isVpsAdminHost && (
+                <p className={textSecondary}>
+                  Необходима авторизация через Netlify Identity
+                </p>
+              )}
               {error && (
                 <div className={`px-4 py-3 rounded-xl text-sm ${isDark ? "bg-red-950 border border-red-900 text-red-200" : "bg-red-50 border border-red-200 text-red-700"}`}>
                   {error}
                 </div>
               )}
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={handleOpenLogin}
-                  className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
-                >
-                  Войти (Email)
-                </button>
-                <button
-                  onClick={performLogout}
-                  className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
-                >
-                  Сбросить вход
-                </button>
-              </div>
-              {identityStatusLine}
+              {!isVpsAdminHost && (
+                <>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={handleOpenLogin}
+                      className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
+                    >
+                      Войти (Email)
+                    </button>
+                    <button
+                      onClick={performLogout}
+                      className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
+                    >
+                      Сбросить вход
+                    </button>
+                  </div>
+                  {identityStatusLine}
+                </>
+              )}
             </div>
           </div>
         </main>
@@ -856,14 +872,20 @@ function AdminInner() {
                 Вопросы к OpenAI на основе PROJECT_CONTEXT.md
               </p>
             </div>
-            <button
-              onClick={performLogout}
-              className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
-            >
-              Сбросить вход ({user.email})
-            </button>
+            {!isVpsAdminHost ? (
+              <button
+                onClick={performLogout}
+                className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
+              >
+                Сбросить вход ({user.email})
+              </button>
+            ) : (
+              <div className={`text-xs font-semibold ${textMuted}`}>
+                User: server-protected
+              </div>
+            )}
           </div>
-          {identityStatusLine}
+          {!isVpsAdminHost && identityStatusLine}
 
           {/* Chat History */}
           {conversationHistory.length > 0 && (

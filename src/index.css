@@ -139,15 +139,3 @@ h2 {
   animation: chat-fade-in-up 0.18s ease-out;
 }
 
-/* ===== Netlify Identity Widget ===== */
-.netlify-identity-widget,
-.netlify-identity-modal,
-.netlify-identity-widget iframe,
-iframe#netlify-identity-widget {
-  z-index: 2147483647 !important;
-}
-
-.netlify-identity-widget iframe,
-iframe#netlify-identity-widget {
-  pointer-events: none;
-}

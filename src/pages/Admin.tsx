@@ -88,6 +88,8 @@ declare global {
   }
 }
 
+const API_BASE = "http://77.42.36.198:3001";
+
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -486,7 +488,8 @@ function AdminInner() {
   ) => {
     const token = await getAuthToken();
 
-    const requestUrl = "/.netlify/functions/admin-proxy";
+    const isDirectRequest = requestBody.mode === "direct";
+    const requestUrl = `${API_BASE}/admin/${isDirectRequest ? "direct" : "domovoy"}`;
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs;
     const timeoutId = timeoutMs
@@ -499,7 +502,7 @@ function AdminInner() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          "X-Admin-Token": token,
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
@@ -554,12 +557,12 @@ function AdminInner() {
 
   const requestAdminResult = async (jobId: string) => {
     const token = await getAuthToken();
-    const requestUrl = `/.netlify/functions/admin-proxy/admin/result/${encodeURIComponent(jobId)}`;
+    const requestUrl = `${API_BASE}/admin/result/${encodeURIComponent(jobId)}`;
 
     const res = await fetch(requestUrl, {
       method: "GET",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "X-Admin-Token": token,
       },
     });
 
@@ -739,11 +742,11 @@ function AdminInner() {
 
     try {
       const token = await getAuthToken();
-      const res = await fetch("/.netlify/functions/admin-proxy", {
+      const res = await fetch(`${API_BASE}/admin/domovoy`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          "X-Admin-Token": token,
         },
         body: JSON.stringify({ action: "snapshot:download", name }),
       });

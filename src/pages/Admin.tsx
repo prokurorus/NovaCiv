@@ -224,6 +224,58 @@ function AdminInner() {
   const inputClass = isDark
     ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
     : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
+  const getIdentityIframeSrc = (iframe: HTMLIFrameElement) => {
+    return (iframe.getAttribute("src") || "").trim().toLowerCase();
+  };
+
+  const isBlankIdentityIframe = (iframe: HTMLIFrameElement) => {
+    const src = getIdentityIframeSrc(iframe);
+    return !src || src === "about:blank";
+  };
+
+  const isIdentityIframeVisible = (iframe: HTMLIFrameElement) => {
+    const rect = iframe.getBoundingClientRect();
+    const display = getComputedStyle(iframe).display;
+    return rect.width > 50 && rect.height > 50 && display !== "none";
+  };
+
+  const findActiveIdentityIframe = (iframes: HTMLIFrameElement[]) => {
+    const candidates = iframes.filter(
+      (iframe) => !isBlankIdentityIframe(iframe) && isIdentityIframeVisible(iframe),
+    );
+    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
+  };
+
+  const lockIdentityOverlays = () => {
+    if (typeof document === "undefined") return null;
+    const iframes = Array.from(
+      document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
+    );
+
+    iframes.forEach((iframe) => {
+      iframe.style.pointerEvents = "none";
+    });
+
+    const blankIframes = iframes.filter((iframe) => isBlankIdentityIframe(iframe));
+    blankIframes.forEach((iframe) => iframe.remove());
+
+    const remaining = iframes.filter(
+      (iframe) => !isBlankIdentityIframe(iframe) && document.contains(iframe),
+    );
+    const active = findActiveIdentityIframe(remaining);
+
+    if (remaining.length > 1) {
+      const keep = active || remaining[remaining.length - 1];
+      remaining.forEach((iframe) => {
+        if (iframe !== keep) {
+          iframe.remove();
+        }
+      });
+    }
+
+    return active;
+  };
+
   const collectIdentityDiagnostics = () => {
     if (typeof window === "undefined" || typeof document === "undefined") {
       return {
@@ -263,6 +315,7 @@ function AdminInner() {
   };
   const updateIdentityDiagnostics = () => {
     if (!showIdentityDebug) return;
+    lockIdentityOverlays();
     setIdentityDiagnostics(collectIdentityDiagnostics());
   };
   const themeToggle = (
@@ -396,53 +449,16 @@ function AdminInner() {
       }
     };
 
-    const dedupeIdentityIframes = () => {
-      const iframes = Array.from(
-        document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
-      );
-      if (iframes.length <= 1) return;
-      const keep = iframes[iframes.length - 1];
-      iframes.forEach((iframe) => {
-        if (iframe !== keep) {
-          iframe.remove();
-        }
-      });
-    };
-
-    const forceIdentityPointerEventsOpen = () => {
-      const modalElements = document.querySelectorAll<HTMLElement>(".netlify-identity-modal");
-      const iframeElements = document.querySelectorAll<HTMLElement>(
-        "iframe#netlify-identity-widget",
-      );
-      modalElements.forEach((el) => {
-        el.style.setProperty("pointer-events", "auto", "important");
-      });
-      iframeElements.forEach((el) => {
-        el.style.setProperty("pointer-events", "auto", "important");
-      });
-    };
-
-    const forceIdentityIframePointerEventsClosed = () => {
-      const iframeElements = document.querySelectorAll<HTMLElement>(
-        "iframe#netlify-identity-widget",
-      );
-      iframeElements.forEach((el) => {
-        el.style.setProperty("pointer-events", "none", "important");
-      });
-    };
-
     const attachGlobalIdentityHandlers = () => {
       if (!window.netlifyIdentity || window.__ncIdentityHandlersAttached) return;
       window.__ncIdentityHandlersAttached = true;
       window.netlifyIdentity.on("open", () => {
         setLastIdentityEvent("open");
-        dedupeIdentityIframes();
-        forceIdentityPointerEventsOpen();
         updateIdentityDiagnostics();
       });
       window.netlifyIdentity.on("close", () => {
         setLastIdentityEvent("close");
-        forceIdentityIframePointerEventsClosed();
+        lockIdentityOverlays();
         updateIdentityDiagnostics();
       });
     };
@@ -465,8 +481,6 @@ function AdminInner() {
           checkRoleWithRetry(user);
         } else {
           setHasAdminRole(false);
-          // Если пользователь не залогинен, открываем модал
-          window.netlifyIdentity?.open();
         }
       });
 
@@ -496,6 +510,7 @@ function AdminInner() {
       if (!window.__ncIdentityInited) {
         window.__ncIdentityInited = true;
         window.netlifyIdentity.init();
+        lockIdentityOverlays();
       }
 
       // 3) Детерминированный fallback через 700ms
@@ -505,9 +520,7 @@ function AdminInner() {
           setUser(u);
           setIsLoading(false);
           stillLoadingRef.current = false;
-          if (!u) {
-            window.netlifyIdentity?.open();
-          } else {
+          if (u) {
             checkRoleWithRetry(u);
           }
         }
@@ -579,7 +592,34 @@ function AdminInner() {
         window.__ncIdentityInited = true;
         window.netlifyIdentity.init();
       }
+      lockIdentityOverlays();
       window.netlifyIdentity.open();
+      const maxAttempts = 10;
+      const retryDelay = 150;
+      let attempts = 0;
+      const waitForActive = () => {
+        attempts += 1;
+        const iframes = Array.from(
+          document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
+        );
+        const active = findActiveIdentityIframe(iframes);
+        if (active) {
+          iframes.forEach((iframe) => {
+            iframe.style.pointerEvents = "none";
+          });
+          active.style.pointerEvents = "auto";
+          updateIdentityDiagnostics();
+          return;
+        }
+        if (attempts < maxAttempts) {
+          const timer = setTimeout(waitForActive, retryDelay);
+          timersRef.current.push(timer);
+        } else {
+          updateIdentityDiagnostics();
+        }
+      };
+      const timer = setTimeout(waitForActive, retryDelay);
+      timersRef.current.push(timer);
       return;
     }
     if (process.env.NODE_ENV === "development") {
@@ -637,32 +677,7 @@ function AdminInner() {
   };
 
   const handleProbeOpenLogin = () => {
-    if (!window.netlifyIdentity) {
-      setError("Netlify Identity не загружен. Проверьте подключение скрипта.");
-      return;
-    }
-    if (window.netlifyIdentity.init) {
-      try {
-        window.netlifyIdentity.init();
-      } catch {
-        // ignore init errors in debug flow
-      }
-    }
-    window.netlifyIdentity.open();
-    const timer = setTimeout(() => {
-      const modalElements = document.querySelectorAll<HTMLElement>(".netlify-identity-modal");
-      const iframeElements = document.querySelectorAll<HTMLElement>(
-        "iframe#netlify-identity-widget",
-      );
-      modalElements.forEach((el) => {
-        el.style.pointerEvents = "auto";
-      });
-      iframeElements.forEach((el) => {
-        el.style.pointerEvents = "auto";
-      });
-      updateIdentityDiagnostics();
-    }, 200);
-    timersRef.current.push(timer);
+    handleOpenLogin();
   };
 
   const handleClearHistory = () => {

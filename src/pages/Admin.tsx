@@ -128,6 +128,21 @@ function AdminInner() {
     pointerEventsCurrent: [],
   }));
   const [showIdentityDebug, setShowIdentityDebug] = useState(false);
+  const [showClickProbe, setShowClickProbe] = useState(false);
+  const [clickProbeInfo, setClickProbeInfo] = useState<{
+    center: { x: number; y: number };
+    target: {
+      tagName: string;
+      id: string;
+      className: string;
+      zIndex: string;
+      pointerEvents: string;
+      width: number;
+      height: number;
+    } | null;
+    counts: { iframe: number; modal: number; widget: number };
+    timestamp: string;
+  } | null>(null);
   const [snapshotDownloads, setSnapshotDownloads] = useState<{
     report: boolean;
     telemetry: boolean;
@@ -236,6 +251,16 @@ function AdminInner() {
       pointerEventsCurrent: elements.map((el) => getComputedStyle(el).pointerEvents),
     };
   };
+  const collectIdentityCounts = () => {
+    if (typeof document === "undefined") {
+      return { iframe: 0, modal: 0, widget: 0 };
+    }
+    return {
+      iframe: document.querySelectorAll("iframe#netlify-identity-widget").length,
+      modal: document.querySelectorAll(".netlify-identity-modal").length,
+      widget: document.querySelectorAll(".netlify-identity-widget").length,
+    };
+  };
   const updateIdentityDiagnostics = () => {
     if (!showIdentityDebug) return;
     setIdentityDiagnostics(collectIdentityDiagnostics());
@@ -328,10 +353,11 @@ function AdminInner() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const debugParam = new URL(window.location.href).searchParams.get("debug") === "1";
     const shouldShowDebug =
-      import.meta.env.DEV ||
-      new URL(window.location.href).searchParams.get("debug") === "1";
+      import.meta.env.DEV || debugParam;
     setShowIdentityDebug(shouldShowDebug);
+    setShowClickProbe(debugParam);
   }, []);
 
   useEffect(() => {
@@ -562,6 +588,81 @@ function AdminInner() {
     setError(
       "Identity widget is still loading. Please wait 2 seconds and try again (or refresh).",
     );
+  };
+
+  const handleClickProbe = () => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const centerX = Math.round(window.innerWidth / 2);
+    const centerY = Math.round(window.innerHeight / 2);
+    const target = document.elementFromPoint(centerX, centerY) as HTMLElement | null;
+    const counts = collectIdentityCounts();
+    if (!target) {
+      setClickProbeInfo({
+        center: { x: centerX, y: centerY },
+        target: null,
+        counts,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const rect = target.getBoundingClientRect();
+    const computed = getComputedStyle(target);
+    const className = typeof target.className === "string" ? target.className : "";
+    setClickProbeInfo({
+      center: { x: centerX, y: centerY },
+      target: {
+        tagName: target.tagName.toLowerCase(),
+        id: target.id || "—",
+        className: className || "—",
+        zIndex: computed.zIndex || "auto",
+        pointerEvents: computed.pointerEvents || "auto",
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+      counts,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  const handleSafeOverlayDisable = () => {
+    if (typeof document === "undefined") return;
+    const elements = document.querySelectorAll<HTMLElement>(
+      ".netlify-identity-widget, iframe#netlify-identity-widget",
+    );
+    elements.forEach((el) => {
+      el.style.pointerEvents = "none";
+    });
+    updateIdentityDiagnostics();
+  };
+
+  const handleProbeOpenLogin = () => {
+    if (!window.netlifyIdentity) {
+      setError("Netlify Identity не загружен. Проверьте подключение скрипта.");
+      return;
+    }
+    if (window.netlifyIdentity.init) {
+      try {
+        window.netlifyIdentity.init();
+      } catch {
+        // ignore init errors in debug flow
+      }
+    }
+    window.netlifyIdentity.open();
+    const timer = setTimeout(() => {
+      const modalElements = document.querySelectorAll<HTMLElement>(".netlify-identity-modal");
+      const iframeElements = document.querySelectorAll<HTMLElement>(
+        "iframe#netlify-identity-widget",
+      );
+      modalElements.forEach((el) => {
+        el.style.pointerEvents = "auto";
+      });
+      iframeElements.forEach((el) => {
+        el.style.pointerEvents = "auto";
+      });
+      updateIdentityDiagnostics();
+    }, 200);
+    timersRef.current.push(timer);
   };
 
   const handleClearHistory = () => {
@@ -957,6 +1058,62 @@ function AdminInner() {
     }
   };
 
+  const clickProbePanel = showClickProbe ? (
+    <div
+      className={`mt-6 p-4 border rounded-xl text-xs ${
+        isDark
+          ? "bg-zinc-900 border-zinc-800 text-zinc-200"
+          : "bg-zinc-50 border-zinc-200 text-zinc-800"
+      }`}
+    >
+      <div className="font-semibold mb-2">Click Probe</div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <button
+          type="button"
+          onClick={handleClickProbe}
+          className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${secondaryButtonClass}`}
+        >
+          ПРОВЕРИТЬ ЧТО ПЕРЕКРЫВАЕТ
+        </button>
+        <button
+          type="button"
+          onClick={handleSafeOverlayDisable}
+          className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${secondaryButtonClass}`}
+        >
+          СНЯТЬ ПЕРЕКРЫТИЕ (SAFE)
+        </button>
+        <button
+          type="button"
+          onClick={handleProbeOpenLogin}
+          className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${primaryButtonClass}`}
+        >
+          ОТКРЫТЬ ЛОГИН
+        </button>
+      </div>
+      <div className="font-mono space-y-1">
+        <div>
+          elementFromPoint:{" "}
+          {clickProbeInfo?.target
+            ? clickProbeInfo.target.tagName
+            : "none"}
+        </div>
+        <div>tagName: {clickProbeInfo?.target?.tagName || "—"}</div>
+        <div>id: {clickProbeInfo?.target?.id || "—"}</div>
+        <div>className: {clickProbeInfo?.target?.className || "—"}</div>
+        <div>z-index: {clickProbeInfo?.target?.zIndex || "—"}</div>
+        <div>pointer-events: {clickProbeInfo?.target?.pointerEvents || "—"}</div>
+        <div>
+          rect: {clickProbeInfo?.target ? `${clickProbeInfo.target.width}x${clickProbeInfo.target.height}` : "—"}
+        </div>
+        <div>
+          counts: iframe#{clickProbeInfo?.counts.iframe ?? "—"} | modal
+          #{clickProbeInfo?.counts.modal ?? "—"} | widget
+          #{clickProbeInfo?.counts.widget ?? "—"}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (isLoading) {
     const identityDebugPanel = showIdentityDebug ? (
       <div
@@ -1012,6 +1169,7 @@ function AdminInner() {
                 </>
               )}
               {identityDebugPanel}
+              {clickProbePanel}
             </div>
           </div>
         </main>
@@ -1077,6 +1235,7 @@ function AdminInner() {
                 </button>
               </div>
               {identityDebugPanel}
+              {clickProbePanel}
             </div>
           </div>
         </main>
@@ -1133,6 +1292,7 @@ function AdminInner() {
               </button>
             </div>
             {identityDebugPanel}
+            {clickProbePanel}
           </div>
         </main>
       </>
@@ -1424,6 +1584,7 @@ function AdminInner() {
           )}
 
           {identityDebugPanel}
+          {clickProbePanel}
 
           {/* Debug area (non-secret) */}
           {debugInfo && (

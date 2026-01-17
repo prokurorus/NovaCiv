@@ -31,26 +31,6 @@
 
 
 
-    <!-- Netlify Identity Initialization -->
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const tick = () => {
-          if (!window.netlifyIdentity) {
-            return setTimeout(tick, 50);
-          }
-          window.netlifyIdentity.on('init', (user) => {
-            if (!user) {
-              window.netlifyIdentity.on('login', () => {
-                document.location.reload();
-              });
-            }
-          });
-          window.netlifyIdentity.init();
-        };
-        tick();
-      });
-    </script>
-
     <!-- React -->
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -85,6 +85,9 @@ declare global {
       currentUser: () => NetlifyIdentityUser | null;
       logout: () => void;
     };
+    __ncIdentityInited?: boolean;
+    __ncIdentityHandlersAttached?: boolean;
+    __ncIdentityModalOpen?: boolean;
   }
 }
 
@@ -157,6 +160,7 @@ function AdminInner() {
   const initCalledRef = useRef(false);
   const initEventFiredRef = useRef(false);
   const timersRef = useRef<Array<NodeJS.Timeout>>([]);
+  const identityObserverRef = useRef<MutationObserver | null>(null);
   const stillLoadingRef = useRef(true);
   const isDark = theme === "dark";
   const threadLabel = debugInfo?.threadId ?? "—";
@@ -287,12 +291,81 @@ function AdminInner() {
     const cleanup = () => {
       timersRef.current.forEach(timer => clearTimeout(timer));
       timersRef.current = [];
+      if (identityObserverRef.current) {
+        identityObserverRef.current.disconnect();
+        identityObserverRef.current = null;
+      }
+    };
+
+    const getIdentityElements = () => {
+      const elements = new Set<HTMLElement>();
+      document
+        .querySelectorAll<HTMLElement>(".netlify-identity-widget")
+        .forEach((el) => elements.add(el));
+      document
+        .querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget")
+        .forEach((el) => elements.add(el));
+      return Array.from(elements);
+    };
+
+    const dedupeIdentityIframes = () => {
+      const iframes = Array.from(
+        document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
+      );
+      if (iframes.length <= 1) return;
+      const keep = iframes[iframes.length - 1];
+      iframes.forEach((iframe) => {
+        if (iframe !== keep) {
+          iframe.remove();
+        }
+      });
+    };
+
+    const setIdentityPointerEvents = (value: "auto" | "none") => {
+      getIdentityElements().forEach((el) => {
+        el.style.pointerEvents = value;
+      });
+    };
+
+    const syncIdentityIframeState = (isOpen: boolean) => {
+      dedupeIdentityIframes();
+      setIdentityPointerEvents(isOpen ? "auto" : "none");
+    };
+
+    const ensureIdentityObserver = () => {
+      if (identityObserverRef.current || typeof MutationObserver === "undefined") return;
+      identityObserverRef.current = new MutationObserver(() => {
+        syncIdentityIframeState(Boolean(window.__ncIdentityModalOpen));
+      });
+      identityObserverRef.current.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    };
+
+    const attachGlobalIdentityHandlers = () => {
+      if (!window.netlifyIdentity || window.__ncIdentityHandlersAttached) return;
+      window.__ncIdentityHandlersAttached = true;
+      window.netlifyIdentity.on("open", () => {
+        window.__ncIdentityModalOpen = true;
+        syncIdentityIframeState(true);
+      });
+      window.netlifyIdentity.on("close", () => {
+        window.__ncIdentityModalOpen = false;
+        syncIdentityIframeState(false);
+      });
     };
 
     const initIdentity = () => {
       if (!window.netlifyIdentity || initCalledRef.current) return;
-      
+
       initCalledRef.current = true;
+      ensureIdentityObserver();
+      attachGlobalIdentityHandlers();
+      if (window.__ncIdentityModalOpen === undefined) {
+        window.__ncIdentityModalOpen = false;
+      }
+      syncIdentityIframeState(Boolean(window.__ncIdentityModalOpen));
 
       // 1) Регистрируем обработчики ПЕРВЫМИ, до вызова init()
       window.netlifyIdentity.on("init", (user) => {
@@ -331,7 +404,19 @@ function AdminInner() {
       });
 
       // 2) Вызываем init() ровно один раз
-      window.netlifyIdentity.init();
+      if (!window.__ncIdentityInited) {
+        window.__ncIdentityInited = true;
+        window.netlifyIdentity.init();
+      }
+
+      // Страховка: после init сразу выключаем клики по iframe
+      const postInitSync = setTimeout(() => {
+        syncIdentityIframeState(false);
+      }, 0);
+      const postInitSyncDelayed = setTimeout(() => {
+        syncIdentityIframeState(false);
+      }, 200);
+      timersRef.current.push(postInitSync, postInitSyncDelayed);
 
       // 3) Детерминированный fallback через 700ms
       const fallbackTimer = setTimeout(() => {

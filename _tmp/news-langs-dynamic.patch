@@ -1,0 +1,92 @@
+diff --git a/netlify/functions/fetch-news-background.js b/netlify/functions/fetch-news-background.js
+index 1111111..2222222 100644
+--- a/netlify/functions/fetch-news-background.js
++++ b/netlify/functions/fetch-news-background.js
+@@ -25,1 +25,40 @@
+ const NEWS_CRON_SECRET = process.env.NEWS_CRON_SECRET;
++
++// ---------- Language handling (future-proof) ----------
++// If NEWS_LANGS is set, it controls the order and the exact set (comma-separated).
++// Otherwise we use all languages present in RSS_SOURCES.
++const NEWS_LANGS = (process.env.NEWS_LANGS || "")
++  .split(",")
++  .map((s) => s.trim())
++  .filter(Boolean);
++
++const LANGS = (NEWS_LANGS.length ? NEWS_LANGS : Object.keys(RSS_SOURCES || {}))
++  .map((s) => String(s).trim())
++  .filter((code) => code && RSS_SOURCES && RSS_SOURCES[code] && RSS_SOURCES[code].length > 0);
++
++// Friendly names (used only for translation prompts)
++const LANG_NAMES = {
++  en: "English",
++  ru: "Russian",
++  de: "German",
++  es: "Spanish",
++  fr: "French",
++  pt: "Portuguese",
++  it: "Italian",
++  pl: "Polish",
++  uk: "Ukrainian",
++  ro: "Romanian",
++  nl: "Dutch",
++  sv: "Swedish",
++  no: "Norwegian",
++  da: "Danish",
++  fi: "Finnish",
++  tr: "Turkish",
++  ar: "Arabic",
++  he: "Hebrew",
++  hi: "Hindi",
++  ja: "Japanese",
++  ko: "Korean",
++  zh: "Chinese",
++};
++
+@@ -42,17 +81,7 @@
+-const LANG_OUTPUTS = [
+-  {
+-    code: "en",
+-    label: "English",
+-    saveToForum: true,
+-  },
+-  {
+-    code: "ru",
+-    label: "Russian",
+-    saveToForum: true,
+-  },
+-  {
+-    code: "de",
+-    label: "German",
+-    saveToForum: true,
+-  },
+-];
++// Output policy: now fully data-driven (forum only; Telegram is separate)
++// Keeping this constant only as a placeholder for future options.
++const LANG_OUTPUTS = LANGS.map((code) => ({
++  code,
++  label: LANG_NAMES[code] || code,
++  saveToForum: true,
++}));
+@@ -720,8 +748,1 @@ async function translateText(englishText, targetLangCode) {
+-  let targetDescription;
+-  if (targetLangCode === "ru") {
+-    targetDescription = "Russian";
+-  } else if (targetLangCode === "de") {
+-    targetDescription = "German";
+-  } else {
+-    targetDescription = "the target language";
+-  }
++  const targetDescription = LANG_NAMES[targetLangCode] || targetLangCode;
+@@ -871,6 +890,2 @@ exports.handler = async (event, context) => {
+-  const languages = ["ru", "en", "de"];
+-  const results = {
+-    ru: { prepared: false, fallback: false },
+-    en: { prepared: false, fallback: false },
+-    de: { prepared: false, fallback: false },
+-  };
++  const languages = LANGS.length ? LANGS : ["en"]; // never empty
++  const results = Object.fromEntries(languages.map((l) => [l, { prepared: false, fallback: false }]));
+@@ -1193,1 +1208,1 @@
+-                        { role: "user", content: `Translate to ${lang === "ru" ? "Russian" : "German"}: ${text}` },
++                        { role: "user", content: `Translate to ${LANG_NAMES[lang] || lang}: ${text}` },

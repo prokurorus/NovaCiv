@@ -232,6 +232,15 @@ function AdminInner() {
   const inputClass = isDark
     ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
     : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
+  const userEmail = user?.email || "none";
+  const userRolesRaw = user?.app_metadata?.roles || user?.user_metadata?.roles || [];
+  const userRoles = Array.isArray(userRolesRaw) ? userRolesRaw : [];
+  const hasToken = Boolean(user?.token?.access_token);
+  const identityStatusLine = (
+    <div className={`text-xs mt-2 ${textMuted}`}>
+      User: {userEmail} | Token: {hasToken ? "yes" : "no"} | Roles: {JSON.stringify(userRoles)}
+    </div>
+  );
   const setIdentityPointerEvents = (value: "none" | "auto") => {
     if (typeof document === "undefined") return;
     const elements = document.querySelectorAll<HTMLElement>(
@@ -455,29 +464,18 @@ function AdminInner() {
     </button>
   );
 
-  // Сильная очистка при выходе
+  // Сброс входа: только через явную кнопку
   const performLogout = () => {
     if (window.netlifyIdentity) {
       window.netlifyIdentity.logout();
     }
 
-    // Очищаем localStorage ключи Identity (защитная очистка)
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key) {
-        const lowerKey = key.toLowerCase();
-        const hasGotrue = lowerKey.includes("gotrue");
-        const hasNetlify = lowerKey.includes("netlify");
-        const hasAuth = lowerKey.includes("auth") || lowerKey.includes("identity") || lowerKey.includes("user") || lowerKey.includes("token");
-        
-        // Удаляем если содержит gotrue ИЛИ (netlify И auth/identity/user/token), НО не трогаем novaciv-*
-        if (!key.startsWith("novaciv-") && (hasGotrue || (hasNetlify && hasAuth))) {
-          keysToRemove.push(key);
-        }
-      }
+    if (typeof document !== "undefined") {
+      const overlays = document.querySelectorAll(
+        ".netlify-identity-widget, .netlify-identity-modal, iframe#netlify-identity-widget",
+      );
+      overlays.forEach((node) => node.remove());
     }
-    keysToRemove.forEach(key => localStorage.removeItem(key));
 
     // Перенаправление на /admin чтобы открыть логин
     window.location.href = "/admin";
@@ -606,8 +604,8 @@ function AdminInner() {
           setHasAdminRole(false);
         }
         
-        // Принудительная перезагрузка для обновления claims
-        window.location.href = "/admin";
+        // Принудительная перезагрузка для применения cookie/localStorage
+        window.location.href = "/admin?logged=1";
       });
 
       window.netlifyIdentity.on("logout", () => {
@@ -1302,6 +1300,7 @@ function AdminInner() {
                       Сбросить вход
                     </button>
                   </div>
+                {identityStatusLine}
                 </>
               )}
               {identityDebugPanel}
@@ -1392,6 +1391,7 @@ function AdminInner() {
                   Сбросить вход
                 </button>
               </div>
+              {identityStatusLine}
               {identityDebugPanel}
               {clickProbePanel}
             </div>
@@ -1468,8 +1468,9 @@ function AdminInner() {
                 onClick={performLogout}
                 className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
               >
-                Выйти
+                Сбросить вход
               </button>
+              {identityStatusLine}
             </div>
             {identityDebugPanel}
             {clickProbePanel}
@@ -1561,9 +1562,10 @@ function AdminInner() {
               onClick={performLogout}
               className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
             >
-              Выйти ({user.email})
+              Сбросить вход ({user.email})
             </button>
           </div>
+          {identityStatusLine}
 
           {/* Chat History */}
           {conversationHistory.length > 0 && (

@@ -10,6 +10,7 @@ const url = require("url");
 const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
+const { randomUUID } = require("crypto");
 require("dotenv").config({ path: process.env.ENV_PATH || "/root/NovaCiv/.env" });
 
 const { getDb } = require("./lib/firebaseAdmin");
@@ -55,6 +56,23 @@ let staticMemoryCache = null;
 let cachedMode = null;
 const HONESTY_SYSTEM_RULE =
   "Never claim you performed actions (opened browser, executed commands, checked endpoints) unless you actually have tool output provided in the conversation.";
+const jobs = new Map();
+
+function createJobId() {
+  if (typeof randomUUID === "function") {
+    return randomUUID();
+  }
+  return `job_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createHttpError(statusCode, payload) {
+  const message =
+    (payload && (payload.message || payload.error)) || "Request failed";
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.payload = payload;
+  return error;
+}
 
 // ---------- Helper: Load file safely ----------
 function loadFile(filePath) {
@@ -675,6 +693,497 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(body));
 }
 
+async function handleAdminQuestion({
+  text,
+  history,
+  mode,
+  isDirectMode,
+  threadId,
+}) {
+  if (isDirectMode) {
+    // Load memory pack (mode-aware filtering)
+    let memoryPack;
+    try {
+      memoryPack = await buildMemoryPack(threadId, "direct");
+    } catch (e) {
+      console.error("[admin-domovoy-api] Memory pack loading error:", e);
+      throw createHttpError(500, {
+        ok: false,
+        error: "context_missing",
+        message: `Failed to load memory pack: ${e.message}`,
+        debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
+      });
+    }
+
+    if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
+      throw createHttpError(500, {
+        ok: false,
+        error: "context_missing",
+        message: "Memory pack is empty or not found",
+        debugHint: "Check docs/ files exist",
+      });
+    }
+
+    // Build context from memory files
+    const contextBlocks = memoryPack.memoryFiles
+      .map((file) => `=== ${file.name} ===\n\n${file.content}\n\n`)
+      .join("\n---\n\n");
+
+    // Build messages array for direct mode
+    const messages = [];
+
+    const docsBase = path.join(PROJECT_DIR, "docs");
+    const directPrompt = loadPromptFile(
+      path.join(docsBase, "ADMIN_ASSISTANT_DIRECT.md"),
+      path.join(docsBase, "ADMIN_ASSISTANT.md"),
+    );
+
+    // System prompt for Direct Admin Chat
+    messages.push({
+      role: "system",
+      content: HONESTY_SYSTEM_RULE,
+    });
+    messages.push({
+      role: "system",
+      content: directPrompt,
+    });
+
+    // Add conversation history (last 20 messages)
+    const recentHistory = history.slice(-20);
+    for (const msg of recentHistory) {
+      if (msg.role && msg.content && (msg.role === "user" || msg.role === "assistant")) {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    // Add current question with context
+    messages.push({
+      role: "user",
+      content: `Полная проектная память (Memory Pack):
+
+${contextBlocks}
+
+---
+
+Вопрос администратора:
+${text}`,
+    });
+
+    if (!OPENAI_API_KEY) {
+      throw createHttpError(500, {
+        ok: false,
+        error: "OPENAI_API_KEY is not configured",
+        message: "OpenAI API key is missing in environment variables",
+        debugHint: "Set OPENAI_API_KEY in VPS .env file",
+      });
+    }
+
+    // Call OpenAI
+    const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: messages,
+        temperature: 0.5,
+      }),
+    });
+
+    if (!completion.ok) {
+      const errorText = await completion.text().catch(() => "");
+      console.error(
+        "[admin-domovoy-api] OpenAI error:",
+        completion.status,
+        errorText.slice(0, 200),
+      );
+      throw createHttpError(502, {
+        ok: false,
+        error: "openai_failed",
+        message: `OpenAI API returned status ${completion.status}`,
+        debugHint: "Check OPENAI_API_KEY and API quota",
+      });
+    }
+
+    const completionData = await completion.json();
+    const answer =
+      completionData.choices?.[0]?.message?.content ||
+      "Не удалось получить ответ от OpenAI.";
+
+    if (!answer || answer.trim().length === 0) {
+      throw createHttpError(502, {
+        ok: false,
+        error: "openai_empty_response",
+        message: "OpenAI returned an empty response",
+        debugHint: "Check OpenAI API response structure",
+      });
+    }
+
+    // Log assistant message and increment pairCount (best-effort)
+    let logResult = null;
+    try {
+      logResult = await logAssistantMessageAndIncrementPair({
+        threadId,
+        text: answer,
+        ts: Date.now(),
+        origin: "vps-direct",
+      });
+    } catch (e) {
+      console.warn(
+        "[admin-domovoy-api] Failed to log assistant message to RTDB:",
+        e.message,
+      );
+    }
+
+    // Success response for direct mode
+    return {
+      ok: true,
+      answer: answer,
+      debug: {
+        origin: "vps",
+        mode: "direct",
+        threadId,
+        filesLoaded: memoryPack.filesLoaded,
+        memoryBytes: memoryPack.totalChars,
+        pairCount:
+          logResult && typeof logResult.pairCount === "number"
+            ? logResult.pairCount
+            : null,
+      },
+    };
+  }
+
+  // Detect general questions for ops mode (before loading memory)
+  if (mode === "ops") {
+    const normalizedText = text.toLowerCase().trim();
+    const generalQuestionPatterns = [
+      /^что делать дальше/i,
+      /^что дальше/i,
+      /^что улучшить/i,
+      /^next/i,
+      /^дальше/i,
+      /^что делать$/i,
+      /^что можно сделать$/i,
+      /^что нужно сделать$/i,
+    ];
+
+    const isGeneralQuestion = generalQuestionPatterns.some(
+      (pattern) => pattern.test(normalizedText) && normalizedText.length < 50,
+    );
+
+    if (isGeneralQuestion) {
+      const generalResponse = `Критичных проблем не видно.
+
+Выбери цель: (A) админка/домовой (B) форум/UX (C) контент/постинг
+
+Назови букву — дам один шаг.`;
+
+      // Log assistant message
+      try {
+        await logAssistantMessageAndIncrementPair({
+          threadId,
+          text: generalResponse,
+          ts: Date.now(),
+          origin: "vps-admin",
+        });
+      } catch (e) {
+        console.warn("[admin-domovoy-api] Failed to log general response:", e.message);
+      }
+
+      return {
+        ok: true,
+        answer: generalResponse,
+        debug: {
+          filesLoaded: [],
+          memoryBytes: 0,
+          threadId,
+          mode: mode,
+          generalQuestionDetected: true,
+        },
+      };
+    }
+
+    // Handle A/B/C selection after general question
+    const choicePattern =
+      /^(выбираю|выбираем|выберу|выберём|выбрал|выбрали|выбрала|выбрало|a|b|c|а|б|в)$/i;
+    if (choicePattern.test(normalizedText)) {
+      // Let it through to OpenAI, but add instruction to give ONE step for chosen area
+      // This will be handled by the system prompt
+    }
+  }
+
+  // Load memory pack (docs + snapshots + admin RTDB context)
+  let memoryPack;
+  try {
+    memoryPack = await buildMemoryPack(threadId, mode);
+  } catch (e) {
+    console.error("[admin-domovoy-api] Memory pack loading error:", e);
+    throw createHttpError(500, {
+      ok: false,
+      error: "context_missing",
+      message: `Failed to load memory pack: ${e.message}`,
+      debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
+    });
+  }
+
+  if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
+    throw createHttpError(500, {
+      ok: false,
+      error: "context_missing",
+      message: "Memory pack is empty or not found",
+      debugHint: "Check docs/ADMIN_ASSISTANT.md exists",
+    });
+  }
+
+  // Collect OPS STATUS (real-time checks, authoritative)
+  const opsStatus = collectOpsStatus();
+
+  // Build context from memory files
+  const contextBlocks = memoryPack.memoryFiles
+    .map((file) => `=== ${file.name} ===\n\n${file.content}\n\n`)
+    .join("\n---\n\n");
+
+  // Build messages array
+  const messages = [];
+
+  // System prompt (mode-aware)
+  const docsBase = path.join(PROJECT_DIR, "docs");
+  const opsPrompt =
+    mode === "ops"
+      ? loadPromptFile(
+          path.join(docsBase, "ADMIN_ASSISTANT_OPS.md"),
+          path.join(docsBase, "ADMIN_ASSISTANT.md"),
+        )
+      : `РЕЖИМ: СТРАТЕГИЯ
+- Можно предлагать идеи улучшений и планы
+- МАКСИМУМ 3 пункта улучшений
+- Привязка к текущей архитектуре NovaCiv
+- БЕЗ предложений "установить 10 инструментов"
+- Использовать, когда нет пожара и хочется развитие
+- Можно структурировать ответ с разделами, но кратко`;
+
+  messages.push({
+    role: "system",
+    content: HONESTY_SYSTEM_RULE,
+  });
+  messages.push({
+    role: "system",
+    content: `Ты — Admin Domovoy: OPS brain и системный хранитель проекта NovaCiv.
+Ты НЕ философский чат. Ты операционный мозг системы.
+
+ТВОЯ РОЛЬ:
+- Ты знаешь архитектуру: Netlify ↔ VPS ↔ Firebase ↔ PM2
+- Ты знаешь failure modes и recovery procedures
+- Ты знаешь текущие приоритеты и workflow rules
+- Ты отвечаешь как системный оператор, не как философ
+
+ПОЛЬЗОВАТЕЛЬ:
+- Пользователь — Руслан, основатель и оператор NovaCiv
+- Владелец novaciv.space, управляет GitHub/Netlify/VPS
+- Когда спрашивает "кто я?" — отвечай: проектная роль (founder/operator), НЕ личные данные
+- Thread ID по умолчанию: ruslan-main
+
+КРИТИЧЕСКИ ВАЖНО — OPS STATUS (GROUND TRUTH):
+- OPS STATUS блок содержит РЕАЛЬНЫЕ проверки системы в момент запроса
+- OPS STATUS — это ИСТИНА, а НЕ память или предположения
+- Ты ДОЛЖЕН использовать OPS STATUS как источник истины для статуса VPS
+- Если gitClean=true в OPS STATUS — НЕ говори "dirty" или "RED FLAG"
+- Если gitClean=false в OPS STATUS — говори "dirty" и предложи действия (без секретов)
+- OPS STATUS обновляется при каждом запросе, это актуальные данные
+
+${opsPrompt}
+
+ПРАВИЛА ОТВЕТОВ (общие):
+- Отвечай как спокойный человеческий помощник
+- Используй OPS STATUS как источник истины для статуса VPS
+- Используй memory pack (docs + snapshot + RTDB history) для контекста
+- НИКОГДА не печатай секреты, токены, ключи, пароли
+- Если данных нет в memory pack — честно скажи, не выдумывай
+- Стиль: человеческий, спокойный, конкретный
+
+КОГДА СПРАШИВАЮТ "кто я?":
+- Отвечай: "Ты Руслан, основатель и оператор проекта NovaCiv, владелец novaciv.space, управляешь GitHub/Netlify/VPS."
+- НЕ утверждай доступ к личным данным
+- Фокус на проектной роли и операционной идентичности
+
+КОГДА СПРАШИВАЮТ "какая сейчас стадия администрирования?" или "покажи кратко ops status":
+- Проверь OPS STATUS (gitClean, pm2, snapshotMtime)
+- Покажи краткий список:
+  * VPS: OK (gitClean true/false)
+  * PM2: список процессов (name, online/offline, restarts, uptime)
+  * Snapshot mtime
+- Затем добавь одно короткое человеческое предложение:
+  * Если всё OK: "Всё ровно, ничего делать не нужно."
+  * Если не OK: одна строка диагноза + спроси, хочет ли пользователь auto-fix задачу
+- НЕ добавляй автоматически "Следующие действия" если пользователь не просит план`,
+  });
+
+  // Add conversation history (last 20 messages)
+  const recentHistory = history.slice(-20);
+  for (const msg of recentHistory) {
+    if (msg.role && msg.content && (msg.role === "user" || msg.role === "assistant")) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // Add current question with context (OPS STATUS BEFORE memory pack)
+  const opsStatusBlock = formatOpsStatusBlock(opsStatus);
+  messages.push({
+    role: "user",
+    content: `${opsStatusBlock}
+
+---
+
+Полная проектная память (Memory Pack):
+
+${contextBlocks}
+
+---
+
+Вопрос администратора:
+${text}`,
+  });
+
+  if (!OPENAI_API_KEY) {
+    throw createHttpError(500, {
+      ok: false,
+      error: "OPENAI_API_KEY is not configured",
+      message: "OpenAI API key is missing in environment variables",
+      debugHint: "Set OPENAI_API_KEY in VPS .env file",
+    });
+  }
+
+  // Call OpenAI
+  const completion = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: messages,
+      temperature: 0.5,
+    }),
+  });
+
+  if (!completion.ok) {
+    const errorText = await completion.text().catch(() => "");
+    console.error(
+      "[admin-domovoy-api] OpenAI error:",
+      completion.status,
+      errorText.slice(0, 200),
+    );
+    throw createHttpError(502, {
+      ok: false,
+      error: "openai_failed",
+      message: `OpenAI API returned status ${completion.status}`,
+      debugHint: "Check OPENAI_API_KEY and API quota",
+    });
+  }
+
+  const completionData = await completion.json();
+  const answer =
+    completionData.choices?.[0]?.message?.content ||
+    "Не удалось получить ответ от OpenAI.";
+
+  if (!answer || answer.trim().length === 0) {
+    throw createHttpError(502, {
+      ok: false,
+      error: "openai_empty_response",
+      message: "OpenAI returned an empty response",
+      debugHint: "Check OpenAI API response structure",
+    });
+  }
+
+  // Log assistant message and increment pairCount (best-effort)
+  let logResult = null;
+  try {
+    logResult = await logAssistantMessageAndIncrementPair({
+      threadId,
+      text: answer,
+      ts: Date.now(),
+      origin: "vps-admin",
+    });
+  } catch (e) {
+    console.warn(
+      "[admin-domovoy-api] Failed to log assistant message to RTDB:",
+      e.message,
+    );
+  }
+
+  // Trigger summarizer if thresholds are met (non-blocking failure)
+  let summarizerResult = null;
+  try {
+    if (OPENAI_API_KEY) {
+      const summarizerClient = async ({ role, content }) => {
+        const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [{ role, content }],
+            temperature: 0.2,
+          }),
+        });
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          console.warn(
+            "[admin-domovoy-api] Summarizer OpenAI error:",
+            resp.status,
+            txt.slice(0, 200),
+          );
+          return "";
+        }
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content || "";
+      };
+
+      summarizerResult = await checkAndSummarizeThread({
+        threadId,
+        minNewPairs: 100,
+        level1MergeThreshold: 10,
+        openAiClient: summarizerClient,
+      });
+    }
+  } catch (e) {
+    console.warn(
+      "[admin-domovoy-api] Hierarchical summarizer failed:",
+      e.message,
+    );
+  }
+
+  // Success response
+  return {
+    ok: true,
+    answer: answer,
+    debug: {
+      filesLoaded: memoryPack.filesLoaded,
+      memoryBytes: memoryPack.totalChars,
+      threadId,
+      mode: mode, // Include mode in debug for verification
+      pairCount: logResult && typeof logResult.pairCount === "number"
+        ? logResult.pairCount
+        : null,
+      lastSummaryTs: memoryPack.lastSummaryTs || null,
+      summariesIncluded: memoryPack.summaryCount,
+      recentPairsIncluded: memoryPack.recentPairCount,
+      summarizerRan: summarizerResult ? !!summarizerResult.ran : false,
+      ops: {
+        gitClean: opsStatus.gitClean,
+        headSha: opsStatus.headSha,
+        pm2: opsStatus.pm2,
+        snapshotMtime: opsStatus.snapshotMtime,
+      },
+    },
+  };
+}
+
 // ---------- HTTP Server ----------
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -697,8 +1206,13 @@ const server = http.createServer(async (req, res) => {
   const isHealthNews = parsedUrl.pathname === "/admin/health/news";
   const isHealthDomovoy = parsedUrl.pathname === "/admin/health/domovoy";
   const isHealth = isHealthNews || isHealthDomovoy;
-  
-  if (!isDomovoy && !isDirect && !isHealth) {
+  const resultMatch = parsedUrl.pathname
+    ? parsedUrl.pathname.match(/^\/admin\/result\/([^/]+)$/)
+    : null;
+  const resultJobId = resultMatch ? resultMatch[1] : null;
+  const isResult = Boolean(resultJobId);
+
+  if (!isDomovoy && !isDirect && !isHealth && !isResult) {
     sendJson(res, 404, {
       ok: false,
       error: "Not Found",
@@ -713,8 +1227,16 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
-  
-  if (!isHealth && req.method !== "POST") {
+
+  if (isResult && req.method !== "GET") {
+    sendJson(res, 405, {
+      ok: false,
+      error: "Method Not Allowed",
+    });
+    return;
+  }
+
+  if (!isHealth && !isResult && req.method !== "POST") {
     sendJson(res, 404, {
       ok: false,
       error: "Not Found",
@@ -790,6 +1312,24 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (isResult) {
+    const job = jobs.get(resultJobId);
+    if (!job) {
+      sendJson(res, 200, { status: "pending" });
+      return;
+    }
+    if (job.status === "done") {
+      sendJson(res, 200, { status: "done", result: job.result });
+      return;
+    }
+    if (job.status === "error") {
+      sendJson(res, 200, { status: "error", error: job.error });
+      return;
+    }
+    sendJson(res, 200, { status: "pending" });
+    return;
+  }
+
   if (!hasJsonContentType(req)) {
     sendJson(res, 415, {
       ok: false,
@@ -804,6 +1344,7 @@ const server = http.createServer(async (req, res) => {
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
       const action = (data.action || "").toString().trim();
+      const isAsync = data.async === true;
       
       // Validate mode (default to "direct" if missing or invalid)
       const modeRaw = data.mode;
@@ -816,6 +1357,11 @@ const server = http.createServer(async (req, res) => {
       const threadId = isDirectMode
         ? "ruslan-direct" 
         : getEffectiveThreadId(data.threadId || DEFAULT_THREAD_ID);
+
+      if (text === "ping") {
+        sendJson(res, 200, { ok: true, pong: true });
+        return;
+      }
 
       if (action === "snapshot:report") {
         const stabilityResult = await runStabilityReport();
@@ -1023,501 +1569,56 @@ const server = http.createServer(async (req, res) => {
           e.message,
         );
       }
-      
-      // For /admin/direct: skip domovoy-specific logic, go straight to OpenAI
-      if (isDirectMode) {
-        // Load memory pack (mode-aware filtering)
-        let memoryPack;
-        try {
-          memoryPack = await buildMemoryPack(threadId, "direct");
-        } catch (e) {
-          console.error("[admin-domovoy-api] Memory pack loading error:", e);
-          sendJson(res, 500, {
-            ok: false,
-            error: "context_missing",
-            message: `Failed to load memory pack: ${e.message}`,
-            debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
-          });
-          return;
-        }
-        
-        if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
-          sendJson(res, 500, {
-            ok: false,
-            error: "context_missing",
-            message: "Memory pack is empty or not found",
-            debugHint: "Check docs/ files exist",
-          });
-          return;
-        }
-        
-        // Build context from memory files
-        const contextBlocks = memoryPack.memoryFiles.map(file => 
-          `=== ${file.name} ===\n\n${file.content}\n\n`
-        ).join("\n---\n\n");
-        
-        // Build messages array for direct mode
-        const messages = [];
+      if (isAsync) {
+        const jobId = createJobId();
+        jobs.set(jobId, { status: "pending", createdAt: Date.now() });
+        sendJson(res, 202, { ok: true, jobId });
 
-        const docsBase = path.join(PROJECT_DIR, "docs");
-        const directPrompt = loadPromptFile(
-          path.join(docsBase, "ADMIN_ASSISTANT_DIRECT.md"),
-          path.join(docsBase, "ADMIN_ASSISTANT.md"),
-        );
-
-        // System prompt for Direct Admin Chat
-        messages.push({
-          role: "system",
-          content: HONESTY_SYSTEM_RULE,
-        });
-        messages.push({
-          role: "system",
-          content: directPrompt,
-        });
-        
-        // Add conversation history (last 20 messages)
-        const recentHistory = history.slice(-20);
-        for (const msg of recentHistory) {
-          if (msg.role && msg.content && (msg.role === "user" || msg.role === "assistant")) {
-            messages.push({ role: msg.role, content: msg.content });
-          }
-        }
-        
-        // Add current question with context
-        messages.push({
-          role: "user",
-          content: `Полная проектная память (Memory Pack):
-
-${contextBlocks}
-
----
-
-Вопрос администратора:
-${text}`
-        });
-        
-        if (!OPENAI_API_KEY) {
-          sendJson(res, 500, {
-            ok: false,
-            error: "OPENAI_API_KEY is not configured",
-            message: "OpenAI API key is missing in environment variables",
-            debugHint: "Set OPENAI_API_KEY in VPS .env file",
-          });
-          return;
-        }
-
-        // Call OpenAI
-        const completion = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: messages,
-            temperature: 0.5,
-          }),
-        });
-        
-        if (!completion.ok) {
-          const errorText = await completion.text().catch(() => "");
-          console.error(
-            "[admin-domovoy-api] OpenAI error:",
-            completion.status,
-            errorText.slice(0, 200),
-          );
-          sendJson(res, 502, {
-            ok: false,
-            error: "openai_failed",
-            message: `OpenAI API returned status ${completion.status}`,
-            debugHint: "Check OPENAI_API_KEY and API quota",
-          });
-          return;
-        }
-        
-        const completionData = await completion.json();
-        let answer =
-          completionData.choices?.[0]?.message?.content ||
-          "Не удалось получить ответ от OpenAI.";
-        
-        if (!answer || answer.trim().length === 0) {
-          sendJson(res, 502, {
-            ok: false,
-            error: "openai_empty_response",
-            message: "OpenAI returned an empty response",
-            debugHint: "Check OpenAI API response structure",
-          });
-          return;
-        }
-        
-        // Log assistant message and increment pairCount (best-effort)
-        let logResult = null;
-        try {
-          logResult = await logAssistantMessageAndIncrementPair({
-            threadId,
-            text: answer,
-            ts: Date.now(),
-            origin: "vps-direct",
-          });
-        } catch (e) {
-          console.warn(
-            "[admin-domovoy-api] Failed to log assistant message to RTDB:",
-            e.message,
-          );
-        }
-        
-        // Success response for direct mode
-        sendJson(res, 200, {
-          ok: true,
-          answer: answer,
-          debug: {
-            origin: "vps",
-            mode: "direct",
-            threadId,
-            filesLoaded: memoryPack.filesLoaded,
-            memoryBytes: memoryPack.totalChars,
-            pairCount: logResult && typeof logResult.pairCount === "number"
-              ? logResult.pairCount
-              : null,
-          },
-        });
-        return;
-      }
-      
-      // Detect general questions for ops mode (before loading memory)
-      if (mode === "ops") {
-        const normalizedText = text.toLowerCase().trim();
-        const generalQuestionPatterns = [
-          /^что делать дальше/i,
-          /^что дальше/i,
-          /^что улучшить/i,
-          /^next/i,
-          /^дальше/i,
-          /^что делать$/i,
-          /^что можно сделать$/i,
-          /^что нужно сделать$/i,
-        ];
-        
-        const isGeneralQuestion = generalQuestionPatterns.some(pattern => 
-          pattern.test(normalizedText) && normalizedText.length < 50
-        );
-        
-        if (isGeneralQuestion) {
-          const generalResponse = `Критичных проблем не видно.
-
-Выбери цель: (A) админка/домовой (B) форум/UX (C) контент/постинг
-
-Назови букву — дам один шаг.`;
-          
-          // Log assistant message
-          try {
-            await logAssistantMessageAndIncrementPair({
+        Promise.resolve()
+          .then(() =>
+            handleAdminQuestion({
+              text,
+              history,
+              mode,
+              isDirectMode,
               threadId,
-              text: generalResponse,
-              ts: Date.now(),
-              origin: "vps-admin",
-            });
-          } catch (e) {
-            console.warn("[admin-domovoy-api] Failed to log general response:", e.message);
-          }
-          
-          sendJson(res, 200, {
-            ok: true,
-            answer: generalResponse,
-            debug: {
-              filesLoaded: [],
-              memoryBytes: 0,
-              threadId,
-              mode: mode,
-              generalQuestionDetected: true,
-            },
-          });
-          return;
-        }
-        
-        // Handle A/B/C selection after general question
-        const choicePattern = /^(выбираю|выбираем|выберу|выберём|выбрал|выбрали|выбрала|выбрало|a|b|c|а|б|в)$/i;
-        if (choicePattern.test(normalizedText)) {
-          // Let it through to OpenAI, but add instruction to give ONE step for chosen area
-          // This will be handled by the system prompt
-        }
-      }
-      
-      // Load memory pack (docs + snapshots + admin RTDB context)
-      let memoryPack;
-      try {
-        memoryPack = await buildMemoryPack(threadId, mode);
-      } catch (e) {
-        console.error("[admin-domovoy-api] Memory pack loading error:", e);
-        sendJson(res, 500, {
-          ok: false,
-          error: "context_missing",
-          message: `Failed to load memory pack: ${e.message}`,
-          debugHint: "Check docs/, runbooks/ and Firebase admin credentials in PROJECT_DIR",
-        });
-        return;
-      }
-      
-      if (!memoryPack.memoryFiles || memoryPack.memoryFiles.length === 0) {
-        sendJson(res, 500, {
-          ok: false,
-          error: "context_missing",
-          message: "Memory pack is empty or not found",
-          debugHint: "Check docs/ADMIN_ASSISTANT.md exists",
-        });
-        return;
-      }
-      
-      // Collect OPS STATUS (real-time checks, authoritative)
-      const opsStatus = collectOpsStatus();
-      
-      // Build context from memory files
-      const contextBlocks = memoryPack.memoryFiles.map(file => 
-        `=== ${file.name} ===\n\n${file.content}\n\n`
-      ).join("\n---\n\n");
-      
-      // Build messages array
-      const messages = [];
-      
-      // System prompt (mode-aware)
-      const docsBase = path.join(PROJECT_DIR, "docs");
-      const opsPrompt = mode === "ops"
-        ? loadPromptFile(
-            path.join(docsBase, "ADMIN_ASSISTANT_OPS.md"),
-            path.join(docsBase, "ADMIN_ASSISTANT.md"),
+            }),
           )
-        : `РЕЖИМ: СТРАТЕГИЯ
-- Можно предлагать идеи улучшений и планы
-- МАКСИМУМ 3 пункта улучшений
-- Привязка к текущей архитектуре NovaCiv
-- БЕЗ предложений "установить 10 инструментов"
-- Использовать, когда нет пожара и хочется развитие
-- Можно структурировать ответ с разделами, но кратко`;
-
-      messages.push({
-        role: "system",
-        content: HONESTY_SYSTEM_RULE,
-      });
-      messages.push({
-        role: "system",
-        content: `Ты — Admin Domovoy: OPS brain и системный хранитель проекта NovaCiv.
-Ты НЕ философский чат. Ты операционный мозг системы.
-
-ТВОЯ РОЛЬ:
-- Ты знаешь архитектуру: Netlify ↔ VPS ↔ Firebase ↔ PM2
-- Ты знаешь failure modes и recovery procedures
-- Ты знаешь текущие приоритеты и workflow rules
-- Ты отвечаешь как системный оператор, не как философ
-
-ПОЛЬЗОВАТЕЛЬ:
-- Пользователь — Руслан, основатель и оператор NovaCiv
-- Владелец novaciv.space, управляет GitHub/Netlify/VPS
-- Когда спрашивает "кто я?" — отвечай: проектная роль (founder/operator), НЕ личные данные
-- Thread ID по умолчанию: ruslan-main
-
-КРИТИЧЕСКИ ВАЖНО — OPS STATUS (GROUND TRUTH):
-- OPS STATUS блок содержит РЕАЛЬНЫЕ проверки системы в момент запроса
-- OPS STATUS — это ИСТИНА, а НЕ память или предположения
-- Ты ДОЛЖЕН использовать OPS STATUS как источник истины для статуса VPS
-- Если gitClean=true в OPS STATUS — НЕ говори "dirty" или "RED FLAG"
-- Если gitClean=false в OPS STATUS — говори "dirty" и предложи действия (без секретов)
-- OPS STATUS обновляется при каждом запросе, это актуальные данные
-
-${opsPrompt}
-
-ПРАВИЛА ОТВЕТОВ (общие):
-- Отвечай как спокойный человеческий помощник
-- Используй OPS STATUS как источник истины для статуса VPS
-- Используй memory pack (docs + snapshot + RTDB history) для контекста
-- НИКОГДА не печатай секреты, токены, ключи, пароли
-- Если данных нет в memory pack — честно скажи, не выдумывай
-- Стиль: человеческий, спокойный, конкретный
-
-КОГДА СПРАШИВАЮТ "кто я?":
-- Отвечай: "Ты Руслан, основатель и оператор проекта NovaCiv, владелец novaciv.space, управляешь GitHub/Netlify/VPS."
-- НЕ утверждай доступ к личным данным
-- Фокус на проектной роли и операционной идентичности
-
-КОГДА СПРАШИВАЮТ "какая сейчас стадия администрирования?" или "покажи кратко ops status":
-- Проверь OPS STATUS (gitClean, pm2, snapshotMtime)
-- Покажи краткий список:
-  * VPS: OK (gitClean true/false)
-  * PM2: список процессов (name, online/offline, restarts, uptime)
-  * Snapshot mtime
-- Затем добавь одно короткое человеческое предложение:
-  * Если всё OK: "Всё ровно, ничего делать не нужно."
-  * Если не OK: одна строка диагноза + спроси, хочет ли пользователь auto-fix задачу
-- НЕ добавляй автоматически "Следующие действия" если пользователь не просит план`
-      });
-      
-      // Add conversation history (last 20 messages)
-      const recentHistory = history.slice(-20);
-      for (const msg of recentHistory) {
-        if (msg.role && msg.content && (msg.role === "user" || msg.role === "assistant")) {
-          messages.push({ role: msg.role, content: msg.content });
-        }
-      }
-      
-      // Add current question with context (OPS STATUS BEFORE memory pack)
-      const opsStatusBlock = formatOpsStatusBlock(opsStatus);
-      messages.push({
-        role: "user",
-        content: `${opsStatusBlock}
-
----
-
-Полная проектная память (Memory Pack):
-
-${contextBlocks}
-
----
-
-Вопрос администратора:
-${text}`
-      });
-      
-      if (!OPENAI_API_KEY) {
-        sendJson(res, 500, {
-          ok: false,
-          error: "OPENAI_API_KEY is not configured",
-          message: "OpenAI API key is missing in environment variables",
-          debugHint: "Set OPENAI_API_KEY in VPS .env file",
-        });
-        return;
-      }
-
-      // Call OpenAI
-      const completion = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: messages,
-          temperature: 0.5,
-        }),
-      });
-      
-      if (!completion.ok) {
-        const errorText = await completion.text().catch(() => "");
-        console.error(
-          "[admin-domovoy-api] OpenAI error:",
-          completion.status,
-          errorText.slice(0, 200),
-        );
-        sendJson(res, 502, {
-          ok: false,
-          error: "openai_failed",
-          message: `OpenAI API returned status ${completion.status}`,
-          debugHint: "Check OPENAI_API_KEY and API quota",
-        });
-        return;
-      }
-      
-      const completionData = await completion.json();
-      let answer =
-        completionData.choices?.[0]?.message?.content ||
-        "Не удалось получить ответ от OpenAI.";
-      
-      if (!answer || answer.trim().length === 0) {
-        sendJson(res, 502, {
-          ok: false,
-          error: "openai_empty_response",
-          message: "OpenAI returned an empty response",
-          debugHint: "Check OpenAI API response structure",
-        });
-        return;
-      }
-      
-      // Log assistant message and increment pairCount (best-effort)
-      let logResult = null;
-      try {
-        logResult = await logAssistantMessageAndIncrementPair({
-          threadId,
-          text: answer,
-          ts: Date.now(),
-          origin: "vps-admin",
-        });
-      } catch (e) {
-        console.warn(
-          "[admin-domovoy-api] Failed to log assistant message to RTDB:",
-          e.message,
-        );
-      }
-
-      // Trigger summarizer if thresholds are met (non-blocking failure)
-      let summarizerResult = null;
-      try {
-        if (OPENAI_API_KEY) {
-          const summarizerClient = async ({ role, content }) => {
-            const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${OPENAI_API_KEY}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                model: "gpt-4o-mini",
-                messages: [{ role, content }],
-                temperature: 0.2,
-              }),
+          .then((result) => {
+            jobs.set(jobId, {
+              status: "done",
+              result,
+              finishedAt: Date.now(),
             });
-            if (!resp.ok) {
-              const txt = await resp.text().catch(() => "");
-              console.warn(
-                "[admin-domovoy-api] Summarizer OpenAI error:",
-                resp.status,
-                txt.slice(0, 200),
-              );
-              return "";
-            }
-            const data = await resp.json();
-            return data.choices?.[0]?.message?.content || "";
-          };
-
-          summarizerResult = await checkAndSummarizeThread({
-            threadId,
-            minNewPairs: 100,
-            level1MergeThreshold: 10,
-            openAiClient: summarizerClient,
+          })
+          .catch((err) => {
+            const payload = err && err.payload ? err.payload : null;
+            const errorMessage =
+              (payload && (payload.message || payload.error)) ||
+              err?.message ||
+              "Internal Server Error";
+            jobs.set(jobId, {
+              status: "error",
+              error: errorMessage,
+              finishedAt: Date.now(),
+            });
           });
-        }
-      } catch (e) {
-        console.warn(
-          "[admin-domovoy-api] Hierarchical summarizer failed:",
-          e.message,
-        );
+        return;
       }
-      
-      // Success response
-      sendJson(res, 200, {
-        ok: true,
-        answer: answer,
-        debug: {
-          filesLoaded: memoryPack.filesLoaded,
-          memoryBytes: memoryPack.totalChars,
-          threadId,
-          mode: mode, // Include mode in debug for verification
-          pairCount: logResult && typeof logResult.pairCount === "number"
-            ? logResult.pairCount
-            : null,
-          lastSummaryTs: memoryPack.lastSummaryTs || null,
-          summariesIncluded: memoryPack.summaryCount,
-          recentPairsIncluded: memoryPack.recentPairCount,
-          summarizerRan: summarizerResult ? !!summarizerResult.ran : false,
-          ops: {
-            gitClean: opsStatus.gitClean,
-            headSha: opsStatus.headSha,
-            pm2: opsStatus.pm2,
-            snapshotMtime: opsStatus.snapshotMtime,
-          },
-        },
+
+      const result = await handleAdminQuestion({
+        text,
+        history,
+        mode,
+        isDirectMode,
+        threadId,
       });
-      
+      sendJson(res, 200, result);
     } catch (e) {
+      if (e && e.statusCode) {
+        sendJson(res, e.statusCode, e.payload || { ok: false, error: "request_failed" });
+        return;
+      }
       console.error("[admin-domovoy-api] Handler error:", e);
       sendJson(res, 500, {
         ok: false,

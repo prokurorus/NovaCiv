@@ -431,6 +431,55 @@ function AdminInner() {
     return token;
   };
 
+  const parseJsonResponse = async (res: Response, requestUrl: string) => {
+    const rawResponseText = await res.text();
+    const rawResponseTruncated = rawResponseText.slice(0, 2000);
+
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      setDebugInfo({
+        url: requestUrl,
+        status: res.status,
+        rawResponse: rawResponseTruncated,
+        jsonKeys: [],
+      });
+      throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${rawResponseText.slice(0, 200)}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawResponseText);
+    } catch (parseErr) {
+      setDebugInfo({
+        url: requestUrl,
+        status: res.status,
+        rawResponse: rawResponseTruncated,
+        jsonKeys: [],
+      });
+      throw new Error(
+        `Не удалось распарсить JSON: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`,
+      );
+    }
+
+    const jsonKeys = Object.keys(data);
+    const debug = (data && typeof data.debug === "object") ? data.debug : {};
+    setDebugInfo({
+      url: requestUrl,
+      status: res.status,
+      rawResponse: rawResponseTruncated,
+      jsonKeys,
+      threadId: debug.threadId ?? null,
+      pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
+      lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
+      origin: typeof debug.origin === "string" ? debug.origin : null,
+      upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
+      upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
+      mode: typeof debug.mode === "string" ? debug.mode : null,
+    });
+
+    return data;
+  };
+
   const requestAdmin = async (
     requestBody: Record<string, unknown>,
     options: { timeoutMs?: number } = {},
@@ -466,51 +515,7 @@ function AdminInner() {
       }
     }
 
-    // Получаем raw response text для debug
-    const rawResponseText = await res.text();
-    const rawResponseTruncated = rawResponseText.slice(0, 2000);
-
-    // Проверяем, что ответ - JSON, а не HTML
-    const contentType = res.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      setDebugInfo({
-        url: requestUrl,
-        status: res.status,
-        rawResponse: rawResponseTruncated,
-        jsonKeys: [],
-      });
-      throw new Error(`Ожидался JSON, получен ${contentType}. Ответ: ${rawResponseText.slice(0, 200)}`);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (parseErr) {
-      setDebugInfo({
-        url: requestUrl,
-        status: res.status,
-        rawResponse: rawResponseTruncated,
-        jsonKeys: [],
-      });
-      throw new Error(`Не удалось распарсить JSON: ${parseErr instanceof Error ? parseErr.message : "Unknown error"}`);
-    }
-
-    // Capture debug info
-    const jsonKeys = Object.keys(data);
-    const debug = (data && typeof data.debug === "object") ? data.debug : {};
-    setDebugInfo({
-      url: requestUrl,
-      status: res.status,
-      rawResponse: rawResponseTruncated,
-      jsonKeys,
-      threadId: debug.threadId ?? null,
-      pairCount: typeof debug.pairCount === "number" ? debug.pairCount : null,
-      lastSummaryTs: typeof debug.lastSummaryTs === "string" ? debug.lastSummaryTs : (debug.lastSummaryTs ? String(debug.lastSummaryTs) : null),
-      origin: typeof debug.origin === "string" ? debug.origin : null,
-      upstreamUrl: typeof debug.upstreamUrl === "string" ? debug.upstreamUrl : null,
-      upstreamStatus: typeof debug.upstreamStatus === "number" ? debug.upstreamStatus : (debug.upstreamStatus === null ? null : undefined),
-      mode: typeof debug.mode === "string" ? debug.mode : null,
-    });
+    const data = await parseJsonResponse(res, requestUrl);
 
     // Handle error responses (ok: false or non-200 status)
     if (!res.ok || data.ok === false) {
@@ -547,6 +552,47 @@ function AdminInner() {
     return data;
   };
 
+  const requestAdminResult = async (jobId: string) => {
+    const token = await getAuthToken();
+    const requestUrl = `/.netlify/functions/admin-proxy/admin/result/${encodeURIComponent(jobId)}`;
+
+    const res = await fetch(requestUrl, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+      },
+    });
+
+    const data = await parseJsonResponse(res, requestUrl);
+
+    if (!res.ok || data.ok === false) {
+      const errorMsg = data.error || data.message || "Ошибка запроса";
+      throw new Error(`${errorMsg} (HTTP ${res.status})`);
+    }
+
+    return data;
+  };
+
+  const pollAdminResult = async (jobId: string) => {
+    const timeoutMs = 90_000;
+    const intervalMs = 1000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const data = await requestAdminResult(jobId);
+      if (data.status === "done") {
+        return data.result;
+      }
+      if (data.status === "error") {
+        const errorText = data.error || "Ошибка обработки запроса";
+        throw new Error(errorText);
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error("Таймаут ожидания результата (90s)");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -563,30 +609,74 @@ function AdminInner() {
         history: conversationHistory.slice(-20), // Last 20 messages
         threadId: "ruslan-main",
         mode: mode, // "ops" | "direct"
+        async: true,
       };
       const data = await requestAdmin(requestBody);
 
-      // Handle success response - prefer answer, then output, then text, then reply
+      if (data.pong) {
+        const pongText = "pong";
+        const newHistory = [
+          ...conversationHistory,
+          { role: "user" as const, content: text.trim() },
+          { role: "assistant" as const, content: pongText },
+        ].slice(-20);
+        setConversationHistory(newHistory);
+        try {
+          localStorage.setItem("adminChatHistory", JSON.stringify(newHistory));
+        } catch (e) {
+          console.error("[Admin] Failed to save chat history:", e);
+        }
+        setResponse(pongText);
+        setText("");
+        return;
+      }
+
+      const jobId = typeof data.jobId === "string" ? data.jobId : null;
+      if (jobId) {
+        setPendingMessage("Ожидаю результат...");
+        const result = await pollAdminResult(jobId);
+        const answerText =
+          result?.answer || result?.output || result?.text || result?.reply || "";
+        if (!answerText) {
+          throw new Error("Ответ получен, но пуст.");
+        }
+
+        const newHistory = [
+          ...conversationHistory,
+          { role: "user" as const, content: text.trim() },
+          { role: "assistant" as const, content: answerText },
+        ].slice(-20);
+        setConversationHistory(newHistory);
+
+        try {
+          localStorage.setItem("adminChatHistory", JSON.stringify(newHistory));
+        } catch (e) {
+          console.error("[Admin] Failed to save chat history:", e);
+        }
+
+        setResponse(answerText);
+        setText("");
+        return;
+      }
+
       const answerText = data.answer || data.output || data.text || data.reply || "";
       if (!answerText) {
         throw new Error("Ответ получен, но пуст.");
       }
-      
-      // Update conversation history (keep last 20 messages)
+
       const newHistory = [
         ...conversationHistory,
         { role: "user" as const, content: text.trim() },
         { role: "assistant" as const, content: answerText },
       ].slice(-20);
       setConversationHistory(newHistory);
-      
-      // Save to localStorage
+
       try {
         localStorage.setItem("adminChatHistory", JSON.stringify(newHistory));
       } catch (e) {
         console.error("[Admin] Failed to save chat history:", e);
       }
-      
+
       setResponse(answerText);
       setText(""); // Clear input after successful submission
     } catch (err) {

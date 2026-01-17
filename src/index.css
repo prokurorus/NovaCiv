@@ -148,6 +148,7 @@ iframe#netlify-identity-widget {
 }
 
 .netlify-identity-widget,
+.netlify-identity-modal,
 .netlify-identity-widget iframe,
 iframe#netlify-identity-widget {
   pointer-events: none;

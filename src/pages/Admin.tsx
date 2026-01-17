@@ -102,6 +102,32 @@ function AdminInner() {
   const [response, setResponse] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [lastIdentityEvent, setLastIdentityEvent] = useState<
+    "init" | "open" | "close" | "login" | "logout" | "none"
+  >("none");
+  const [identityDiagnostics, setIdentityDiagnostics] = useState<{
+    identityLoaded: boolean;
+    widgetScriptLoaded: boolean;
+    widgetContainerCount: number;
+    iframeCount: number;
+    pointerEventsCurrent: string[];
+  }>(() => ({
+    identityLoaded: typeof window !== "undefined" && Boolean(window.netlifyIdentity),
+    widgetScriptLoaded:
+      typeof document !== "undefined"
+        ? Boolean(document.querySelector('script[src*="netlify-identity-widget"]'))
+        : false,
+    widgetContainerCount:
+      typeof document !== "undefined"
+        ? document.querySelectorAll(".netlify-identity-widget").length
+        : 0,
+    iframeCount:
+      typeof document !== "undefined"
+        ? document.querySelectorAll("iframe#netlify-identity-widget").length
+        : 0,
+    pointerEventsCurrent: [],
+  }));
+  const [showIdentityDebug, setShowIdentityDebug] = useState(false);
   const [snapshotDownloads, setSnapshotDownloads] = useState<{
     report: boolean;
     telemetry: boolean;
@@ -184,6 +210,37 @@ function AdminInner() {
   const inputClass = isDark
     ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
     : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
+  const collectIdentityDiagnostics = () => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return {
+        identityLoaded: false,
+        widgetScriptLoaded: false,
+        widgetContainerCount: 0,
+        iframeCount: 0,
+        pointerEventsCurrent: [],
+      };
+    }
+
+    const elements = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        ".netlify-identity-widget, .netlify-identity-modal, iframe#netlify-identity-widget",
+      ),
+    );
+
+    return {
+      identityLoaded: Boolean(window.netlifyIdentity),
+      widgetScriptLoaded: Boolean(
+        document.querySelector('script[src*="netlify-identity-widget"]'),
+      ),
+      widgetContainerCount: document.querySelectorAll(".netlify-identity-widget").length,
+      iframeCount: document.querySelectorAll("iframe#netlify-identity-widget").length,
+      pointerEventsCurrent: elements.map((el) => getComputedStyle(el).pointerEvents),
+    };
+  };
+  const updateIdentityDiagnostics = () => {
+    if (!showIdentityDebug) return;
+    setIdentityDiagnostics(collectIdentityDiagnostics());
+  };
   const themeToggle = (
     <button
       type="button"
@@ -271,6 +328,21 @@ function AdminInner() {
   }, [theme]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const shouldShowDebug =
+      import.meta.env.DEV ||
+      new URL(window.location.href).searchParams.get("debug") === "1";
+    setShowIdentityDebug(shouldShowDebug);
+  }, []);
+
+  useEffect(() => {
+    if (!showIdentityDebug) return;
+    updateIdentityDiagnostics();
+    const interval = setInterval(updateIdentityDiagnostics, 500);
+    return () => clearInterval(interval);
+  }, [showIdentityDebug]);
+
+  useEffect(() => {
     if (!historyEndRef.current) return;
     historyEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [conversationHistory.length]);
@@ -288,6 +360,9 @@ function AdminInner() {
     setIdentityReady(Boolean(window.netlifyIdentity));
     
     // Очистка всех таймеров при размонтировании
+    let scriptLoadTarget: HTMLScriptElement | null = null;
+    let scriptLoadHandler: (() => void) | null = null;
+
     const cleanup = () => {
       timersRef.current.forEach(timer => clearTimeout(timer));
       timersRef.current = [];
@@ -295,12 +370,18 @@ function AdminInner() {
         identityObserverRef.current.disconnect();
         identityObserverRef.current = null;
       }
+      if (scriptLoadTarget && scriptLoadHandler) {
+        scriptLoadTarget.removeEventListener("load", scriptLoadHandler);
+      }
     };
 
     const getIdentityElements = () => {
       const elements = new Set<HTMLElement>();
       document
         .querySelectorAll<HTMLElement>(".netlify-identity-widget")
+        .forEach((el) => elements.add(el));
+      document
+        .querySelectorAll<HTMLElement>(".netlify-identity-modal")
         .forEach((el) => elements.add(el));
       document
         .querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget")
@@ -330,6 +411,7 @@ function AdminInner() {
     const syncIdentityIframeState = (isOpen: boolean) => {
       dedupeIdentityIframes();
       setIdentityPointerEvents(isOpen ? "auto" : "none");
+      updateIdentityDiagnostics();
     };
 
     const ensureIdentityObserver = () => {
@@ -347,10 +429,12 @@ function AdminInner() {
       if (!window.netlifyIdentity || window.__ncIdentityHandlersAttached) return;
       window.__ncIdentityHandlersAttached = true;
       window.netlifyIdentity.on("open", () => {
+        setLastIdentityEvent("open");
         window.__ncIdentityModalOpen = true;
         syncIdentityIframeState(true);
       });
       window.netlifyIdentity.on("close", () => {
+        setLastIdentityEvent("close");
         window.__ncIdentityModalOpen = false;
         syncIdentityIframeState(false);
       });
@@ -369,6 +453,7 @@ function AdminInner() {
 
       // 1) Регистрируем обработчики ПЕРВЫМИ, до вызова init()
       window.netlifyIdentity.on("init", (user) => {
+        setLastIdentityEvent("init");
         initEventFiredRef.current = true;
         stillLoadingRef.current = false;
         setUser(user);
@@ -384,6 +469,7 @@ function AdminInner() {
       });
 
       window.netlifyIdentity.on("login", (user) => {
+        setLastIdentityEvent("login");
         setUser(user);
         setIsLoading(false);
         window.netlifyIdentity?.close();
@@ -399,6 +485,7 @@ function AdminInner() {
       });
 
       window.netlifyIdentity.on("logout", () => {
+        setLastIdentityEvent("logout");
         setUser(null);
         setHasAdminRole(false);
       });
@@ -448,6 +535,7 @@ function AdminInner() {
     const markIdentityReady = () => {
       if (!window.netlifyIdentity) return false;
       setIdentityReady(true);
+      updateIdentityDiagnostics();
       if (!initCalledRef.current) {
         initIdentity();
       }
@@ -456,6 +544,17 @@ function AdminInner() {
 
     if (!markIdentityReady()) {
       let attempts = 0;
+      const script = document.querySelector<HTMLScriptElement>(
+        'script[src*="netlify-identity-widget"]',
+      );
+      const onScriptLoad = () => {
+        markIdentityReady();
+      };
+      if (script) {
+        scriptLoadTarget = script;
+        scriptLoadHandler = onScriptLoad;
+        script.addEventListener("load", onScriptLoad, { once: true });
+      }
       const pollIdentity = () => {
         attempts += 1;
         if (markIdentityReady()) {
@@ -482,6 +581,10 @@ function AdminInner() {
       setError("");
       if (process.env.NODE_ENV === "development") {
         console.log("[Admin] Opening Identity modal");
+      }
+      if (!window.__ncIdentityInited && window.netlifyIdentity.init) {
+        window.__ncIdentityInited = true;
+        window.netlifyIdentity.init();
       }
       window.netlifyIdentity.open();
       return;
@@ -888,6 +991,30 @@ function AdminInner() {
   };
 
   if (isLoading) {
+    const identityDebugPanel = showIdentityDebug ? (
+      <div
+        className={`mt-6 p-4 border rounded-xl text-xs ${
+          isDark
+            ? "bg-zinc-900 border-zinc-800 text-zinc-200"
+            : "bg-zinc-50 border-zinc-200 text-zinc-800"
+        }`}
+      >
+        <div className="font-semibold mb-2">Identity Diagnostics</div>
+        <div className="font-mono space-y-1">
+          <div>identityLoaded: {String(identityDiagnostics.identityLoaded)}</div>
+          <div>widgetScriptLoaded: {String(identityDiagnostics.widgetScriptLoaded)}</div>
+          <div>widgetContainerCount: {identityDiagnostics.widgetContainerCount}</div>
+          <div>iframeCount: {identityDiagnostics.iframeCount}</div>
+          <div>lastIdentityEvent: {lastIdentityEvent}</div>
+          <div>
+            pointerEventsCurrent:{" "}
+            {identityDiagnostics.pointerEventsCurrent.length > 0
+              ? identityDiagnostics.pointerEventsCurrent.join(", ")
+              : "none"}
+          </div>
+        </div>
+      </div>
+    ) : null;
     return (
       <>
         {themeToggle}
@@ -917,6 +1044,7 @@ function AdminInner() {
                   </div>
                 </>
               )}
+              {identityDebugPanel}
             </div>
           </div>
         </main>
@@ -925,6 +1053,30 @@ function AdminInner() {
   }
 
   if (!user) {
+    const identityDebugPanel = showIdentityDebug ? (
+      <div
+        className={`mt-6 p-4 border rounded-xl text-xs ${
+          isDark
+            ? "bg-zinc-900 border-zinc-800 text-zinc-200"
+            : "bg-zinc-50 border-zinc-200 text-zinc-800"
+        }`}
+      >
+        <div className="font-semibold mb-2">Identity Diagnostics</div>
+        <div className="font-mono space-y-1">
+          <div>identityLoaded: {String(identityDiagnostics.identityLoaded)}</div>
+          <div>widgetScriptLoaded: {String(identityDiagnostics.widgetScriptLoaded)}</div>
+          <div>widgetContainerCount: {identityDiagnostics.widgetContainerCount}</div>
+          <div>iframeCount: {identityDiagnostics.iframeCount}</div>
+          <div>lastIdentityEvent: {lastIdentityEvent}</div>
+          <div>
+            pointerEventsCurrent:{" "}
+            {identityDiagnostics.pointerEventsCurrent.length > 0
+              ? identityDiagnostics.pointerEventsCurrent.join(", ")
+              : "none"}
+          </div>
+        </div>
+      </div>
+    ) : null;
     return (
       <>
         {themeToggle}
@@ -957,6 +1109,7 @@ function AdminInner() {
                   Сбросить вход
                 </button>
               </div>
+              {identityDebugPanel}
             </div>
           </div>
         </main>
@@ -965,6 +1118,30 @@ function AdminInner() {
   }
 
   if (!hasAdminRole) {
+    const identityDebugPanel = showIdentityDebug ? (
+      <div
+        className={`mt-6 p-4 border rounded-xl text-xs ${
+          isDark
+            ? "bg-zinc-900 border-zinc-800 text-zinc-200"
+            : "bg-zinc-50 border-zinc-200 text-zinc-800"
+        }`}
+      >
+        <div className="font-semibold mb-2">Identity Diagnostics</div>
+        <div className="font-mono space-y-1">
+          <div>identityLoaded: {String(identityDiagnostics.identityLoaded)}</div>
+          <div>widgetScriptLoaded: {String(identityDiagnostics.widgetScriptLoaded)}</div>
+          <div>widgetContainerCount: {identityDiagnostics.widgetContainerCount}</div>
+          <div>iframeCount: {identityDiagnostics.iframeCount}</div>
+          <div>lastIdentityEvent: {lastIdentityEvent}</div>
+          <div>
+            pointerEventsCurrent:{" "}
+            {identityDiagnostics.pointerEventsCurrent.length > 0
+              ? identityDiagnostics.pointerEventsCurrent.join(", ")
+              : "none"}
+          </div>
+        </div>
+      </div>
+    ) : null;
     return (
       <>
         {themeToggle}
@@ -988,11 +1165,37 @@ function AdminInner() {
                 Выйти
               </button>
             </div>
+            {identityDebugPanel}
           </div>
         </main>
       </>
     );
   }
+
+  const identityDebugPanel = showIdentityDebug ? (
+    <div
+      className={`mt-6 p-4 border rounded-xl text-xs ${
+        isDark
+          ? "bg-zinc-900 border-zinc-800 text-zinc-200"
+          : "bg-zinc-50 border-zinc-200 text-zinc-800"
+      }`}
+    >
+      <div className="font-semibold mb-2">Identity Diagnostics</div>
+      <div className="font-mono space-y-1">
+        <div>identityLoaded: {String(identityDiagnostics.identityLoaded)}</div>
+        <div>widgetScriptLoaded: {String(identityDiagnostics.widgetScriptLoaded)}</div>
+        <div>widgetContainerCount: {identityDiagnostics.widgetContainerCount}</div>
+        <div>iframeCount: {identityDiagnostics.iframeCount}</div>
+        <div>lastIdentityEvent: {lastIdentityEvent}</div>
+        <div>
+          pointerEventsCurrent:{" "}
+          {identityDiagnostics.pointerEventsCurrent.length > 0
+            ? identityDiagnostics.pointerEventsCurrent.join(", ")
+            : "none"}
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -1252,6 +1455,8 @@ function AdminInner() {
               </div>
             </div>
           )}
+
+          {identityDebugPanel}
 
           {/* Debug area (non-secret) */}
           {debugInfo && (

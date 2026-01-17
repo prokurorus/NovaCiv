@@ -232,56 +232,14 @@ function AdminInner() {
   const inputClass = isDark
     ? "bg-zinc-900 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:ring-zinc-200 focus:border-transparent"
     : "border-zinc-300 focus:ring-zinc-900 focus:border-transparent";
-  const getIdentityIframeSrc = (iframe: HTMLIFrameElement) => {
-    return (iframe.getAttribute("src") || "").trim().toLowerCase();
-  };
-
-  const isBlankIdentityIframe = (iframe: HTMLIFrameElement) => {
-    const src = getIdentityIframeSrc(iframe);
-    return !src || src === "about:blank";
-  };
-
-  const isIdentityIframeVisible = (iframe: HTMLIFrameElement) => {
-    const rect = iframe.getBoundingClientRect();
-    const display = getComputedStyle(iframe).display;
-    return rect.width > 50 && rect.height > 50 && display !== "none";
-  };
-
-  const findActiveIdentityIframe = (iframes: HTMLIFrameElement[]) => {
-    const candidates = iframes.filter(
-      (iframe) => !isBlankIdentityIframe(iframe) && isIdentityIframeVisible(iframe),
+  const setIdentityPointerEvents = (value: "none" | "auto") => {
+    if (typeof document === "undefined") return;
+    const elements = document.querySelectorAll<HTMLElement>(
+      ".netlify-identity-widget, .netlify-identity-modal, iframe#netlify-identity-widget",
     );
-    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
-  };
-
-  const lockIdentityOverlays = () => {
-    if (typeof document === "undefined") return null;
-    const iframes = Array.from(
-      document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
-    );
-
-    iframes.forEach((iframe) => {
-      iframe.style.pointerEvents = "none";
+    elements.forEach((element) => {
+      element.style.pointerEvents = value;
     });
-
-    const blankIframes = iframes.filter((iframe) => isBlankIdentityIframe(iframe));
-    blankIframes.forEach((iframe) => iframe.remove());
-
-    const remaining = iframes.filter(
-      (iframe) => !isBlankIdentityIframe(iframe) && document.contains(iframe),
-    );
-    const active = findActiveIdentityIframe(remaining);
-
-    if (remaining.length > 1) {
-      const keep = active || remaining[remaining.length - 1];
-      remaining.forEach((iframe) => {
-        if (iframe !== keep) {
-          iframe.remove();
-        }
-      });
-    }
-
-    return active;
   };
 
   const collectIdentityDiagnostics = () => {
@@ -323,7 +281,6 @@ function AdminInner() {
   };
   const updateIdentityDiagnostics = () => {
     if (!showIdentityDebug) return;
-    lockIdentityOverlays();
     setIdentityDiagnostics(collectIdentityDiagnostics());
   };
 
@@ -404,11 +361,12 @@ function AdminInner() {
     window.__ncIdentityHandlersAttached = true;
     window.netlifyIdentity.on("open", () => {
       setLastIdentityEvent("open");
+      setIdentityPointerEvents("auto");
       updateIdentityDiagnostics();
     });
     window.netlifyIdentity.on("close", () => {
       setLastIdentityEvent("close");
-      lockIdentityOverlays();
+      setIdentityPointerEvents("none");
       updateIdentityDiagnostics();
     });
     try {
@@ -454,8 +412,10 @@ function AdminInner() {
       }
 
       try {
+        setIdentityPointerEvents("none");
         window.netlifyIdentity.open();
         setLastIdentityEvent("open");
+        setIdentityPointerEvents("auto");
       } catch (err) {
         throw new Error(`Identity open failed: ${formatIdentityError(err)}`);
       }
@@ -660,7 +620,6 @@ function AdminInner() {
       if (!window.__ncIdentityInited) {
         window.__ncIdentityInited = true;
         window.netlifyIdentity.init();
-        lockIdentityOverlays();
       }
 
       // 3) Детерминированный fallback через 700ms
@@ -745,9 +704,10 @@ function AdminInner() {
           window.__ncIdentityInited = true;
           window.netlifyIdentity.init();
         }
-        lockIdentityOverlays();
+        setIdentityPointerEvents("none");
         window.netlifyIdentity.open();
         setLastIdentityEvent("open");
+        setIdentityPointerEvents("auto");
       } catch (err) {
         const message = formatIdentityError(err);
         setIdentityError(message);
@@ -757,31 +717,13 @@ function AdminInner() {
         setError(message);
         return;
       }
-      const maxAttempts = 10;
-      const retryDelay = 150;
-      let attempts = 0;
-      const waitForActive = () => {
-        attempts += 1;
-        const iframes = Array.from(
-          document.querySelectorAll<HTMLIFrameElement>("iframe#netlify-identity-widget"),
-        );
-        const active = findActiveIdentityIframe(iframes);
-        if (active) {
-          iframes.forEach((iframe) => {
-            iframe.style.pointerEvents = "none";
-          });
-          active.style.pointerEvents = "auto";
-          updateIdentityDiagnostics();
-          return;
+      const timer = setTimeout(() => {
+        const counts = collectIdentityCounts();
+        if (counts.widget === 0 && counts.iframe === 0 && counts.modal === 0) {
+          setIdentityReloadStatus("Widget did not mount (do not delete nodes).");
         }
-        if (attempts < maxAttempts) {
-          const timer = setTimeout(waitForActive, retryDelay);
-          timersRef.current.push(timer);
-        } else {
-          updateIdentityDiagnostics();
-        }
-      };
-      const timer = setTimeout(waitForActive, retryDelay);
+        updateIdentityDiagnostics();
+      }, 300);
       timersRef.current.push(timer);
       return;
     }
@@ -829,13 +771,7 @@ function AdminInner() {
   };
 
   const handleSafeOverlayDisable = () => {
-    if (typeof document === "undefined") return;
-    const elements = document.querySelectorAll<HTMLElement>(
-      ".netlify-identity-widget, iframe#netlify-identity-widget",
-    );
-    elements.forEach((el) => {
-      el.style.pointerEvents = "none";
-    });
+    setIdentityPointerEvents("none");
     updateIdentityDiagnostics();
   };
 

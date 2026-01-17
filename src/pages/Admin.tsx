@@ -79,7 +79,12 @@ declare global {
   interface Window {
     netlifyIdentity?: {
       init: () => void;
-      on: (event: string, callback: (user: NetlifyIdentityUser | null) => void) => void;
+      on: (
+        event: string,
+        callback: (
+          payload: NetlifyIdentityUser | null | Record<string, unknown> | string,
+        ) => void,
+      ) => void;
       open: () => void;
       close: () => void;
       currentUser: () => NetlifyIdentityUser | null;
@@ -103,7 +108,7 @@ function AdminInner() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [lastIdentityEvent, setLastIdentityEvent] = useState<
-    "init" | "open" | "close" | "login" | "logout" | "none"
+    "init" | "open" | "close" | "login" | "logout" | "error" | "none"
   >("none");
   const [identityDiagnostics, setIdentityDiagnostics] = useState<{
     identityLoaded: boolean;
@@ -127,6 +132,9 @@ function AdminInner() {
         : 0,
     pointerEventsCurrent: [],
   }));
+  const [identityReloadStatus, setIdentityReloadStatus] = useState<string | null>(null);
+  const [identityReloading, setIdentityReloading] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   const [showIdentityDebug, setShowIdentityDebug] = useState(false);
   const [showClickProbe, setShowClickProbe] = useState(false);
   const [clickProbeInfo, setClickProbeInfo] = useState<{
@@ -318,6 +326,160 @@ function AdminInner() {
     lockIdentityOverlays();
     setIdentityDiagnostics(collectIdentityDiagnostics());
   };
+
+  const formatIdentityError = (err: unknown) => {
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object") {
+      const typed = err as { message?: string; error?: string };
+      if (typed.message) return typed.message;
+      if (typed.error) return typed.error;
+      try {
+        return JSON.stringify(err);
+      } catch (stringifyErr) {
+        return "Unknown identity error";
+      }
+    }
+    return "Unknown identity error";
+  };
+
+  const isNetlifyIdentityUser = (value: unknown): value is NetlifyIdentityUser => {
+    if (!value || typeof value !== "object") return false;
+    return "email" in value || "id" in value;
+  };
+
+  const ensureIdentityWidgetScript = () => {
+    if (typeof document === "undefined") {
+      return Promise.reject(new Error("Document is not available"));
+    }
+    if (window.netlifyIdentity) {
+      return Promise.resolve();
+    }
+
+    const existingScript =
+      document.querySelector<HTMLScriptElement>(
+        'script[src="https://identity.netlify.com/v1/netlify-identity-widget.js"]',
+      ) ||
+      document.querySelector<HTMLScriptElement>('script[src*="netlify-identity-widget"]');
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+      const onLoad = () => settle(resolve);
+      const onError = () =>
+        settle(() =>
+          reject(new Error("Failed to load Netlify Identity widget script.")),
+        );
+
+      const timeout = setTimeout(() => {
+        settle(() =>
+          reject(new Error("Timed out loading Netlify Identity widget script.")),
+        );
+      }, 3000);
+      timersRef.current.push(timeout);
+
+      if (existingScript) {
+        existingScript.addEventListener("load", onLoad, { once: true });
+        existingScript.addEventListener("error", onError, { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://identity.netlify.com/v1/netlify-identity-widget.js";
+      script.async = true;
+      script.defer = true;
+      script.setAttribute("data-nc-identity", "1");
+      script.addEventListener("load", onLoad, { once: true });
+      script.addEventListener("error", onError, { once: true });
+      document.head.appendChild(script);
+    });
+  };
+
+  const attachGlobalIdentityHandlers = () => {
+    if (!window.netlifyIdentity || window.__ncIdentityHandlersAttached) return;
+    window.__ncIdentityHandlersAttached = true;
+    window.netlifyIdentity.on("open", () => {
+      setLastIdentityEvent("open");
+      updateIdentityDiagnostics();
+    });
+    window.netlifyIdentity.on("close", () => {
+      setLastIdentityEvent("close");
+      lockIdentityOverlays();
+      updateIdentityDiagnostics();
+    });
+    try {
+      window.netlifyIdentity.on("error", (err: unknown) => {
+        setLastIdentityEvent("error");
+        const message = formatIdentityError(err);
+        setIdentityError(message);
+        setIdentityReloadStatus(message);
+        updateIdentityDiagnostics();
+      });
+    } catch (err) {
+      const message = formatIdentityError(err);
+      setIdentityError(message);
+    }
+  };
+
+  const handleHardReloadWidget = async () => {
+    if (identityReloading) return;
+    setIdentityReloading(true);
+    setIdentityReloadStatus("Reloading Netlify Identity widget...");
+    setIdentityError(null);
+
+    try {
+      const diagnostics = collectIdentityDiagnostics();
+      if (!window.netlifyIdentity || diagnostics.widgetContainerCount === 0) {
+        await ensureIdentityWidgetScript();
+      }
+      if (!window.netlifyIdentity) {
+        throw new Error("Netlify Identity script loaded but window.netlifyIdentity is missing.");
+      }
+
+      attachGlobalIdentityHandlers();
+
+      try {
+        if (!window.__ncIdentityInited && window.netlifyIdentity.init) {
+          window.__ncIdentityInited = true;
+          window.netlifyIdentity.init();
+        } else if (window.netlifyIdentity.init) {
+          window.netlifyIdentity.init();
+        }
+      } catch (err) {
+        throw new Error(`Identity init failed: ${formatIdentityError(err)}`);
+      }
+
+      try {
+        window.netlifyIdentity.open();
+        setLastIdentityEvent("open");
+      } catch (err) {
+        throw new Error(`Identity open failed: ${formatIdentityError(err)}`);
+      }
+
+      updateIdentityDiagnostics();
+      const statusTimer = setTimeout(() => {
+        const counts = collectIdentityCounts();
+        const status =
+          counts.widget > 0 || counts.iframe > 0
+            ? `Widget reload OK: widget#${counts.widget}, iframe#${counts.iframe}.`
+            : "Widget reload still missing after 1s. Check Netlify Identity settings.";
+        setIdentityReloadStatus(status);
+        updateIdentityDiagnostics();
+      }, 1000);
+      timersRef.current.push(statusTimer);
+    } catch (err) {
+      const message = formatIdentityError(err);
+      setIdentityError(message);
+      setIdentityReloadStatus(`Reload failed: ${message}`);
+    } finally {
+      setIdentityReloading(false);
+    }
+  };
+
   const themeToggle = (
     <button
       type="button"
@@ -449,20 +611,6 @@ function AdminInner() {
       }
     };
 
-    const attachGlobalIdentityHandlers = () => {
-      if (!window.netlifyIdentity || window.__ncIdentityHandlersAttached) return;
-      window.__ncIdentityHandlersAttached = true;
-      window.netlifyIdentity.on("open", () => {
-        setLastIdentityEvent("open");
-        updateIdentityDiagnostics();
-      });
-      window.netlifyIdentity.on("close", () => {
-        setLastIdentityEvent("close");
-        lockIdentityOverlays();
-        updateIdentityDiagnostics();
-      });
-    };
-
     const initIdentity = () => {
       if (!window.netlifyIdentity || initCalledRef.current) return;
 
@@ -471,27 +619,29 @@ function AdminInner() {
 
       // 1) Регистрируем обработчики ПЕРВЫМИ, до вызова init()
       window.netlifyIdentity.on("init", (user) => {
+        const resolvedUser = isNetlifyIdentityUser(user) ? user : null;
         setLastIdentityEvent("init");
         initEventFiredRef.current = true;
         stillLoadingRef.current = false;
-        setUser(user);
+        setUser(resolvedUser);
         setIsLoading(false);
         
-        if (user) {
-          checkRoleWithRetry(user);
+        if (resolvedUser) {
+          checkRoleWithRetry(resolvedUser);
         } else {
           setHasAdminRole(false);
         }
       });
 
       window.netlifyIdentity.on("login", (user) => {
+        const resolvedUser = isNetlifyIdentityUser(user) ? user : null;
         setLastIdentityEvent("login");
-        setUser(user);
+        setUser(resolvedUser);
         setIsLoading(false);
         window.netlifyIdentity?.close();
         
-        if (user) {
-          checkRoleWithRetry(user);
+        if (resolvedUser) {
+          checkRoleWithRetry(resolvedUser);
         } else {
           setHasAdminRole(false);
         }
@@ -585,15 +735,28 @@ function AdminInner() {
   const handleOpenLogin = () => {
     if (window.netlifyIdentity?.open) {
       setError("");
+      setIdentityError(null);
       if (process.env.NODE_ENV === "development") {
         console.log("[Admin] Opening Identity modal");
       }
-      if (!window.__ncIdentityInited && window.netlifyIdentity.init) {
-        window.__ncIdentityInited = true;
-        window.netlifyIdentity.init();
+      try {
+        attachGlobalIdentityHandlers();
+        if (!window.__ncIdentityInited && window.netlifyIdentity.init) {
+          window.__ncIdentityInited = true;
+          window.netlifyIdentity.init();
+        }
+        lockIdentityOverlays();
+        window.netlifyIdentity.open();
+        setLastIdentityEvent("open");
+      } catch (err) {
+        const message = formatIdentityError(err);
+        setIdentityError(message);
+        if (showIdentityDebug) {
+          setIdentityReloadStatus(`Open failed: ${message}`);
+        }
+        setError(message);
+        return;
       }
-      lockIdentityOverlays();
-      window.netlifyIdentity.open();
       const maxAttempts = 10;
       const retryDelay = 150;
       let attempts = 0;
@@ -1152,6 +1315,28 @@ function AdminInner() {
               : "none"}
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleHardReloadWidget}
+            disabled={identityReloading}
+            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+              identityReloading ? "opacity-70 cursor-not-allowed" : ""
+            } ${primaryButtonClass}`}
+          >
+            {identityReloading ? "RELOADING..." : "HARD RELOAD WIDGET"}
+          </button>
+        </div>
+        {identityError && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-red-300" : "text-red-700"}`}>
+            identityError: {identityError}
+          </div>
+        )}
+        {identityReloadStatus && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+            {identityReloadStatus}
+          </div>
+        )}
       </div>
     ) : null;
     return (
@@ -1215,6 +1400,28 @@ function AdminInner() {
               : "none"}
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleHardReloadWidget}
+            disabled={identityReloading}
+            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+              identityReloading ? "opacity-70 cursor-not-allowed" : ""
+            } ${primaryButtonClass}`}
+          >
+            {identityReloading ? "RELOADING..." : "HARD RELOAD WIDGET"}
+          </button>
+        </div>
+        {identityError && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-red-300" : "text-red-700"}`}>
+            identityError: {identityError}
+          </div>
+        )}
+        {identityReloadStatus && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+            {identityReloadStatus}
+          </div>
+        )}
       </div>
     ) : null;
     return (
@@ -1281,6 +1488,28 @@ function AdminInner() {
               : "none"}
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleHardReloadWidget}
+            disabled={identityReloading}
+            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+              identityReloading ? "opacity-70 cursor-not-allowed" : ""
+            } ${primaryButtonClass}`}
+          >
+            {identityReloading ? "RELOADING..." : "HARD RELOAD WIDGET"}
+          </button>
+        </div>
+        {identityError && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-red-300" : "text-red-700"}`}>
+            identityError: {identityError}
+          </div>
+        )}
+        {identityReloadStatus && (
+          <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+            {identityReloadStatus}
+          </div>
+        )}
       </div>
     ) : null;
     return (
@@ -1336,6 +1565,28 @@ function AdminInner() {
             : "none"}
         </div>
       </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={handleHardReloadWidget}
+          disabled={identityReloading}
+          className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${
+            identityReloading ? "opacity-70 cursor-not-allowed" : ""
+          } ${primaryButtonClass}`}
+        >
+          {identityReloading ? "RELOADING..." : "HARD RELOAD WIDGET"}
+        </button>
+      </div>
+      {identityError && (
+        <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-red-300" : "text-red-700"}`}>
+          identityError: {identityError}
+        </div>
+      )}
+      {identityReloadStatus && (
+        <div className={`mt-2 text-[11px] font-mono ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+          {identityReloadStatus}
+        </div>
+      )}
     </div>
   ) : null;
 

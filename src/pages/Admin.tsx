@@ -502,7 +502,7 @@ function AdminInner() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Admin-Token": token,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
@@ -525,11 +525,7 @@ function AdminInner() {
       const errorMsg = data.error || data.message || "Ошибка запроса";
       let statusMsg: string;
       if (res.status === 401) {
-        if (data.error === "unauthorized") {
-          statusMsg = "Токен не совпадает между Netlify и VPS. Проверьте ADMIN_API_TOKEN в обеих системах.";
-        } else {
-          statusMsg = "Не авторизован. Проверьте вход через Netlify Identity.";
-        }
+        statusMsg = "Не авторизован. Проверьте вход через Netlify Identity.";
       } else if (res.status === 403) {
         statusMsg = "Доступ запрещён. Требуется роль admin.";
       } else if (res.status === 500) {
@@ -562,7 +558,7 @@ function AdminInner() {
     const res = await fetch(requestUrl, {
       method: "GET",
       headers: {
-        "X-Admin-Token": token,
+        Authorization: `Bearer ${token}`,
       },
     });
 
@@ -746,7 +742,7 @@ function AdminInner() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Admin-Token": token,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ action: "snapshot:download", name }),
       });

@@ -91,7 +91,8 @@ declare global {
   }
 }
 
-const API_BASE = "http://77.42.36.198:3001";
+const API_BASE =
+  import.meta.env.VITE_ADMIN_API_BASE || "https://admin-api.novaciv.space";
 
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);

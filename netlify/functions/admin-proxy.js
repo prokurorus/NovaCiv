@@ -1,4 +1,4 @@
-// netlify/functions-lite/admin-proxy.js
+// netlify/functions/admin-proxy.js
 //
 // Server-side proxy for Admin Domovoy API
 // Forwards requests to VPS endpoint with X-Admin-Token (never exposed to browser)
@@ -23,7 +23,7 @@
 
 // ---------- ENV ----------
 // Upstream base URL: ADMIN_DOMOVOY_API_URL (dedicated env var for admin-proxy)
-// We always call `${base}/admin/domovoy` (base should be host:port, without path).
+// We always call `${base}/admin/domovoy` (base should be host[:port], without path).
 // NO fallback to DOMOVOY_API_URL to avoid accidentally pointing to ai-domovoy.
 const ADMIN_DOMOVOY_API_URL = process.env.ADMIN_DOMOVOY_API_URL;
 const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
@@ -31,14 +31,16 @@ const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN;
 // ---------- Helpers ----------
 function normalizeBaseUrl(raw) {
   if (!raw) return null;
+  const trimmed = raw.trim();
   // Remove trailing slashes
-  let base = raw.replace(/\/+$/, "");
-  // Remove /admin/domovoy suffix if present
-  base = base.replace(/\/admin\/domovoy$/i, "");
+  let base = trimmed.replace(/\/+$/, "");
+  // Remove /admin/(domovoy|direct) suffix if present
+  base = base.replace(/\/admin\/(domovoy|direct)$/i, "");
   // Remove /admin suffix if present (but keep the base if it's just /admin)
   base = base.replace(/\/admin$/i, "");
   // Remove trailing slashes again after suffix removal
   base = base.replace(/\/+$/, "");
+  // IMPORTANT: Do not add a default port here (use ADMIN_DOMOVOY_API_URL as-is).
   return base;
 }
 

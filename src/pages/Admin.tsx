@@ -93,6 +93,7 @@ const API_BASE = "http://77.42.36.198:3001";
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [identityReady, setIdentityReady] = useState(false);
   const [hasAdminRole, setHasAdminRole] = useState(false);
   const [text, setText] = useState("");
   const [response, setResponse] = useState("");
@@ -271,9 +272,16 @@ function AdminInner() {
   }, [conversationHistory.length]);
 
   useEffect(() => {
+    if (identityReady && error.startsWith("Identity widget is still loading")) {
+      setError("");
+    }
+  }, [identityReady, error]);
+
+  useEffect(() => {
     // Сброс состояния загрузки
     stillLoadingRef.current = true;
     initEventFiredRef.current = false;
+    setIdentityReady(Boolean(window.netlifyIdentity));
     
     // Очистка всех таймеров при размонтировании
     const cleanup = () => {
@@ -352,44 +360,53 @@ function AdminInner() {
       timersRef.current.push(hardTimeout);
     };
 
-    if (!window.netlifyIdentity) {
-      // Ждём загрузки скрипта
-      const checkInterval = setInterval(() => {
-        if (window.netlifyIdentity && !initCalledRef.current) {
-          clearInterval(checkInterval);
-          initIdentity();
-        }
-      }, 50);
-      timersRef.current.push(checkInterval as unknown as NodeJS.Timeout);
+    const markIdentityReady = () => {
+      if (!window.netlifyIdentity) return false;
+      setIdentityReady(true);
+      if (!initCalledRef.current) {
+        initIdentity();
+      }
+      return true;
+    };
 
-      // Таймаут на случай, если скрипт не загрузится
-      const scriptTimeout = setTimeout(() => {
-        clearInterval(checkInterval);
-        if (!window.netlifyIdentity) {
-          stillLoadingRef.current = false;
-          setIsLoading(false);
-          setError("Netlify Identity не загружен. Убедитесь, что скрипт подключен.");
+    if (!markIdentityReady()) {
+      let attempts = 0;
+      const pollIdentity = () => {
+        attempts += 1;
+        if (markIdentityReady()) {
+          return;
         }
-      }, 5000);
-      timersRef.current.push(scriptTimeout);
-    } else if (!initCalledRef.current) {
-      initIdentity();
+        if (attempts < 20) {
+          const timer = setTimeout(pollIdentity, 100);
+          timersRef.current.push(timer);
+          return;
+        }
+        stillLoadingRef.current = false;
+        setIsLoading(false);
+        setError("Netlify Identity не загружен. Убедитесь, что скрипт подключен.");
+      };
+      const firstTimer = setTimeout(pollIdentity, 100);
+      timersRef.current.push(firstTimer);
     }
 
     return cleanup;
   }, []);
 
   const handleOpenLogin = () => {
-    if (!window.netlifyIdentity) {
+    if (window.netlifyIdentity?.open) {
+      setError("");
       if (process.env.NODE_ENV === "development") {
-        console.log("[Admin] netlifyIdentity not available");
+        console.log("[Admin] Opening Identity modal");
       }
+      window.netlifyIdentity.open();
       return;
     }
     if (process.env.NODE_ENV === "development") {
-      console.log("[Admin] Opening Identity modal");
+      console.log("[Admin] netlifyIdentity not available");
     }
-    window.netlifyIdentity.open();
+    setError(
+      "Identity widget is still loading. Please wait 2 seconds and try again (or refresh).",
+    );
   };
 
   const handleClearHistory = () => {
@@ -836,6 +853,11 @@ function AdminInner() {
               <p className={textSecondary}>
                 Необходима авторизация через Netlify Identity
               </p>
+              {error && (
+                <div className={`px-4 py-3 rounded-xl text-sm ${isDark ? "bg-red-950 border border-red-900 text-red-200" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                  {error}
+                </div>
+              )}
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleOpenLogin}

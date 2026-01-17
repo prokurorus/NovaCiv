@@ -93,6 +93,43 @@ function sanitizeContent(content) {
   return sanitized;
 }
 
+function safeJsonParse(raw, fallback = null) {
+  if (typeof raw !== "string") return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function hasJsonContentType(req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  return contentType.includes("application/json");
+}
+
+function parseJsonBody(req, res, onParsed) {
+  let body = "";
+  req.on("data", (chunk) => {
+    body += chunk.toString();
+  });
+
+  req.on("end", () => {
+    const trimmed = body.trim();
+    if (!trimmed) {
+      sendJson(res, 400, { ok: false, error: "empty_body" });
+      return;
+    }
+    let data;
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      sendJson(res, 400, { ok: false, error: "invalid_json" });
+      return;
+    }
+    onParsed(data);
+  });
+}
+
 function truncateWithSuffix(text, remaining) {
   if (typeof text !== "string") return "";
   if (text.length <= remaining) return text;
@@ -339,7 +376,7 @@ function collectOpsStatus() {
     try {
       if (fs.existsSync(monitoringStatePath)) {
         const stateRaw = fs.readFileSync(monitoringStatePath, "utf8");
-        const state = JSON.parse(stateRaw);
+        const state = safeJsonParse(stateRaw, null);
         const lastRun =
           (state && typeof state.lastReportRunAt === "string" && state.lastReportRunAt) ||
           (state && typeof state.lastSnapshotAt === "string" && state.lastSnapshotAt) ||
@@ -690,15 +727,20 @@ const server = http.createServer(async (req, res) => {
   const token = tokenRaw ? tokenRaw.trim() : null;
   const expectedToken = ADMIN_API_TOKEN ? ADMIN_API_TOKEN.trim() : null;
   
-  if (!expectedToken || !token || token !== expectedToken) {
-    sendJson(res, 401, {
+  if (!expectedToken) {
+    sendJson(res, 500, {
       ok: false,
-      error: "unauthorized",
-      message: "Invalid or missing X-Admin-Token header",
+      error: "server_token_missing",
+      message: "ADMIN_API_TOKEN is not configured on the server",
     });
     return;
   }
   
+  if (!token || token !== expectedToken) {
+    sendJson(res, 401, { ok: false, error: "unauthorized" });
+    return;
+  }
+
   if (isHealth) {
     try {
       if (isHealthNews) {
@@ -748,13 +790,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Parse body
-  let body = "";
-  req.on("data", chunk => { body += chunk.toString(); });
-  
-  req.on("end", async () => {
+  if (!hasJsonContentType(req)) {
+    sendJson(res, 415, {
+      ok: false,
+      error: "unsupported_media_type",
+      message: "Content-Type must include application/json",
+    });
+    return;
+  }
+
+  parseJsonBody(req, res, async (data) => {
     try {
-      const data = JSON.parse(body || "{}");
       const text = (data.text || "").toString().trim();
       const history = Array.isArray(data.history) ? data.history : [];
       const action = (data.action || "").toString().trim();

@@ -429,7 +429,7 @@ function AdminInner() {
     const token = isVpsAdminHost ? null : await getAuthToken();
 
     const isDirectRequest = requestBody.mode === "direct";
-    const requestUrl = `${API_BASE}/admin/${isDirectRequest ? "direct" : "domovoy"}`;
+    const requestUrl = `${API_BASE}/${isDirectRequest ? "direct" : "domovoy"}`;
     const controller = new AbortController();
     const timeoutMs = options.timeoutMs;
     const timeoutId = timeoutMs
@@ -493,7 +493,7 @@ function AdminInner() {
 
   const requestAdminResult = async (jobId: string) => {
     const token = isVpsAdminHost ? null : await getAuthToken();
-    const requestUrl = `${API_BASE}/admin/result/${encodeURIComponent(jobId)}`;
+    const requestUrl = `${API_BASE}/result/${encodeURIComponent(jobId)}`;
 
     const res = await fetch(requestUrl, {
       method: "GET",
@@ -678,7 +678,7 @@ function AdminInner() {
 
     try {
       const token = isVpsAdminHost ? null : await getAuthToken();
-      const res = await fetch(`${API_BASE}/admin/domovoy`, {
+      const res = await fetch(`${API_BASE}/domovoy`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

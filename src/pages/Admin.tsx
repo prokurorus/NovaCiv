@@ -96,9 +96,7 @@ declare global {
 }
 
 const isVpsAdminHost = window.location.hostname === "admin.novaciv.space";
-const API_BASE = isVpsAdminHost
-  ? "/api"
-  : import.meta.env.VITE_ADMIN_API_BASE || "https://admin-api.novaciv.space";
+const API_BASE = "/.netlify/functions/admin-proxy";
 
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);

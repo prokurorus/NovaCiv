@@ -856,6 +856,9 @@ function AdminInner() {
               Git SHA: {import.meta.env.VITE_COMMIT_REF || "unknown"} | Build time:{" "}
               {import.meta.env.VITE_BUILD_TIME || "unknown"} | Source: src/pages/Admin.tsx
             </div>
+            <div className={`text-sm font-mono mt-1 ${isDark ? "text-yellow-200" : "text-yellow-800"}`}>
+              API_BASE: {API_BASE}
+            </div>
             <div className={`text-sm mt-2 font-semibold ${isDark ? "text-yellow-200" : "text-yellow-700"}`}>
               DEPLOY PROOF: if you see this, GitHub → Netlify pipeline is correct
             </div>

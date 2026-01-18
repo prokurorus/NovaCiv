@@ -95,7 +95,7 @@ declare global {
   }
 }
 
-const API_BASE = "/.netlify/functions/admin-proxy";
+const API_BASE = "/admin-api";
 
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
@@ -847,6 +847,9 @@ function AdminInner() {
             </div>
             <div className={`text-sm mt-2 font-semibold ${isDark ? "text-yellow-200" : "text-yellow-700"}`}>
               DEPLOY PROOF: if you see this, GitHub → Netlify pipeline is correct
+            </div>
+            <div className={`text-sm mt-1 font-semibold ${isDark ? "text-yellow-200" : "text-yellow-700"}`}>
+              DEPLOY_TARGET: VPS
             </div>
           </div>
 

@@ -1,7 +1,7 @@
 [build]
   # Inject dynamic build metadata into Vite-only env vars for Netlify builds.
   # Git SHA is pulled from the repo, date comes from the build container.
-  command = "VITE_GIT_SHA=$(git rev-parse --short HEAD) VITE_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) npm run build"
+  command = "VITE_GIT_SHA=$(git rev-parse --short HEAD) VITE_BUILD_TIME=$(date -u +\"%Y-%m-%dT%H:%M:%SZ\") npm run build"
   publish = "dist"
   # ============================================================================
   # MIGRATION: Using lightweight functions directory to reduce env var footprint

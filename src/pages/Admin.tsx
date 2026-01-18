@@ -95,7 +95,6 @@ declare global {
   }
 }
 
-const isVpsAdminHost = window.location.hostname === "admin.novaciv.space";
 const API_BASE = "/.netlify/functions/admin-proxy";
 
 function AdminInner() {
@@ -212,7 +211,6 @@ function AdminInner() {
 
   // Сброс входа: только через явную кнопку
   const performLogout = () => {
-    if (isVpsAdminHost) return;
     window.netlifyIdentity?.logout();
   };
 
@@ -266,12 +264,6 @@ function AdminInner() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (isVpsAdminHost) {
-      setUser({ id: "server-protected", email: "server-protected" });
-      setHasAdminRole(true);
-      setIsLoading(false);
-      return;
-    }
     if (!window.netlifyIdentity) {
       setIsLoading(false);
       return;
@@ -318,7 +310,6 @@ function AdminInner() {
   }, []);
 
   const handleOpenLogin = () => {
-    if (isVpsAdminHost) return;
     if (!window.netlifyIdentity) {
       setError("Netlify Identity недоступен. Обновите страницу.");
       return;
@@ -424,8 +415,7 @@ function AdminInner() {
     requestBody: Record<string, unknown>,
     options: { timeoutMs?: number } = {},
   ) => {
-    const token = isVpsAdminHost ? null : await getAuthToken();
-
+    const token = await getAuthToken();
     const isDirectRequest = requestBody.mode === "direct";
     const requestUrl = `${API_BASE}/${isDirectRequest ? "direct" : "domovoy"}`;
     const controller = new AbortController();
@@ -490,7 +480,7 @@ function AdminInner() {
   };
 
   const requestAdminResult = async (jobId: string) => {
-    const token = isVpsAdminHost ? null : await getAuthToken();
+    const token = await getAuthToken();
     const requestUrl = `${API_BASE}/result/${encodeURIComponent(jobId)}`;
 
     const res = await fetch(requestUrl, {
@@ -675,7 +665,7 @@ function AdminInner() {
     setDownloadInProgress(name);
 
     try {
-      const token = isVpsAdminHost ? null : await getAuthToken();
+      const token = await getAuthToken();
       const res = await fetch(`${API_BASE}/domovoy`, {
         method: "POST",
         headers: {
@@ -772,35 +762,31 @@ function AdminInner() {
               <h1 className={`text-2xl font-semibold ${textPrimary}`}>
                 Админ-панель
               </h1>
-              {!isVpsAdminHost && (
-                <p className={textSecondary}>
-                  Необходима авторизация через Netlify Identity
-                </p>
-              )}
+              <p className={textSecondary}>
+                Необходима авторизация через Netlify Identity
+              </p>
               {error && (
                 <div className={`px-4 py-3 rounded-xl text-sm ${isDark ? "bg-red-950 border border-red-900 text-red-200" : "bg-red-50 border border-red-200 text-red-700"}`}>
                   {error}
                 </div>
               )}
-              {!isVpsAdminHost && (
-                <>
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={handleOpenLogin}
-                      className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
-                    >
-                      Войти (Email)
-                    </button>
-                    <button
-                      onClick={performLogout}
-                      className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
-                    >
-                      Сбросить вход
-                    </button>
-                  </div>
-                  {identityStatusLine}
-                </>
-              )}
+              <>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={handleOpenLogin}
+                    className={`inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-semibold transition ${primaryButtonClass}`}
+                  >
+                    Войти (Email)
+                  </button>
+                  <button
+                    onClick={performLogout}
+                    className={`inline-flex items-center justify-center rounded-full border px-6 py-2.5 text-sm font-semibold transition ${secondaryButtonClass}`}
+                  >
+                    Сбросить вход
+                  </button>
+                </div>
+                {identityStatusLine}
+              </>
             </div>
           </div>
         </main>
@@ -873,20 +859,14 @@ function AdminInner() {
                 Вопросы к OpenAI на основе PROJECT_CONTEXT.md
               </p>
             </div>
-            {!isVpsAdminHost ? (
-              <button
-                onClick={performLogout}
-                className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
-              >
-                Сбросить вход ({user.email})
-              </button>
-            ) : (
-              <div className={`text-xs font-semibold ${textMuted}`}>
-                User: server-protected
-              </div>
-            )}
+            <button
+              onClick={performLogout}
+              className={`inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-semibold transition ${secondaryButtonClass}`}
+            >
+              Сбросить вход ({user.email})
+            </button>
           </div>
-          {!isVpsAdminHost && identityStatusLine}
+          {identityStatusLine}
 
           {/* Chat History */}
           {conversationHistory.length > 0 && (

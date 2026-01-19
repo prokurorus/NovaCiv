@@ -1,0 +1,13 @@
+Report: Admin VPS-native UI update
+Timestamp: 2026-01-19_1048
+
+Key diffs:
+- Removed Netlify Identity login gate, handlers, and token usage from Admin UI.
+- Admin requests now use /admin-api/domovoy (mode=ops), /admin-api/direct (mode=direct), /admin-api/result/:jobId with no auth headers.
+- UI now shows "User: server-protected" and includes build markers for DEPLOY_TARGET: VPS and API_BASE: /admin-api.
+- Removed Netlify Identity login/logout UI and role checks.
+- Build verified: dist/index.html references /assets/*.js.
+
+Grep results (Admin.tsx):
+- pattern: /\.netlify\/identity/ -> no matches
+- pattern: /\.netlify\/functions/ -> no matches

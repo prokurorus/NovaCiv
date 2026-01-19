@@ -78,7 +78,7 @@ interface NetlifyIdentityUser {
 declare global {
   interface Window {
     netlifyIdentity?: {
-      init: () => void;
+      init: (options?: { APIUrl?: string }) => void;
       on: (
         event: string,
         callback: (
@@ -96,6 +96,7 @@ declare global {
 }
 
 const API_BASE = "/admin-api";
+const IDENTITY_URL = "https://novaciv.space/.netlify/identity";
 
 function AdminInner() {
   const [user, setUser] = useState<NetlifyIdentityUser | null>(null);
@@ -300,7 +301,7 @@ function AdminInner() {
       });
     }
 
-    window.netlifyIdentity.init();
+    window.netlifyIdentity.init({ APIUrl: IDENTITY_URL });
     const currentUser = window.netlifyIdentity.currentUser?.() || null;
     if (currentUser) {
       setUser(currentUser);

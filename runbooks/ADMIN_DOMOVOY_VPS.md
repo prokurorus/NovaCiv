@@ -17,7 +17,7 @@
 
 3. **Netlify environment variables** (for proxy function):
    - `ADMIN_API_TOKEN` — Same value as VPS (server-side only, never exposed to browser)
-   - `VPS_ADMIN_DOMOVOY_URL` — VPS endpoint URL (e.g., `https://novaciv.space/admin/domovoy` or `http://VPS_IP:3001/admin/domovoy`)
+   - `VPS_ADMIN_DOMOVOY_URL` — VPS endpoint URL (e.g., `https://novaciv.space/api/admin/domovoy` or `http://VPS_IP:3001/admin/domovoy`)
 
 ---
 
@@ -230,7 +230,7 @@ git reset --hard origin/main
 Add to nginx config (e.g., `/etc/nginx/sites-available/novaciv`):
 
 ```nginx
-location /admin/domovoy {
+location /api/admin/domovoy {
     proxy_pass http://127.0.0.1:3001/admin/domovoy;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -239,7 +239,7 @@ location /admin/domovoy {
 }
 ```
 
-Then set in Netlify env: `VPS_ADMIN_DOMOVOY_URL=https://novaciv.space/admin/domovoy`
+Then set in Netlify env: `VPS_ADMIN_DOMOVOY_URL=https://novaciv.space/api/admin/domovoy`
 
 ### Option 2: Direct IP Access
 

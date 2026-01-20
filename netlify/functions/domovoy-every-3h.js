@@ -428,7 +428,7 @@ exports.handler = async (event) => {
     });
     await writeEvent(component, "info", "Post published successfully", {
       lang,
-      seedKey: seed.key,
+      seedKey,
     });
 
     return {

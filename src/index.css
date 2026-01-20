@@ -139,3 +139,18 @@ h2 {
   animation: chat-fade-in-up 0.18s ease-out;
 }
 
+/* ===== Netlify Identity Modal Visibility Fix ===== */
+.netlify-identity-widget,
+.netlify-identity-modal,
+.netlify-identity-widget iframe {
+  z-index: 2147483647 !important;
+}
+
+.netlify-identity-widget {
+  position: fixed !important;
+  inset: 0 !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}

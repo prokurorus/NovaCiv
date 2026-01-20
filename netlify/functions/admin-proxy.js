@@ -111,42 +111,74 @@ function extractResultJobId(event) {
  * @returns {Object|null} Error response object if unauthorized, null if authorized
  */
 function authorizeAdmin(event, context) {
-  // Require Netlify Identity context for admin role
+  // First, check Netlify Identity context for admin role
   const user = context?.clientContext?.user;
-
-  if (!user) {
-    return jsonResponse(401, {
+  
+  if (user) {
+    // Check for admin role in various metadata locations
+    const appRoles = user.app_metadata?.roles || [];
+    const userRoles = user.user_metadata?.roles || [];
+    const appRole = user.app_metadata?.role; // singular string fallback
+    
+    const hasAdminRole = 
+      (Array.isArray(appRoles) && appRoles.includes("admin")) ||
+      (Array.isArray(userRoles) && userRoles.includes("admin")) ||
+      (typeof appRole === "string" && appRole === "admin");
+    
+    if (hasAdminRole) {
+      return null; // Authorized via Identity role
+    }
+  }
+  
+  // Fallback to token-based authentication
+  const headers = event.headers || {};
+  
+  // Try x-admin-token header first (preferred)
+  let token = headers["x-admin-token"] || headers["X-Admin-Token"];
+  
+  // Fallback to Authorization: Bearer <token>
+  if (!token) {
+    const authHeader = headers["authorization"] || headers["Authorization"] || "";
+    const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch) {
+      token = bearerMatch[1];
+    }
+  }
+  
+  // Check if token is provided
+  if (!token) {
+    return jsonResponse(403, {
       ok: false,
-      error: "unauthorized",
-      message: "Authentication required",
+      error: "forbidden",
+      message: "Access denied",
       debug: {
         origin: "admin-proxy",
       },
     });
   }
-
-  // Check for admin role in various metadata locations
-  const appRoles = user.app_metadata?.roles || [];
-  const userRoles = user.user_metadata?.roles || [];
-  const appRole = user.app_metadata?.role; // singular string fallback
-
-  const hasAdminRole =
-    (Array.isArray(appRoles) && appRoles.includes("admin")) ||
-    (Array.isArray(userRoles) && userRoles.includes("admin")) ||
-    (typeof appRole === "string" && appRole === "admin");
-
-  if (hasAdminRole) {
-    return null; // Authorized via Identity role
+  
+  // Compare with ADMIN_API_TOKEN
+  const expectedToken = process.env.ADMIN_API_TOKEN;
+  if (!expectedToken) {
+    return jsonResponse(500, {
+      ok: false,
+      error: "server_error",
+      message: "ADMIN_API_TOKEN is not configured",
+    });
   }
-
-  return jsonResponse(403, {
-    ok: false,
-    error: "forbidden",
-    message: "Access denied",
-    debug: {
-      origin: "admin-proxy",
-    },
-  });
+  
+  if (token !== expectedToken) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "forbidden",
+      message: "Access denied",
+      debug: {
+        origin: "admin-proxy",
+      },
+    });
+  }
+  
+  return null; // Authorized via token
 }
 
 function attachProxyDebug(payload, extraDebug) {
@@ -156,13 +188,6 @@ function attachProxyDebug(payload, extraDebug) {
   }
   // Always set origin to "admin-proxy" (never "proxy" or anything else)
   body.debug.origin = "admin-proxy";
-  if (!Object.prototype.hasOwnProperty.call(body.debug, "where")) {
-    body.debug.where = "admin-proxy";
-  }
-  if (!Object.prototype.hasOwnProperty.call(body.debug, "upstreamBase")) {
-    const base = normalizeBaseUrl(ADMIN_DOMOVOY_API_URL || "");
-    body.debug.upstreamBase = base ? sanitizeUrlForLogs(base) : null;
-  }
   if (extraDebug && typeof extraDebug === "object") {
     body.debug = { ...body.debug, ...extraDebug };
   }
@@ -247,7 +272,6 @@ exports.handler = async (event, context) => {
         response = await fetch(vpsUrl, {
           method: "GET",
           headers: {
-            "Content-Type": "application/json",
             "X-Admin-Token": ADMIN_API_TOKEN,
           },
           signal: controller.signal,
@@ -419,7 +443,6 @@ exports.handler = async (event, context) => {
         response = await fetch(vpsUrl, {
           method: "GET",
           headers: {
-            "Content-Type": "application/json",
             "X-Admin-Token": ADMIN_API_TOKEN,
           },
           signal: controller.signal,

@@ -3,7 +3,7 @@ import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
 import LanguageSwitcher from "../components/LanguageSwitcher";
 
-const content: Record<
+const contentByLang: Record<
   Language,
   {
     title: string;
@@ -56,46 +56,46 @@ const content: Record<
       "A public support report page will be added later. Transparency is a core principle of NovaCiv.",
   },
   de: {
-    title: "Support the NovaCiv Process",
-    introTitle: "Short explanation",
+    title: "Unterstützung des NovaCiv-Prozesses",
+    introTitle: "Kurze Erläuterung",
     intro:
-      "NovaCiv is an open philosophical and civic initiative, not a product or a company.",
+      "NovaCiv ist eine offene philosophische und bürgerliche Initiative, kein Produkt und kein Unternehmen.",
     introDetails:
-      "The book is distributed freely. Support is voluntary and does not grant privileges, access, or rights.",
-    legalTitle: "Legal and ethical clarification",
+      "Das Buch wird frei verbreitet. Unterstützung ist freiwillig und verleiht keine Privilegien, keinen Zugang und keine Rechte.",
+    legalTitle: "Rechtliche und ethische Klarstellung",
     legalText:
-      "Contributions are not payment. Contributions are not donations for services. These funds are not personal income of the author. The funds are intended only for project infrastructure and development.",
-    responsibilityTitle: "Collective responsibility",
+      "Beiträge sind keine Zahlung. Beiträge sind keine Spenden für Dienstleistungen. Diese Mittel sind kein persönliches Einkommen des Autors. Die Mittel sind ausschließlich für die Infrastruktur und die Entwicklung des Projekts bestimmt.",
+    responsibilityTitle: "Kollektive Verantwortung",
     responsibilityText:
-      "At this stage the project is in an initiation phase. Decisions on resource allocation will be transferred to collective governance once the community forms. Until then, spending is limited to basic project maintenance (website, hosting, publishing). This is a temporary boundary, not a promise.",
-    methodsTitle: "Contribution methods (placeholders)",
-    transparencyTitle: "Transparency",
+      "In dieser Phase befindet sich das Projekt in der Initiierungsphase. Entscheidungen über die Verteilung von Ressourcen werden nach der Bildung der Gemeinschaft an eine kollektive Verwaltung übertragen. Bis dahin sind Ausgaben auf die grundlegende Projektpflege beschränkt (Website, Hosting, Veröffentlichungen). Dies ist eine vorübergehende Grenze, kein Versprechen.",
+    methodsTitle: "Unterstützungsmöglichkeiten (Platzhalter)",
+    transparencyTitle: "Transparenz",
     transparencyText:
-      "A public support report page will be added later. Transparency is a core principle of NovaCiv.",
+      "Später wird eine öffentliche Seite mit Unterstützungsberichten hinzugefügt. Transparenz ist ein Grundprinzip von NovaCiv.",
   },
   es: {
-    title: "Support the NovaCiv Process",
-    introTitle: "Short explanation",
+    title: "Apoyo al proceso de NovaCiv",
+    introTitle: "Explicación breve",
     intro:
-      "NovaCiv is an open philosophical and civic initiative, not a product or a company.",
+      "NovaCiv es una iniciativa filosófica y cívica abierta, no un producto ni una empresa.",
     introDetails:
-      "The book is distributed freely. Support is voluntary and does not grant privileges, access, or rights.",
-    legalTitle: "Legal and ethical clarification",
+      "El libro se distribuye libremente. El apoyo es voluntario y no otorga privilegios, acceso ni derechos.",
+    legalTitle: "Aclaración legal y ética",
     legalText:
-      "Contributions are not payment. Contributions are not donations for services. These funds are not personal income of the author. The funds are intended only for project infrastructure and development.",
-    responsibilityTitle: "Collective responsibility",
+      "Las contribuciones no son un pago. Las contribuciones no son donaciones por servicios. Estos fondos no son ingresos personales del autor. Los fondos están destinados únicamente a la infraestructura y al desarrollo del proyecto.",
+    responsibilityTitle: "Responsabilidad colectiva",
     responsibilityText:
-      "At this stage the project is in an initiation phase. Decisions on resource allocation will be transferred to collective governance once the community forms. Until then, spending is limited to basic project maintenance (website, hosting, publishing). This is a temporary boundary, not a promise.",
-    methodsTitle: "Contribution methods (placeholders)",
-    transparencyTitle: "Transparency",
+      "En esta etapa el proyecto se encuentra en fase de inicio. Las decisiones sobre la asignación de recursos se transferirán a la gobernanza colectiva una vez que se forme la comunidad. Hasta entonces, el gasto se limita al mantenimiento básico del proyecto (sitio web, hosting, publicaciones). Este es un límite temporal, no una promesa.",
+    methodsTitle: "Formas de apoyo (marcadores)",
+    transparencyTitle: "Transparencia",
     transparencyText:
-      "A public support report page will be added later. Transparency is a core principle of NovaCiv.",
+      "Más adelante se añadirá una página pública de informe de apoyo. La transparencia es uno de los principios básicos de NovaCiv.",
   },
 };
 
 const SupportPage: React.FC = () => {
   const { language } = useLanguage();
-  const copy = content[language];
+  const copy = contentByLang[language];
 
   return (
     <main className="min-h-screen bg-white text-gray-900">

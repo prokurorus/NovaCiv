@@ -80,6 +80,17 @@ export default function TopNav() {
       active: pathname === "/join",
     },
     {
+      id: "support",
+      href: "/support",
+      label: {
+        ru: "Поддержать",
+        en: "Support",
+        de: "Unterstützen",
+        es: "Apoyar",
+      },
+      active: pathname === "/support" || pathname === "/donate",
+    },
+    {
       id: "forum",
       href: "/forum",
       label: { ru: "Форум", en: "Forum", de: "Forum", es: "Foro" },

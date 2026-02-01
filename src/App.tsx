@@ -13,6 +13,7 @@ import ForumPage from "./pages/ForumPage";
 import TopicPage from "./pages/TopicPage";
 import Admin from "./pages/Admin";
 import Support from "./pages/Support";
+import SupportReport from "./pages/SupportReport";
 import { useStats } from "./hooks/useStats";
 import { useLanguage } from "./context/LanguageContext";
 import LanguageSwitcher from "./components/LanguageSwitcher";
@@ -579,7 +580,17 @@ export default function App() {
     );
   }
 
-// 8) Форум и темы
+  // 8) Отчет о поддержке
+  if (pathname === "/support-report" || pathname === "/report") {
+    return (
+      <>
+        <Header />
+        <SupportReport />
+      </>
+    );
+  }
+
+// 9) Форум и темы
 if (pathname === "/forum") {
   return (
     <>
@@ -601,12 +612,12 @@ if (pathname.startsWith("/forum/")) {
   );
 }
 
-  // 9) Админ-панель
+  // 10) Админ-панель
   if (pathname === "/admin") {
     return <Admin />;
   }
 
-  // 10) На всякий случай — всё остальное ведём на "Наше видение"
+  // 11) На всякий случай — всё остальное ведём на "Наше видение"
   return (
     <>
       <Header />

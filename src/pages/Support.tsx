@@ -1,4 +1,5 @@
 import React from "react";
+import QRCode from "react-qr-code";
 import { useLanguage } from "../context/LanguageContext";
 import type { Language } from "../types/language";
 import LanguageSwitcher from "../components/LanguageSwitcher";
@@ -18,6 +19,8 @@ const contentByLang: Record<
     usdtWarning: string;
     transparencyTitle: string;
     transparencyText: string;
+    transparencyLinkLabel: string;
+    copyLabel: string;
   }
 > = {
   ru: {
@@ -37,7 +40,9 @@ const contentByLang: Record<
     usdtWarning: "Отправляйте только USDT в сети TRC20 (Tron).",
     transparencyTitle: "Прозрачность",
     transparencyText:
-      "Позже будет добавлена публичная страница отчета о поддержке. Прозрачность — один из базовых принципов NovaCiv.",
+      "Публичная страница отчета о поддержке доступна ниже. Прозрачность — один из базовых принципов NovaCiv.",
+    transparencyLinkLabel: "Открыть отчет",
+    copyLabel: "Скопировать",
   },
   en: {
     title: "Support the NovaCiv Process",
@@ -56,7 +61,9 @@ const contentByLang: Record<
     usdtWarning: "Send only USDT on the TRC20 (Tron) network.",
     transparencyTitle: "Transparency",
     transparencyText:
-      "A public support report page will be added later. Transparency is a core principle of NovaCiv.",
+      "The public support report page is available below. Transparency is a core principle of NovaCiv.",
+    transparencyLinkLabel: "Open the report",
+    copyLabel: "Copy",
   },
   de: {
     title: "Unterstützung des NovaCiv-Prozesses",
@@ -75,7 +82,9 @@ const contentByLang: Record<
     usdtWarning: "Senden Sie nur USDT im TRC20-Netzwerk (Tron).",
     transparencyTitle: "Transparenz",
     transparencyText:
-      "Später wird eine öffentliche Seite mit Unterstützungsberichten hinzugefügt. Transparenz ist ein Grundprinzip von NovaCiv.",
+      "Die öffentliche Seite für Unterstützungsberichte ist unten verfügbar. Transparenz ist ein Grundprinzip von NovaCiv.",
+    transparencyLinkLabel: "Bericht öffnen",
+    copyLabel: "Kopieren",
   },
   es: {
     title: "Apoyo al proceso de NovaCiv",
@@ -94,13 +103,24 @@ const contentByLang: Record<
     usdtWarning: "Envíe solo USDT en la red TRC20 (Tron).",
     transparencyTitle: "Transparencia",
     transparencyText:
-      "Más adelante se añadirá una página pública de informe de apoyo. La transparencia es uno de los principios básicos de NovaCiv.",
+      "La página pública del informe de apoyo está disponible abajo. La transparencia es uno de los principios básicos de NovaCiv.",
+    transparencyLinkLabel: "Abrir informe",
+    copyLabel: "Copiar",
   },
 };
 
 const SupportPage: React.FC = () => {
   const { language } = useLanguage();
   const copy = contentByLang[language];
+  const btcAddress = "18LwxxcXjh6K9ykncz4b39jGsUSWp3dErk";
+  const usdtAddress = "TC9yo5U9tasmo7jjm5BXskGQMv5xwTzS2B";
+  const btcUri = `bitcoin:${btcAddress}`;
+
+  const handleCopy = (value: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(value);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-white text-gray-900">
@@ -138,20 +158,71 @@ const SupportPage: React.FC = () => {
           <h2 className="text-lg font-semibold text-zinc-900">
             {copy.methodsTitle}
           </h2>
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 space-y-2 text-sm text-zinc-700">
-            <div>
-              <span className="font-medium text-zinc-800">Bitcoin (BTC):</span>{" "}
-              <span className="font-mono">18LwxxcXjh6K9ykncz4b39jGsUSWp3dErk</span>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 text-sm text-zinc-700">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="flex-1 space-y-2">
+                  <div className="font-medium text-zinc-800">
+                    Bitcoin (BTC)
+                  </div>
+                  <div className="font-mono text-xs sm:text-sm break-all">
+                    {btcAddress}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(btcAddress)}
+                    className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-1.5 text-xs font-semibold text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+                    aria-label={`${copy.copyLabel} BTC`}
+                  >
+                    {copy.copyLabel}
+                  </button>
+                </div>
+                <div className="flex justify-start sm:justify-end">
+                  <div className="w-36 sm:w-40">
+                    <QRCode
+                      value={btcUri}
+                      size={160}
+                      bgColor="#ffffff"
+                      fgColor="#111827"
+                      className="h-auto w-full"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <span className="font-medium text-zinc-800">
-                USDT (TRC20 / Tron):
-              </span>{" "}
-              <span className="font-mono">
-                TC9yo5U9tasmo7jjm5BXskGQMv5xwTzS2B
-              </span>
+
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 text-sm text-zinc-700">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="flex-1 space-y-2">
+                  <div className="font-medium text-zinc-800">
+                    USDT (TRC20 / Tron)
+                  </div>
+                  <div className="font-mono text-xs sm:text-sm break-all">
+                    {usdtAddress}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(usdtAddress)}
+                    className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-4 py-1.5 text-xs font-semibold text-zinc-700 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+                    aria-label={`${copy.copyLabel} USDT`}
+                  >
+                    {copy.copyLabel}
+                  </button>
+                  <p className="text-xs text-zinc-500">{copy.usdtWarning}</p>
+                </div>
+                <div className="flex justify-start sm:justify-end">
+                  <div className="w-36 sm:w-40">
+                    <QRCode
+                      value={usdtAddress}
+                      size={160}
+                      bgColor="#ffffff"
+                      fgColor="#111827"
+                      className="h-auto w-full"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-zinc-500">{copy.usdtWarning}</p>
           </div>
         </section>
 
@@ -160,6 +231,12 @@ const SupportPage: React.FC = () => {
             {copy.transparencyTitle}
           </h2>
           <p className="text-sm text-zinc-600">{copy.transparencyText}</p>
+          <a
+            href="/support-report"
+            className="inline-flex items-center justify-center rounded-full border border-zinc-300 px-5 py-2 text-sm font-semibold text-zinc-800 bg-white hover:bg-zinc-50 active:bg-zinc-100 transition"
+          >
+            {copy.transparencyLinkLabel}
+          </a>
         </section>
       </div>
     </main>

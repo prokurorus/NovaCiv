@@ -15,6 +15,7 @@ const contentByLang: Record<
     responsibilityTitle: string;
     responsibilityText: string;
     methodsTitle: string;
+    usdtWarning: string;
     transparencyTitle: string;
     transparencyText: string;
   }
@@ -32,7 +33,8 @@ const contentByLang: Record<
     responsibilityTitle: "Коллективная ответственность",
     responsibilityText:
       "На этом этапе проект находится в фазе инициирования. Решения о распределении ресурсов будут переданы коллективному управлению после формирования сообщества. До этого расходы ограничены базовым обслуживанием проекта (сайт, хостинг, публикации). Это временная граница, а не обещание.",
-    methodsTitle: "Способы поддержки (плейсхолдеры)",
+    methodsTitle: "Способы поддержки",
+    usdtWarning: "Отправляйте только USDT в сети TRC20 (Tron).",
     transparencyTitle: "Прозрачность",
     transparencyText:
       "Позже будет добавлена публичная страница отчета о поддержке. Прозрачность — один из базовых принципов NovaCiv.",
@@ -50,7 +52,8 @@ const contentByLang: Record<
     responsibilityTitle: "Collective responsibility",
     responsibilityText:
       "At this stage the project is in an initiation phase. Decisions on resource allocation will be transferred to collective governance once the community forms. Until then, spending is limited to basic project maintenance (website, hosting, publishing). This is a temporary boundary, not a promise.",
-    methodsTitle: "Contribution methods (placeholders)",
+    methodsTitle: "Contribution methods",
+    usdtWarning: "Send only USDT on the TRC20 (Tron) network.",
     transparencyTitle: "Transparency",
     transparencyText:
       "A public support report page will be added later. Transparency is a core principle of NovaCiv.",
@@ -68,7 +71,8 @@ const contentByLang: Record<
     responsibilityTitle: "Kollektive Verantwortung",
     responsibilityText:
       "In dieser Phase befindet sich das Projekt in der Initiierungsphase. Entscheidungen über die Verteilung von Ressourcen werden nach der Bildung der Gemeinschaft an eine kollektive Verwaltung übertragen. Bis dahin sind Ausgaben auf die grundlegende Projektpflege beschränkt (Website, Hosting, Veröffentlichungen). Dies ist eine vorübergehende Grenze, kein Versprechen.",
-    methodsTitle: "Unterstützungsmöglichkeiten (Platzhalter)",
+    methodsTitle: "Unterstützungsmöglichkeiten",
+    usdtWarning: "Senden Sie nur USDT im TRC20-Netzwerk (Tron).",
     transparencyTitle: "Transparenz",
     transparencyText:
       "Später wird eine öffentliche Seite mit Unterstützungsberichten hinzugefügt. Transparenz ist ein Grundprinzip von NovaCiv.",
@@ -86,7 +90,8 @@ const contentByLang: Record<
     responsibilityTitle: "Responsabilidad colectiva",
     responsibilityText:
       "En esta etapa el proyecto se encuentra en fase de inicio. Las decisiones sobre la asignación de recursos se transferirán a la gobernanza colectiva una vez que se forme la comunidad. Hasta entonces, el gasto se limita al mantenimiento básico del proyecto (sitio web, hosting, publicaciones). Este es un límite temporal, no una promesa.",
-    methodsTitle: "Formas de apoyo (marcadores)",
+    methodsTitle: "Formas de apoyo",
+    usdtWarning: "Envíe solo USDT en la red TRC20 (Tron).",
     transparencyTitle: "Transparencia",
     transparencyText:
       "Más adelante se añadirá una página pública de informe de apoyo. La transparencia es uno de los principios básicos de NovaCiv.",
@@ -135,13 +140,18 @@ const SupportPage: React.FC = () => {
           </h2>
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 space-y-2 text-sm text-zinc-700">
             <div>
-              <span className="font-medium text-zinc-800">Bitcoin:</span>{" "}
-              <span className="font-mono">BTC_ADDRESS_TO_BE_ADDED</span>
+              <span className="font-medium text-zinc-800">Bitcoin (BTC):</span>{" "}
+              <span className="font-mono">18LwxxcXjh6K9ykncz4b39jGsUSWp3dErk</span>
             </div>
             <div>
-              <span className="font-medium text-zinc-800">Ethereum:</span>{" "}
-              <span className="font-mono">ETH_ADDRESS_TO_BE_ADDED</span>
+              <span className="font-medium text-zinc-800">
+                USDT (TRC20 / Tron):
+              </span>{" "}
+              <span className="font-mono">
+                TC9yo5U9tasmo7jjm5BXskGQMv5xwTzS2B
+              </span>
             </div>
+            <p className="text-xs text-zinc-500">{copy.usdtWarning}</p>
           </div>
         </section>
 
